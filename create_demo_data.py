@@ -49,6 +49,21 @@ def create_demo_files():
     df_bank.to_excel("测试数据_银行流水.xlsx", index=False)
     print("✅ 已生成: 测试数据_银行流水.xlsx")
 
+    # 4. 创建对账专用流水 (包含匹配和未匹配项)
+    # G银行 -> 触发自动识别为 "G银行"
+    # 注意：reconcile_bank_flow 使用 read_excel_smart，需要单列金额才能最好工作，或者我们需要修正 read_excel_smart
+    # 这里我们生成单列金额格式
+    reconcile_data = [
+        # 日期, 摘要, 金额, 对方户名
+        # 1. 完全匹配项 (已在银行流水中导入) - 收款 20000
+        [dates[2], "收货款", 20000, "客户A"], 
+        # 2. 未匹配项 (新流水) - 支出 350
+        [dates[0], "新增未入账-办公用品", -350, "晨光文具"],
+    ]
+    df_rec = pd.DataFrame(reconcile_data, columns=["交易日期", "摘要", "金额", "对方户名"])
+    df_rec.to_excel("测试数据_待对账流水_G银行.xlsx", index=False)
+    print("✅ 已生成: 测试数据_待对账流水_G银行.xlsx")
+
     # 3. 创建标准凭证导出的预期结果 (仅作为示意，不生成文件，由代码生成)
     
     print("\n🎉 模拟数据准备完毕！")

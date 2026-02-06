@@ -98,7 +98,7 @@ def test_data_processing_and_health_check():
         fields = {
             "记账日期": int(datetime.strptime(date_val, "%Y-%m-%d").timestamp() * 1000),
             "业务类型": biz_type,
-            "费用类型": "测试费用", # 简化
+            "费用归类": "测试费用", # 简化
             "往来单位费用": final_partner,
             "实际收付金额": amount,
             "备注": cleaned_summary,

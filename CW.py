@@ -15,6 +15,7 @@ import requests
 import pandas as pd
 import tkinter as tk
 from tkinter import filedialog
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import base64
 from io import BytesIO
 from PIL import Image, ImageGrab
@@ -198,10 +199,24 @@ TOLERANCE_DAYS = int(os.getenv("TOLERANCE_DAYS", 2))
 # -------------------------------------------------------------------------
 
 # 初始化日志
+class SolutionFormatter(logging.Formatter):
+    def format(self, record):
+        if not hasattr(record, 'solution'):
+            record.solution = "无"
+        return super().format(record)
+
+file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
+stream_handler = logging.StreamHandler()
+
+# 使用自定义Formatter
+formatter = SolutionFormatter("%(asctime)s - %(levelname)s - %(message)s - 解决方案：%(solution)s")
+file_handler.setFormatter(formatter)
+stream_handler.setFormatter(formatter)
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s - 解决方案：%(solution)s",
-    handlers=[logging.FileHandler(LOG_FILE, encoding="utf-8"), logging.StreamHandler()]
+    handlers=[file_handler, stream_handler],
+    force=True # Ensure we override any existing config
 )
 logger = logging.getLogger(__name__)
 
@@ -369,37 +384,36 @@ def import_from_excel(client, app_token, excel_path=None):
                 log.warning("⚠️ 未选择文件，操作取消", extra={"solution": "无"})
                 return False
 
-        excel_file = pd.ExcelFile(excel_path)
-        
         # 导入基础信息表
-        if "基础信息表" in excel_file.sheet_names:
-            table_id = get_table_id_by_name(client, app_token, "基础信息表")
-            if table_id:
-                df = pd.read_excel(excel_path, sheet_name="基础信息表").fillna("")
-                records = []
-                for _, row in df.iterrows():
-                    fields = {
-                        "产品名称": str(row["产品名称"]),
-                        "单位成本": float(row["单位成本"]) if row["单位成本"] != "" else 0,
-                        "备注": str(row.get("备注", ""))
-                    }
-                    records.append(AppTableRecord.builder().fields(fields).build())
-                
-                # 分批写入 (API限制每次100条)
-                batch_size = 100
-                for i in range(0, len(records), batch_size):
-                    batch = records[i:i+batch_size]
-                    req = BatchCreateAppTableRecordRequest.builder() \
-                        .app_token(app_token) \
-                        .table_id(table_id) \
-                        .request_body(BatchCreateAppTableRecordRequestBody.builder().records(batch).build()) \
-                        .build()
-                    resp = client.bitable.v1.app_table_record.batch_create(req)
-                    if not resp.success():
-                        log.error(f"❌ 基础信息表部分导入失败: {resp.msg}", extra={"solution": "检查数据格式"})
-                log.info(f"✅ 基础信息表导入完成: {len(records)}条", extra={"solution": "无"})
-            else:
-                log.error("❌ 未找到'基础信息表'", extra={"solution": "请先创建表格"})
+        with pd.ExcelFile(excel_path) as excel_file:
+            if "基础信息表" in excel_file.sheet_names:
+                table_id = get_table_id_by_name(client, app_token, "基础信息表")
+                if table_id:
+                    df = pd.read_excel(excel_file, sheet_name="基础信息表").fillna("")
+                    records = []
+                    for _, row in df.iterrows():
+                        fields = {
+                            "产品名称": str(row["产品名称"]),
+                            "单位成本": float(row["单位成本"]) if row["单位成本"] != "" else 0,
+                            "备注": str(row.get("备注", ""))
+                        }
+                        records.append(AppTableRecord.builder().fields(fields).build())
+                    
+                    # 分批写入 (API限制每次100条)
+                    batch_size = 100
+                    for i in range(0, len(records), batch_size):
+                        batch = records[i:i+batch_size]
+                        req = BatchCreateAppTableRecordRequest.builder() \
+                            .app_token(app_token) \
+                            .table_id(table_id) \
+                            .request_body(BatchCreateAppTableRecordRequestBody.builder().records(batch).build()) \
+                            .build()
+                        resp = client.bitable.v1.app_table_record.batch_create(req)
+                        if not resp.success():
+                            log.error(f"❌ 基础信息表部分导入失败: {resp.msg}", extra={"solution": "检查数据格式"})
+                    log.info(f"✅ 基础信息表导入完成: {len(records)}条", extra={"solution": "无"})
+                else:
+                    log.error("❌ 未找到'基础信息表'", extra={"solution": "请先创建表格"})
 
         # 导入日常台账表 (优化：支持任意Sheet名，智能识别表头)
         table_id = get_table_id_by_name(client, app_token, "日常台账表")
@@ -499,32 +513,33 @@ def import_from_excel(client, app_token, excel_path=None):
                     log.warning(f"⚠️ 数据行解析失败跳过: {e}", extra={"solution": "检查日期/金额格式"})
                     continue
 
-                desc = str(row["往来单位费用"])
+                desc = str(row.get("往来单位费用", ""))
                 
                 # 优化：解析别名
-                # 1. 先尝试从户名列匹配
                 resolved_desc = resolve_partner(desc)
                 
-                # 2. 如果户名列没匹配到 (结果没变) 或者 户名列无效，尝试从摘要列匹配
-                # 注意：只有当摘要里包含明确的别名时才替换
+                # 如果户名列无效，尝试从摘要列匹配别名
                 if resolved_desc == desc:
                     memo = str(row.get("备注", ""))
                     memo_resolved = resolve_partner(memo)
                     if memo_resolved != memo:
-                        # 摘要里包含别名，使用匹配到的标准名称
                         resolved_desc = memo_resolved
                 
                 desc = resolved_desc
-                
-                # 尝试自动分类补全
                 if not desc or desc == "nan" or desc == "未知" or desc == "":
+                    desc = "散户" # 默认
+
+                # 尝试自动分类补全 (费用归类)
+                category = str(row.get("费用归类", ""))
+                if not category or category == "nan" or category == "未知" or category == "":
                     memo = str(row.get("备注", ""))
-                    desc = auto_categorize(memo, "未知")
+                    category = auto_categorize(memo, "其他", partner_name=desc)
                     
                 fields = {
                     "记账日期": ts,
-                    "凭证号": int(row["凭证号"]) if row["凭证号"] != "" else 0,
+                    "凭证号": int(row.get("凭证号", 0)) if str(row.get("凭证号", "")).strip() != "" else 0,
                     "业务类型": r_type,
+                    "费用归类": category,
                     "往来单位费用": desc,
                     "账面金额": float(row.get("账面金额", 0)),
                     "实际收付金额": r_amt,
@@ -723,46 +738,46 @@ def read_excel_smart(file_path):
     3. 返回标准化的 DataFrame
     """
     try:
-        xl = pd.ExcelFile(file_path)
-        # 优先读 '日常台账表'，否则读第一个 Sheet
-        sheet_name = "日常台账表" if "日常台账表" in xl.sheet_names else xl.sheet_names[0]
-        
-        # 先读前 20 行来找表头
-        df_preview = pd.read_excel(file_path, sheet_name=sheet_name, header=None, nrows=20)
-        
-        header_row_idx = -1
-        column_map = {}
-        
-        # 关键词映射表 (可能的列名 -> 标准列名)
-        keyword_map = {
-            "日期": "记账日期", "时间": "记账日期", "交易日": "记账日期",
-            "金额": "实际收付金额", "发生额": "实际收付金额", "收支金额": "实际收付金额",
-            "摘要": "备注", "说明": "备注", "用途": "备注", "商品": "备注", "附言": "备注",
-            "对方": "往来单位费用", "户名": "往来单位费用", "单位": "往来单位费用", "收/支": "业务类型",
-            "借贷": "业务类型", "收付": "业务类型"
-        }
-        
-        # 扫描寻找表头
-        for idx, row in df_preview.iterrows():
-            row_str = " ".join([str(x) for x in row.values])
-            if "日期" in row_str and ("金额" in row_str or "发生额" in row_str):
-                header_row_idx = idx
-                # 构建列映射
-                for col_idx, val in enumerate(row.values):
-                    val_str = str(val).strip()
-                    for k, v in keyword_map.items():
-                        if k in val_str:
-                            column_map[val_str] = v # 记录原始列名 -> 标准列名
-                            break 
-                break
-                
-        if header_row_idx == -1:
-            # 没找到明显表头，假设第一行就是
-            header_row_idx = 0
-            log.warning("⚠️ 未找到明显的表头行，尝试默认第一行读取", extra={"solution": "请检查Excel格式"})
+        with pd.ExcelFile(file_path) as xl:
+            # 优先读 '日常台账表'，否则读第一个 Sheet
+            sheet_name = "日常台账表" if "日常台账表" in xl.sheet_names else xl.sheet_names[0]
             
-        # 重新读取数据
-        df = pd.read_excel(file_path, sheet_name=sheet_name, header=header_row_idx)
+            # 先读前 20 行来找表头
+            df_preview = pd.read_excel(xl, sheet_name=sheet_name, header=None, nrows=20)
+            
+            header_row_idx = -1
+            column_map = {}
+            
+            # 关键词映射表 (可能的列名 -> 标准列名)
+            keyword_map = {
+                "日期": "记账日期", "时间": "记账日期", "交易日": "记账日期",
+                "金额": "实际收付金额", "发生额": "实际收付金额", "收支金额": "实际收付金额",
+                "摘要": "备注", "说明": "备注", "用途": "备注", "商品": "备注", "附言": "备注",
+                "对方": "往来单位费用", "户名": "往来单位费用", "单位": "往来单位费用", "收/支": "业务类型",
+                "借贷": "业务类型", "收付": "业务类型"
+            }
+            
+            # 扫描寻找表头
+            for idx, row in df_preview.iterrows():
+                row_str = " ".join([str(x) for x in row.values])
+                if "日期" in row_str and ("金额" in row_str or "发生额" in row_str):
+                    header_row_idx = idx
+                    # 构建列映射
+                    for col_idx, val in enumerate(row.values):
+                        val_str = str(val).strip()
+                        for k, v in keyword_map.items():
+                            if k in val_str:
+                                column_map[val_str] = v # 记录原始列名 -> 标准列名
+                                break 
+                    break
+                    
+            if header_row_idx == -1:
+                # 没找到明显表头，假设第一行就是
+                header_row_idx = 0
+                log.warning("⚠️ 未找到明显的表头行，尝试默认第一行读取", extra={"solution": "请检查Excel格式"})
+                
+            # 重新读取数据
+            df = pd.read_excel(xl, sheet_name=sheet_name, header=header_row_idx)
         
         # 重命名列
         df.rename(columns=column_map, inplace=True)
@@ -778,25 +793,52 @@ def read_excel_smart(file_path):
 
 # 智能分类：历史记忆库
 HISTORY_CATEGORY_MAP = {}
+AI_CACHE_FILE = "ai_category_cache.json"
+AI_CACHE_MAP = {}
+AI_CACHE_LOADED = False
+
+def load_ai_cache():
+    """加载本地AI分类缓存"""
+    global AI_CACHE_MAP, AI_CACHE_LOADED
+    if os.path.exists(AI_CACHE_FILE):
+        try:
+            with open(AI_CACHE_FILE, "r", encoding="utf-8") as f:
+                AI_CACHE_MAP = json.load(f)
+            log.info(f"🧠 已加载 {len(AI_CACHE_MAP)} 条AI分类缓存", extra={"solution": "无"})
+        except Exception as e:
+            log.warning(f"⚠️ 加载AI缓存失败: {e}", extra={"solution": "无"})
+            AI_CACHE_MAP = {}
+    AI_CACHE_LOADED = True
+
+def save_ai_cache():
+    """保存AI分类缓存到本地"""
+    try:
+        with open(AI_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(AI_CACHE_MAP, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        log.warning(f"⚠️ 保存AI缓存失败: {e}")
 
 def load_history_knowledge(client, app_token):
     """从飞书加载最近的历史分类习惯 (智能记忆)"""
     global HISTORY_CATEGORY_MAP
     HISTORY_CATEGORY_MAP = {}
     
+    # 同时加载AI缓存
+    load_ai_cache()
+    
     table_id = get_table_id_by_name(client, app_token, "日常台账表")
     if not table_id: return
     
     # 获取最近2000条记录
     log.info("🧠 正在学习历史分类习惯...", extra={"solution": "无"})
-    records = get_all_records(client, app_token, table_id, field_names=["备注", "往来单位费用", "费用类型"])
+    records = get_all_records(client, app_token, table_id, field_names=["备注", "往来单位费用", "费用归类"])
     
     # 倒序遍历，越新的越优先
     for r in reversed(records):
         f = r.fields
         memo = str(f.get("备注") or "").strip()
         partner = str(f.get("往来单位费用") or "").strip()
-        cat = str(f.get("费用类型") or "").strip()
+        cat = str(f.get("费用归类") or "").strip()
         
         if not cat: continue
         
@@ -820,7 +862,11 @@ def auto_categorize(description, default_val, partner_name=None):
         return default_val
     
     # 重新加载规则，支持热修改
-    global AUTO_CATEGORY_RULES, HISTORY_CATEGORY_MAP
+    global AUTO_CATEGORY_RULES, HISTORY_CATEGORY_MAP, AI_CACHE_LOADED
+    
+    # 确保AI缓存已加载
+    if not AI_CACHE_LOADED:
+        load_ai_cache()
     
     desc_str = str(description).lower()
     
@@ -842,12 +888,22 @@ def auto_categorize(description, default_val, partner_name=None):
         if p_key in HISTORY_CATEGORY_MAP:
             return HISTORY_CATEGORY_MAP[p_key]
             
+    # 2.3 [V9.5新特性] 匹配本地AI缓存 (Smart Cache)
+    # 避免重复调用AI接口，节省Token并提升速度
+    cache_key = f"{desc_str}|{str(partner_name).lower()}"
+    if cache_key in AI_CACHE_MAP:
+        # print(f"   🧠 命中本地AI缓存: {cache_key[:20]}... -> {AI_CACHE_MAP[cache_key]}")
+        return AI_CACHE_MAP[cache_key]
+            
     # 3. [V9.4新特性] 尝试 AI 智能推断
     # 只有当描述足够长(>2)或有明确往来单位时才调用，避免浪费 Token
     if (len(desc_str) > 2 or partner_name) and ZHIPUAI_API_KEY:
         ai_cat = ai_guess_category(description, partner_name)
         if ai_cat:
             print(f"   🧠 AI 智能推断: '{description}' -> [{ai_cat}]")
+            # 更新缓存
+            AI_CACHE_MAP[cache_key] = ai_cat
+            save_ai_cache()
             return ai_cat
             
     return default_val
@@ -898,10 +954,16 @@ def import_bank_records_to_feishu(client, app_token, records_list):
         if r.get("是否有票"): has_ticket = r.get("是否有票")
         if r.get("是否现金"): is_cash = r.get("是否现金")
 
+        # 尝试自动分类补全 (费用归类)
+        category = str(r.get("费用归类", ""))
+        if not category or category == "nan" or category == "未知" or category == "":
+            category = auto_categorize(r.get("备注", ""), "其他", partner_name=r.get("往来单位费用", ""))
+
         fields = {
             "记账日期": ts,
             "凭证号": 0, # 默认为0
             "业务类型": r["业务类型"],
+            "费用归类": category,
             "往来单位费用": r["往来单位费用"],
             "账面金额": amt, # 默认账面=实际 (按实际发生)
             "实际收付金额": amt,
@@ -992,6 +1054,7 @@ def generate_reconciliation_report(matched_count, unmatched_list):
                         <th>日期</th>
                         <th>摘要</th>
                         <th>金额</th>
+                        <th>对象</th>
                         <th>建议分类</th>
                         <th>原因</th>
                     </tr>
@@ -1006,6 +1069,7 @@ def generate_reconciliation_report(matched_count, unmatched_list):
                         <td>{item.get('备注')}</td>
                         <td>{item.get('实际收付金额')}</td>
                         <td>{item.get('往来单位费用')}</td>
+                        <td>{item.get('费用归类')}</td>
                         <td><span class="badge badge-danger">{item.get('原因')}</span></td>
                     </tr>
         """
@@ -1241,17 +1305,18 @@ def reconcile_bank_flow(client, app_token, bank_excel_path):
             # 1. 如果有明确规则匹配 cleaned_memo -> 用规则
             # 2. 如果 cleaned_memo 在历史中出现过 -> 用历史
             # 3. 如果 cleaned_desc 在历史中出现过 -> 用历史
-            category = auto_categorize(cleaned_memo, cleaned_desc, partner_name=cleaned_desc) 
+            category = auto_categorize(cleaned_memo, "其他", partner_name=cleaned_desc) 
             
-            # 如果自动分类还是等于 对方户名 (说明没匹配到)，尝试单独匹配 cleaned_desc
-            if category == cleaned_desc:
-                 category = auto_categorize(cleaned_desc, cleaned_desc, partner_name=cleaned_desc)
+            # 如果自动分类返回默认值，尝试单独匹配 cleaned_desc
+            if category == "其他":
+                 category = auto_categorize(cleaned_desc, "其他", partner_name=cleaned_desc)
             
             unmatched.append({
                 "记账日期": b_date.strftime("%Y-%m-%d"),
                 "凭证号": "",
                 "业务类型": "付款" if b_amount < 0 else "收款",
-                "往来单位费用": category,
+                "费用归类": category,
+                "往来单位费用": cleaned_desc,
                 "实际收付金额": b_amount,
                 "交易银行": bank_name,
                 "是否现金": is_cash,
@@ -1271,7 +1336,7 @@ def reconcile_bank_flow(client, app_token, bank_excel_path):
     if unmatched:
         res_df = pd.DataFrame(unmatched)
         # 确保列顺序符合导入要求
-        cols = ["记账日期", "凭证号", "业务类型", "往来单位费用", "实际收付金额", 
+        cols = ["记账日期", "凭证号", "业务类型", "费用归类", "往来单位费用", "实际收付金额", 
                 "交易银行", "是否现金", "是否有票", "待补票标记", "备注", "原因"]
         # 动态调整列，防止KeyError
         final_cols = [c for c in cols if c in res_df.columns]
@@ -1338,18 +1403,24 @@ def get_ai_insight(data_context):
 
 # 税务统计 (含风险预警)
 @retry_on_failure(max_retries=2, delay=3)
-def calculate_tax(client, app_token):
-    log.info("🧮 开始税务及风险分析...", extra={"solution": "无"})
+def calculate_tax(client, app_token, target_year=None):
+    if target_year:
+        log.info(f"🧮 开始 {target_year}年度 税务及风险分析...", extra={"solution": "无"})
+        year = target_year
+    else:
+        log.info("🧮 开始税务及风险分析...", extra={"solution": "无"})
+        year = datetime.now().year
+        
     table_id = get_table_id_by_name(client, app_token, "日常台账表")
     if not table_id:
         return False
         
-    # 优化：只获取本年度数据，减少数据量
-    current_year = datetime.now().year
-    start_ts = int(datetime(current_year, 1, 1).timestamp() * 1000)
-    filter_str = f'CurrentValue.[记账日期]>={start_ts}'
+    # 优化：只获取指定年度数据
+    start_ts = int(datetime(year, 1, 1).timestamp() * 1000)
+    end_ts = int(datetime(year + 1, 1, 1).timestamp() * 1000)
+    filter_str = f'AND(CurrentValue.[记账日期]>={start_ts}, CurrentValue.[记账日期]<{end_ts})'
     
-    log.info(f"🔍 正在拉取 {current_year} 年度数据...", extra={"solution": "无"})
+    log.info(f"🔍 正在拉取 {year} 年度数据...", extra={"solution": "无"})
     records = get_all_records(client, app_token, table_id, filter_info=filter_str)
     
     total_income_ticket = 0.0 # 有票收入
@@ -1523,7 +1594,7 @@ def export_missing_tickets(client, app_token, silent=False):
     if missing_list:
         df = pd.DataFrame(missing_list)
         # 整理列顺序
-        cols = ["记账日期", "凭证号", "往来单位费用", "实际收付金额", "是否有票", "待补票标记", "备注", "操作人"]
+        cols = ["记账日期", "凭证号", "费用归类", "往来单位费用", "实际收付金额", "是否有票", "待补票标记", "备注", "操作人"]
         # 只保留存在的列
         final_cols = [c for c in cols if c in df.columns]
         df = df[final_cols]
@@ -1607,16 +1678,22 @@ def resolve_missing_tickets(client, app_token, missing_list, table_id):
 
 # 生成HTML可视化报表
 @retry_on_failure(max_retries=2, delay=3)
-def generate_html_report(client, app_token):
-    log.info("📊 正在生成可视化报表...", extra={"solution": "无"})
+def generate_html_report(client, app_token, target_year=None):
+    if target_year:
+        log.info(f"📊 正在生成 {target_year}年度 可视化报表...", extra={"solution": "无"})
+        year = target_year
+    else:
+        log.info("📊 正在生成可视化报表...", extra={"solution": "无"})
+        year = datetime.now().year
+
     table_id = get_table_id_by_name(client, app_token, "日常台账表")
     if not table_id:
         return False
         
-    # 获取本年度数据
-    current_year = datetime.now().year
-    start_ts = int(datetime(current_year, 1, 1).timestamp() * 1000)
-    filter_str = f'CurrentValue.[记账日期]>={start_ts}'
+    # 获取指定年度数据
+    start_ts = int(datetime(year, 1, 1).timestamp() * 1000)
+    end_ts = int(datetime(year + 1, 1, 1).timestamp() * 1000)
+    filter_str = f'AND(CurrentValue.[记账日期]>={start_ts}, CurrentValue.[记账日期]<{end_ts})'
     records = get_all_records(client, app_token, table_id, filter_info=filter_str)
     
     # 数据处理
@@ -1697,7 +1774,7 @@ def generate_html_report(client, app_token):
     </head>
     <body>
         <div class="container">
-            <h1>📊 {current_year}年度财务经营分析</h1>
+            <h1>📊 {year}年度财务经营分析</h1>
             
             <div class="summary">
                 <div class="stat-box">
@@ -1795,36 +1872,94 @@ def generate_html_report(client, app_token):
 
 # 导出备份
 @retry_on_failure(max_retries=2, delay=3)
-def export_to_excel(client, app_token):
-    log.info("💾 开始全量备份...", extra={"solution": "无"})
+def export_to_excel(client, app_token, target_path=None):
+    """全量备份：导出所有数据表到 Excel"""
+    log.info("💾 开始全量云端数据备份...", extra={"solution": "无"})
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = os.path.join(LOCAL_FOLDER, f"飞书台账备份_{timestamp}.xlsx")
+    
+    if target_path:
+        backup_path = os.path.join(target_path, f"飞书台账全量备份_{timestamp}.xlsx")
+    else:
+        backup_path = os.path.join(LOCAL_FOLDER, f"飞书台账全量备份_{timestamp}.xlsx")
     
     try:
-        with pd.ExcelWriter(backup_path) as writer:
-            # 备份基础信息
-            table_id = get_table_id_by_name(client, app_token, "基础信息表")
-            if table_id:
-                records = get_all_records(client, app_token, table_id)
-                data = [r.fields for r in records]
-                pd.DataFrame(data).to_excel(writer, sheet_name="基础信息表", index=False)
-                
-            # 备份日常台账
-            table_id = get_table_id_by_name(client, app_token, "日常台账表")
-            if table_id:
-                records = get_all_records(client, app_token, table_id)
-                # 处理字段中的特殊类型 (如日期timestamp转字符串)
+        # 1. 获取所有数据表
+        tables = []
+        page_token = None
+        while True:
+            req = ListAppTableRequest.builder() \
+                .app_token(app_token) \
+                .page_size(20) \
+                .page_token(page_token) \
+                .build()
+            resp = client.bitable.v1.app_table.list(req)
+            if resp.success():
+                if resp.data.items:
+                    tables.extend(resp.data.items)
+                if not resp.data.has_more:
+                    break
+                page_token = resp.data.page_token
+            else:
+                log.error(f"无法获取表格列表: {resp.msg}")
+                break
+
+        if not tables:
+            return False
+
+        # 2. [V9.5新特性] 并行获取数据 (Parallel Backup)
+        table_data_map = {}
+        
+        def fetch_table_data(table):
+            t_name = table.name
+            t_id = table.table_id
+            try:
+                # print(f"   ⏳ [并行] 正在拉取: {t_name}...") # 减少刷屏
+                records = get_all_records(client, app_token, t_id)
                 clean_data = []
-                for r in records:
-                    row = r.fields.copy()
-                    if isinstance(row.get("记账日期"), int):
-                        row["记账日期"] = datetime.fromtimestamp(row["记账日期"] / 1000).strftime("%Y-%m-%d")
-                    clean_data.append(row)
+                if records:
+                    for r in records:
+                        row = r.fields.copy()
+                        # 转换时间戳
+                        for k, v in row.items():
+                            if isinstance(v, int) and v > 1000000000000: # 简单判断毫秒时间戳
+                                try:
+                                    row[k] = datetime.fromtimestamp(v / 1000).strftime("%Y-%m-%d %H:%M:%S")
+                                except:
+                                    pass
+                        clean_data.append(row)
+                return t_name, pd.DataFrame(clean_data)
+            except Exception as e:
+                log.error(f"❌ 获取表 {t_name} 失败: {e}")
+                return t_name, pd.DataFrame()
+
+        log.info(f"🚀 启动并行备份，正在同时拉取 {len(tables)} 张表...", extra={"solution": "无"})
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_table = {executor.submit(fetch_table_data, t): t for t in tables}
+            for future in as_completed(future_to_table):
+                t_name, df = future.result()
+                table_data_map[t_name] = df
+                print(f"   ✅ 已就绪: {t_name} ({len(df)} 条)")
+
+        # 3. 写入 Excel
+        log.info("💾 正在写入Excel文件...", extra={"solution": "无"})
+        with pd.ExcelWriter(backup_path) as writer:
+            for table in tables: # 保持原有顺序
+                table_name = table.name
+                if table_name in table_data_map:
+                    df = table_data_map[table_name]
+                    # Excel Sheet 名字不能超过31个字符
+                    safe_name = table_name[:30]
+                    # 处理重名Sheet (极其罕见)
+                    if safe_name in writer.sheets:
+                        safe_name = (table_name[:25] + "_1")
                     
-                pd.DataFrame(clean_data).to_excel(writer, sheet_name="日常台账表", index=False)
-                
-        log.info(f"✅ 备份成功: {backup_path}", extra={"solution": "妥善保管"})
-        send_bot_message(f"✅ 数据已备份至本地:\n{backup_path}", "accountant")
+                    df.to_excel(writer, sheet_name=safe_name, index=False)
+                else:
+                    pd.DataFrame().to_excel(writer, sheet_name=table_name[:30])
+
+        log.info(f"✅ 全量备份成功: {backup_path}", extra={"solution": "妥善保管"})
+        if not target_path: # 如果是手动触发，发送通知
+            send_bot_message(f"✅ 数据已备份至本地:\n{backup_path}", "accountant")
         return True
     except Exception as e:
         log.error(f"❌ 备份失败: {str(e)}", extra={"solution": "检查磁盘空间"})
@@ -2016,6 +2151,17 @@ def create_ledger_table(client, app_token):
                         AppTableFieldPropertyOption.builder().name("付款").build(),
                         AppTableFieldPropertyOption.builder().name("费用").build()
                     ]).build()).build(),
+                    AppTableCreateHeader.builder().field_name("费用归类").type(FT.SELECT).property(AppTableFieldProperty.builder().options([
+                        AppTableFieldPropertyOption.builder().name("办公费").build(),
+                        AppTableFieldPropertyOption.builder().name("差旅费").build(),
+                        AppTableFieldPropertyOption.builder().name("房租水电").build(),
+                        AppTableFieldPropertyOption.builder().name("人力成本").build(),
+                        AppTableFieldPropertyOption.builder().name("营销推广").build(),
+                        AppTableFieldPropertyOption.builder().name("采购成本").build(),
+                        AppTableFieldPropertyOption.builder().name("税费").build(),
+                        AppTableFieldPropertyOption.builder().name("其他").build()
+                    ]).build()).build(),
+                    AppTableCreateHeader.builder().field_name("关联项目").type(FT.TEXT).build(),
                     AppTableCreateHeader.builder().field_name("往来单位费用").type(FT.TEXT).build(),
                     AppTableCreateHeader.builder().field_name("账面金额").type(FT.NUMBER).build(),
                     AppTableCreateHeader.builder().field_name("实际收付金额").type(FT.NUMBER).build(),
@@ -2218,38 +2364,144 @@ def fill_test_data(client, app_token):
 
 # 月度结账
 @retry_on_failure(max_retries=2, delay=3)
-def monthly_close(client, app_token):
+def monthly_close(client, app_token, ym_input=None):
     log.info("📅 开始月度结账流程...", extra={"solution": "无"})
     
-    # 1. 导出备份
-    print("\n[1/2] 正在执行全量备份...")
+    # 确定结账月份 (默认上个月)
+    today = datetime.now()
+    last_month_date = today.replace(day=1) - timedelta(days=1)
+    default_ym = last_month_date.strftime("%Y%m")
+    
+    if ym_input:
+        ym_str = ym_input
+    else:
+        print(f"\n{Color.YELLOW}💡 默认结账月份为上个月 ({default_ym}){Color.ENDC}")
+        ym_str = input(f"请输入结账月份 (格式 YYYYMM, 直接回车使用默认值): ").strip()
+    
+    target_year = None
+    target_month = None
+    
+    if not ym_str:
+        target_year = last_month_date.year
+        target_month = last_month_date.month
+    else:
+        try:
+            if len(ym_str) == 4:
+                target_year = int(ym_str)
+                target_month = None
+                print(f"🎯 选定结账年度: {target_year}年 (生成年度报表)")
+            elif len(ym_str) == 6:
+                target_year = int(ym_str[:4])
+                target_month = int(ym_str[4:])
+                print(f"🎯 选定结账月份: {target_year}年{target_month}月")
+            else:
+                raise ValueError("Length mismatch")
+        except:
+            print(f"❌ 格式错误，将处理当前年度所有数据")
+            target_year = today.year
+
+    # 1. 自动修复缺失分类
+    print("\n[1/5] 正在检查并修复缺失分类...")
+    auto_fix_missing_categories(client, app_token, target_year)
+    
+    # 2. 导出备份
+    print("\n[2/5] 正在执行全量备份...")
     backup_ok = export_to_excel(client, app_token)
     
-    # 2. 生成报表
-    print("\n[2/2] 正在生成分析报表...")
-    report_ok = generate_html_report(client, app_token)
+    # 3. 生成报表
+    print("\n[3/5] 正在生成分析报表...")
+    report_ok = generate_html_report(client, app_token, target_year)
     
     if backup_ok and report_ok:
-        # 新增：生成Excel利润表
-        generate_excel_pnl_report(client, app_token)
+        # 生成Excel利润表
+        generate_excel_pnl_report(client, app_token, target_year, target_month)
         
-        msg = f"📅 月度结账完成！\n✅ 数据已备份\n✅ 报表已生成\n💡 请务必将本地生成的 Excel 和 HTML 文件打包存档。"
-        log.info("✅ 月度结账流程结束", extra={"solution": "存档"})
+        # 4. 税务测算 (一键结转增强)
+        print("\n[4/5] 正在进行税务风险测算及财务体检...")
+        calculate_tax(client, app_token, target_year)
+        financial_health_check(client, app_token, target_year)
+
+        # 5. 导出标准凭证 (一键结转增强)
+        print("\n[5/5] 正在导出标准财务凭证...")
+        export_standard_voucher(client, app_token, target_year, target_month)
+        
+        if target_month:
+            msg = f"📅 {target_year}年{target_month}月 月度结账完成！\n✅ 数据已备份\n✅ 报表已生成\n✅ 税务已测算\n✅ 凭证已导出\n💡 请务必将本地生成的 Excel 和 HTML 文件打包存档。"
+        else:
+            msg = f"🏆 {target_year}年度 年结完成！\n✅ 全年数据已备份\n✅ 年度报表已生成\n✅ 年度税务测算完成\n✅ 全年凭证已导出\n💡 请务必将本地生成的 Excel 和 HTML 文件打包存档。"
+            
+        log.info("✅ 结账流程结束", extra={"solution": "存档"})
         send_bot_message(msg, "accountant")
         return True
     else:
-        log.error("❌ 月度结账部分失败", extra={"solution": "检查日志"})
+        log.error("❌ 结账部分失败", extra={"solution": "检查日志"})
         return False
 
+def year_end_closing(client, app_token):
+    """一键年结：调用月度结账逻辑，但锁定为年度模式"""
+    print(f"\n{Color.HEADER}📅 启动年结流程 (Year-End Closing)...{Color.ENDC}")
+    print(f"{Color.CYAN}此功能将生成全年的财务报表、税务测算及凭证导出。{Color.ENDC}")
+    
+    last_year = datetime.now().year - 1
+    year_str = input(f"请输入结账年度 (默认: {last_year}): ").strip()
+    if not year_str:
+        year_str = str(last_year)
+        
+    # 再次确认
+    confirm = input(f"❓ 确认对 {year_str} 年度进行年结吗? (y/n) [y]: ").strip().lower()
+    if confirm == 'n':
+        print("已取消。")
+        return
+
+    # 新增：年结前建议进行折旧计提
+    print("-" * 30)
+    dep_confirm = input(f"📉 是否先进行 {year_str}年12月 的固定资产折旧计提 (通常作为年度最后调整)? (y/n) [y]: ").strip().lower()
+    if dep_confirm != 'n':
+        calculate_depreciation(client, app_token, auto_run=True, target_year=int(year_str), target_month=12)
+
+    # 复用 monthly_close 逻辑，它已经包含了年度处理的所有分支
+    monthly_close(client, app_token, ym_input=year_str)
+
 # 生成Excel利润表
-def generate_excel_pnl_report(client, app_token):
-    log.info("📊 正在生成标准利润表(Excel)...", extra={"solution": "无"})
+def generate_excel_pnl_report(client, app_token, target_year=None, target_month=None):
+    if target_year and target_month:
+        log.info(f"📊 正在生成 {target_year}年{target_month}月 利润表(Excel)...", extra={"solution": "无"})
+        filename_prefix = f"利润表_{target_year}{target_month:02d}"
+    elif target_year:
+        log.info(f"📊 正在生成 {target_year}年度 利润表(Excel)...", extra={"solution": "无"})
+        filename_prefix = f"利润表_{target_year}"
+    else:
+        log.info("📊 正在生成标准利润表(Excel)...", extra={"solution": "无"})
+        filename_prefix = f"利润表_{datetime.now().strftime('%Y%m')}"
+
     table_id = get_table_id_by_name(client, app_token, "日常台账表")
     if not table_id:
         return False
 
-    records = get_all_records(client, app_token, table_id)
+    # 构建过滤条件
+    filter_str = None
+    if target_year:
+        try:
+            if target_month:
+                start_dt = datetime(target_year, target_month, 1)
+                if target_month == 12:
+                    end_dt = datetime(target_year + 1, 1, 1)
+                else:
+                    end_dt = datetime(target_year, target_month + 1, 1)
+            else:
+                start_dt = datetime(target_year, 1, 1)
+                end_dt = datetime(target_year + 1, 1, 1)
+            
+            start_ts = int(start_dt.timestamp() * 1000)
+            end_ts = int(end_dt.timestamp() * 1000)
+            filter_str = f'AND(CurrentValue.[记账日期]>={start_ts}, CurrentValue.[记账日期]<{end_ts})'
+        except Exception as e:
+            log.error(f"日期计算错误: {e}")
+            return False
+
+    records = get_all_records(client, app_token, table_id, filter_info=filter_str)
     if not records:
+        log.warning("⚠️ 该期间无数据，跳过生成利润表")
         return False
         
     data = []
@@ -2259,6 +2511,7 @@ def generate_excel_pnl_report(client, app_token):
             "记账日期": datetime.fromtimestamp(fields.get("记账日期", 0)/1000).strftime('%Y-%m-%d') if fields.get("记账日期") else "",
             "业务类型": fields.get("业务类型", ""),
             "往来单位费用": fields.get("往来单位费用", ""),
+            "费用归类": fields.get("费用归类", "其他"),
             "实际收付金额": float(fields.get("实际收付金额", 0)),
             "是否有票": fields.get("是否有票", "无票")
         })
@@ -2270,13 +2523,50 @@ def generate_excel_pnl_report(client, app_token):
     cost = df[df["业务类型"].isin(["付款", "费用"])]["实际收付金额"].sum()
     gross_profit = income - cost
     
-    # 按费用分类汇总
-    expense_summary = df[df["业务类型"].isin(["付款", "费用"])].groupby("往来单位费用")["实际收付金额"].sum().reset_index()
-    expense_summary.columns = ["项目", "金额"]
-    expense_summary = expense_summary.sort_values(by="金额", ascending=False)
+    # 按费用分类汇总 (往来单位)
+    partner_summary = pd.DataFrame()
+    if not df[df["业务类型"].isin(["付款", "费用"])].empty:
+        partner_summary = df[df["业务类型"].isin(["付款", "费用"])].groupby("往来单位费用")["实际收付金额"].sum().reset_index()
+        partner_summary.columns = ["往来单位", "金额"]
+        partner_summary = partner_summary.sort_values(by="金额", ascending=False)
     
+    # 按费用分类汇总 (费用归类)
+    category_summary = pd.DataFrame()
+    if not df[df["业务类型"].isin(["付款", "费用"])].empty:
+        category_summary = df[df["业务类型"].isin(["付款", "费用"])].groupby("费用归类")["实际收付金额"].sum().reset_index()
+        category_summary.columns = ["费用科目", "金额"]
+        category_summary = category_summary.sort_values(by="金额", ascending=False)
+    
+    # 月度趋势 (仅在年度报表时生成)
+    monthly_trend = pd.DataFrame()
+    if not target_month and not df.empty:
+        try:
+            # Extract month from date
+            df['Month'] = df['记账日期'].apply(lambda x: x[:7] if x else '') # YYYY-MM
+            expense_df = df[df["业务类型"].isin(["付款", "费用"])]
+            if not expense_df.empty:
+                monthly_trend = expense_df.pivot_table(
+                    index='费用归类', 
+                    columns='Month', 
+                    values='实际收付金额', 
+                    aggfunc='sum', 
+                    fill_value=0
+                )
+                
+                # 按总金额排序 (降序)
+                # 计算每行的总和
+                monthly_trend['Total'] = monthly_trend.sum(axis=1)
+                # 排序
+                monthly_trend = monthly_trend.sort_values(by='Total', ascending=False)
+                # 移除 Total 列，避免写入 Excel 时重复
+                monthly_trend = monthly_trend.drop(columns=['Total'])
+                
+                monthly_trend = monthly_trend.reset_index()
+        except Exception as e:
+            log.warning(f"生成月度趋势失败: {e}")
+
     # 写入Excel
-    filename = f"利润表_{datetime.now().strftime('%Y%m')}.xlsx"
+    filename = f"{filename_prefix}.xlsx"
     with pd.ExcelWriter(filename, engine='openpyxl') as writer:
         # 概览页
         summary_data = [
@@ -2289,9 +2579,16 @@ def generate_excel_pnl_report(client, app_token):
         ]
         pd.DataFrame(summary_data).to_excel(writer, sheet_name="利润表概览", index=False, header=False)
         
-        # 费用明细页
-        expense_summary.to_excel(writer, sheet_name="费用明细", index=False)
+        # 费用明细页 (按科目)
+        category_summary.to_excel(writer, sheet_name="费用明细(按科目)", index=False)
         
+        # 费用明细页 (按单位)
+        partner_summary.to_excel(writer, sheet_name="费用明细(按单位)", index=False)
+        
+        # 年度趋势页
+        if not monthly_trend.empty:
+             monthly_trend.to_excel(writer, sheet_name="年度费用趋势", index=False)
+
         # 原始数据页
         df.to_excel(writer, sheet_name="流水底稿", index=False)
         
@@ -2827,7 +3124,7 @@ def smart_text_entry(client, app_token):
             fields = {
                 "记账日期": int(datetime.strptime(data.get('date'), "%Y-%m-%d").timestamp() * 1000),
                 "业务类型": data.get('type'),
-                "费用类型": data.get('category'),
+                "费用归类": data.get('category'),
                 "往来单位费用": data.get('partner') or "散户",
                 "实际收付金额": float(data.get('amount')),
                 "备注": data.get('summary'),
@@ -3045,7 +3342,7 @@ def smart_image_entry(client, app_token, file_path=None, auto_confirm=False):
         fields = {
             "记账日期": int(datetime.strptime(data.get('date'), "%Y-%m-%d").timestamp() * 1000),
             "业务类型": data.get('type'),
-            "费用类型": data.get('category'),
+            "费用归类": data.get('category'),
             "往来单位费用": data.get('partner') or "散户",
             "实际收付金额": float(data.get('amount')),
             "备注": data.get('summary'),
@@ -3091,7 +3388,7 @@ def learn_category_rules(client, app_token):
     for r in records:
         f = r.fields
         desc = str(f.get("备注", "")).strip()
-        cat = f.get("费用类型", "")
+        cat = f.get("费用归类", "")
         
         if not desc or not cat:
             continue
@@ -3193,7 +3490,7 @@ def quick_search_records(client, app_token):
         date_ts = f.get("记账日期", 0)
         date_str = datetime.fromtimestamp(date_ts/1000).strftime('%Y-%m-%d') if date_ts else ""
         
-        full_text = f"{date_str} {f.get('业务类型','')} {f.get('费用类型','')} {f.get('往来单位费用','')} {f.get('实际收付金额','')} {f.get('备注','')} {f.get('合同订单号','')}"
+        full_text = f"{date_str} {f.get('业务类型','')} {f.get('费用归类','')} {f.get('往来单位费用','')} {f.get('实际收付金额','')} {f.get('备注','')} {f.get('合同订单号','')}"
         
         if keyword in full_text:
             found.append(r)
@@ -3403,8 +3700,8 @@ def manage_aliases():
             except Exception as e:
                 log.error(f"导入失败: {e}")
 
-def generate_partner_statement(client, app_token):
-    """生成往来对账单"""
+def generate_partner_statement(client, app_token, start_date=None, end_date=None):
+    """生成往来对账单 (支持日期筛选)"""
     log.info("📊 准备生成往来对账单...", extra={"solution": "请按提示操作"})
     
     table_id = get_table_id_by_name(client, app_token, "日常台账表")
@@ -3447,10 +3744,62 @@ def generate_partner_statement(client, app_token):
             return
             
     print(f"✅ 已选择: 【{target_partner}】")
+
+    # 2.1 日期筛选
+    start_ts = None
+    end_ts = None
+    date_desc = "全部历史"
+
+    if start_date and end_date:
+        try:
+            s_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            e_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+            start_ts = int(s_dt.timestamp() * 1000)
+            end_ts = int(e_dt.timestamp() * 1000)
+            date_desc = f"{start_date}至{end_date}"
+        except:
+            pass
+    else:
+        print("-" * 30)
+        use_date = input("📅 是否筛选特定日期范围? (y/n) [n]: ").strip().lower()
+        if use_date == 'y':
+            s_in = input("   起始日期 (YYYY-MM-DD): ").strip()
+            e_in = input("   结束日期 (YYYY-MM-DD): ").strip()
+            if s_in and e_in:
+                try:
+                    s_dt = datetime.strptime(s_in, "%Y-%m-%d")
+                    e_dt = datetime.strptime(e_in, "%Y-%m-%d") + timedelta(days=1)
+                    start_ts = int(s_dt.timestamp() * 1000)
+                    end_ts = int(e_dt.timestamp() * 1000)
+                    date_desc = f"{s_in}至{e_in}"
+                except:
+                    print("❌ 日期格式错误，将导出全部数据")
     
     # 3. 获取该单位所有记录
-    print(f"正在拉取 {target_partner} 的所有往来记录...")
-    all_records = get_all_records(client, app_token, table_id)
+    print(f"正在拉取 {target_partner} 的记录 ({date_desc})...")
+    
+    # 构建过滤器
+    conditions = []
+    # 1. 往来单位筛选
+    conditions.append(f'CurrentValue.[往来单位费用]="{target_partner}"')
+    # 2. 日期筛选
+    if start_ts and end_ts:
+        conditions.append(f'CurrentValue.[记账日期]>={start_ts}')
+        conditions.append(f'CurrentValue.[记账日期]<{end_ts}')
+    
+    filter_cmd = "&&".join(conditions)
+    if len(conditions) > 1:
+        filter_cmd = f"AND({', '.join(conditions)})" # 飞书公式语法可能不支持 && 在 API 中直接用，通常是 AND(cond1, cond2)
+        # 修正：飞书 API filter 通常支持 logic operator like "AND(CurrentValue.[Field]=val, ...)"
+        # 之前的代码有用 && 吗？
+        # Line 3764 used: f'CurrentValue.[记账日期]>={start_ts}&&CurrentValue.[记账日期]<{end_ts}&&CurrentValue.[费用归类]="折旧摊销"'
+        # So && is supported? Let's check line 3764 in previous read.
+        # Yes, line 3764: filter_cmd = f'CurrentValue.[记账日期]>={start_ts}&&CurrentValue.[记账日期]<{end_ts}&&CurrentValue.[费用归类]="折旧摊销"'
+        # So I will use &&
+    
+    filter_cmd = "&&".join(conditions)
+
+    all_records = get_all_records(client, app_token, table_id, filter_info=filter_cmd)
     
     partner_records = []
     total_in = 0.0
@@ -3458,29 +3807,31 @@ def generate_partner_statement(client, app_token):
     
     for r in all_records:
         f = r.fields
+        # 双重确认 (API 过滤可能有时候不完美，或者防止注入)
         p = str(f.get("往来单位费用", "")).strip()
+        if p != target_partner:
+            continue
+            
+        date_ts = f.get("记账日期", 0)
+        date_str = datetime.fromtimestamp(date_ts/1000).strftime('%Y-%m-%d') if date_ts else ""
         
-        if p == target_partner:
-            date_ts = f.get("记账日期", 0)
-            date_str = datetime.fromtimestamp(date_ts/1000).strftime('%Y-%m-%d') if date_ts else ""
-            
-            amt = float(f.get("实际收付金额", 0))
-            b_type = f.get("业务类型", "")
-            
-            row = {
-                "日期": date_str,
-                "业务类型": b_type,
-                "费用类型": f.get("费用类型", ""),
-                "金额": amt,
-                "备注": f.get("备注", ""),
-                "是否有票": f.get("是否有票", "无票")
-            }
-            partner_records.append(row)
-            
-            if b_type == "收款":
-                total_in += amt
-            elif b_type in ["付款", "费用"]:
-                total_out += amt
+        amt = float(f.get("实际收付金额", 0))
+        b_type = f.get("业务类型", "")
+        
+        row = {
+            "日期": date_str,
+            "业务类型": b_type,
+            "费用类型": f.get("费用类型", ""),
+            "金额": amt,
+            "备注": f.get("备注", ""),
+            "是否有票": f.get("是否有票", "无票")
+        }
+        partner_records.append(row)
+        
+        if b_type == "收款":
+            total_in += amt
+        elif b_type in ["付款", "费用"]:
+            total_out += amt
 
     if not partner_records:
         print("⚠️ 未找到任何记录")
@@ -3490,13 +3841,16 @@ def generate_partner_statement(client, app_token):
     df = pd.DataFrame(partner_records)
     df = df.sort_values(by="日期")
     
-    filename = f"往来对账单_{target_partner}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+    filename = f"往来对账单_{target_partner}_{date_desc}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    # remove invalid chars from filename
+    filename = filename.replace(":", "").replace("/", "-")
     
     with pd.ExcelWriter(filename, engine='openpyxl') as writer:
         # 汇总页
         summary = [
             ["项目", "金额", "说明"],
             ["往来单位", target_partner, ""],
+            ["统计期间", date_desc, ""],
             ["累计收款", total_in, "我方收到"],
             ["累计付款", total_out, "我方支付"],
             ["净额", total_in - total_out, "正数=我方净收，负数=我方净付"],
@@ -3517,7 +3871,7 @@ def generate_partner_statement(client, app_token):
 # 新增功能：固定资产折旧
 # -------------------------------------------------------------------------
 
-def calculate_depreciation(client, app_token, auto_run=False):
+def calculate_depreciation(client, app_token, auto_run=False, target_year=None, target_month=None):
     """一键计提折旧 (生成折旧凭证)"""
     log.info("📉 正在计算固定资产折旧...", extra={"solution": "无"})
     
@@ -3528,22 +3882,29 @@ def calculate_depreciation(client, app_token, auto_run=False):
         log.error("❌ 未找到表格，请先初始化", extra={"solution": "运行 --create-table"})
         return
 
-    # 0. 检查本月是否已计提
-    current_month_str = datetime.now().strftime('%Y-%m')
-    
-    # 简易检查：检查是否存在备注包含 "折旧计提" 且日期为本月的记录
+    # 0. 确定计提月份
     now = datetime.now()
-    start_dt = datetime(now.year, now.month, 1)
-    if now.month == 12:
-        end_dt = datetime(now.year + 1, 1, 1)
+    if target_year and target_month:
+        current_month_str = f"{target_year}-{target_month:02d}"
+        start_dt = datetime(target_year, target_month, 1)
+        if target_month == 12:
+            end_dt = datetime(target_year + 1, 1, 1)
+        else:
+            end_dt = datetime(target_year, target_month + 1, 1)
     else:
-        end_dt = datetime(now.year, now.month + 1, 1)
+        # 默认当前月份
+        current_month_str = now.strftime('%Y-%m')
+        start_dt = datetime(now.year, now.month, 1)
+        if now.month == 12:
+            end_dt = datetime(now.year + 1, 1, 1)
+        else:
+            end_dt = datetime(now.year, now.month + 1, 1)
     
     start_ts = int(start_dt.timestamp() * 1000)
     end_ts = int(end_dt.timestamp() * 1000)
     
     # 使用筛选器查询，避免拉取全部数据
-    filter_cmd = f'CurrentValue.[记账日期]>={start_ts}&&CurrentValue.[记账日期]<{end_ts}&&CurrentValue.[费用类型]="折旧摊销"'
+    filter_cmd = f'CurrentValue.[记账日期]>={start_ts}&&CurrentValue.[记账日期]<{end_ts}&&CurrentValue.[费用归类]="折旧摊销"'
     
     existing_deps = get_all_records(client, app_token, ledger_table_id, filter_info=filter_cmd)
     if existing_deps:
@@ -3570,6 +3931,8 @@ def calculate_depreciation(client, app_token, auto_run=False):
     for asset in assets:
         f = asset.fields
         status = f.get("状态", "")
+        # 优化：如果是补提旧月份，可能资产状态现在是'已报废'，但当时是'使用中'？
+        # 暂时只支持对当前'使用中'的资产计提，或者假设资产状态维护得当
         if status != "使用中":
             continue
             
@@ -3595,10 +3958,14 @@ def calculate_depreciation(client, app_token, auto_run=False):
             if not auto_run:
                 print(f"{name:<20} | {original_val:<10.2f} | {salvage_rate*100:<5.0f}% | {monthly_dep:<10.2f}")
             
+            # 记账日期设为该月最后一天 (或当前时间)
+            # 如果是补提，设为该月最后一天中午12点
+            entry_ts = int((end_dt - timedelta(hours=12)).timestamp() * 1000)
+            
             depreciation_entries.append({
-                "记账日期": int(datetime.now().timestamp() * 1000),
+                "记账日期": entry_ts,
                 "业务类型": "费用",
-                "费用类型": "折旧摊销", # 自动归类
+                "费用归类": "折旧摊销", # 自动归类
                 "往来单位费用": "内部计提",
                 "实际收付金额": monthly_dep, 
                 "备注": f"{current_month_str} 折旧计提 - {name}",
@@ -3639,20 +4006,46 @@ def calculate_depreciation(client, app_token, auto_run=False):
                 log.error(f"❌ 折旧凭证写入失败: {resp.msg}", extra={"solution": "检查网络"})
             
         print("✅ 折旧凭证已生成！")
-        send_bot_message(f"✅ 完成本月折旧计提，总额: {total_depreciation}元", "accountant")
+        send_bot_message(f"✅ 完成 {current_month_str} 折旧计提，总额: {total_depreciation}元", "accountant")
     else:
         print("❌ 已取消")
 
-def export_standard_voucher(client, app_token):
+def export_standard_voucher(client, app_token, target_year=None, target_month=None):
     """导出标准凭证格式 (对接财务软件)"""
-    log.info("📑 正在生成标准凭证导出文件...", extra={"solution": "请稍候"})
-    
+    if target_year and target_month:
+        log.info(f"📑 正在生成 {target_year}年{target_month}月 标准凭证导出文件...", extra={"solution": "请稍候"})
+        filename_prefix = f"标准凭证导出_{target_year}{target_month:02d}"
+    else:
+        log.info("📑 正在生成标准凭证导出文件...", extra={"solution": "请稍候"})
+        filename_prefix = f"标准凭证导出_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
     table_id = get_table_id_by_name(client, app_token, "日常台账表")
     if not table_id: return
     
+    # 构建过滤条件
+    filter_str = None
+    if target_year:
+        try:
+            if target_month:
+                start_dt = datetime(target_year, target_month, 1)
+                if target_month == 12:
+                    end_dt = datetime(target_year + 1, 1, 1)
+                else:
+                    end_dt = datetime(target_year, target_month + 1, 1)
+            else:
+                start_dt = datetime(target_year, 1, 1)
+                end_dt = datetime(target_year + 1, 1, 1)
+            
+            start_ts = int(start_dt.timestamp() * 1000)
+            end_ts = int(end_dt.timestamp() * 1000)
+            filter_str = f'AND(CurrentValue.[记账日期]>={start_ts}, CurrentValue.[记账日期]<{end_ts})'
+        except Exception as e:
+            log.error(f"日期计算错误: {e}")
+            return
+            
     # Get all records
-    print("正在拉取所有凭证数据...")
-    records = get_all_records(client, app_token, table_id)
+    print("正在拉取凭证数据...")
+    records = get_all_records(client, app_token, table_id, filter_info=filter_str)
     if not records:
         print("⚠️ 无数据")
         return
@@ -3688,13 +4081,21 @@ def export_standard_voucher(client, app_token):
         
         b_type = f.get("业务类型", "")
         summary = f.get("备注", "")
+        partner = f.get("往来单位费用", "")
+        category = f.get("费用归类", "")
+
         # 如果备注为空，使用往来单位或费用类型作为摘要
         if not summary:
-             summary = f.get("往来单位费用", "")
+             summary = f"{partner} {category}".strip()
         
         # 借贷逻辑
         bank_acc = f.get("交易银行", "银行存款")
-        subject = f.get("往来单位费用", "暂无分类")
+        
+        # 优先使用费用归类作为科目，如果为空则使用往来单位
+        # 对于费用类支出，通常科目为费用归类；对于往来款，科目为往来单位
+        subject = category if category and category != "其他" and category != "nan" else partner
+        if not subject or subject == "nan":
+            subject = "暂无分类"
         
         # 简单会计分录逻辑
         if b_type == "收款":
@@ -3744,7 +4145,7 @@ def export_standard_voucher(client, app_token):
     # 按日期排序
     df = df.sort_values(by="日期")
     
-    filename = f"标准凭证导出_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    filename = f"{filename_prefix}.xlsx"
     df.to_excel(filename, index=False)
     
     log.info(f"✅ 导出完成: {filename}", extra={"solution": "可直接导入金蝶/用友等财务软件"})
@@ -3757,7 +4158,7 @@ def export_standard_voucher(client, app_token):
 # 新增功能：交互式主菜单 (Python版)
 # -------------------------------------------------------------------------
 
-def backup_system_data():
+def backup_system_data(client=None, app_token=None):
     """备份系统关键配置和数据"""
     print(f"{Color.CYAN}💾 正在进行系统备份...{Color.ENDC}")
     
@@ -3769,7 +4170,7 @@ def backup_system_data():
     target_dir = os.path.join(backup_root, timestamp)
     os.makedirs(target_dir)
     
-    # 备份配置文件
+    # 1. 备份配置文件
     files_to_backup = [
         "partner_aliases.json",
         "category_rules.json",
@@ -3786,7 +4187,7 @@ def backup_system_data():
             except Exception as e:
                 print(f"{Color.FAIL}  - 备份失败 {f}: {e}{Color.ENDC}")
     
-    # 尝试备份 Excel 文件 (如果存在)
+    # 2. 备份 Excel 文件 (如果存在)
     excel_files = [f for f in os.listdir('.') if f.endswith('.xlsx') and not f.startswith('~$')]
     for f in excel_files:
         try:
@@ -3795,7 +4196,12 @@ def backup_system_data():
         except:
             pass
             
-    # 压缩备份文件夹 (新增)
+    # 3. [新增] 备份云端数据 (如果提供了client)
+    if client and app_token:
+        print("  - 正在导出云端数据...")
+        export_to_excel(client, app_token, target_path=target_dir)
+
+    # 4. 压缩备份文件夹
     try:
         shutil.make_archive(target_dir, 'zip', target_dir)
         print(f"📦 已创建压缩包: {target_dir}.zip")
@@ -3925,6 +4331,78 @@ def monitor_folder_mode(client, app_token):
     except KeyboardInterrupt:
         print("\n🛑 停止监听。")
         return
+        
+def auto_fix_missing_categories(client, app_token, target_year=None):
+    """自动修复缺失的费用归类"""
+    if target_year:
+        log.info(f"🔧 正在检查并修复 {target_year}年度 缺失的费用归类...", extra={"solution": "自动修复"})
+        year = target_year
+    else:
+        log.info("🔧 正在检查并修复缺失的费用归类...", extra={"solution": "自动修复"})
+        year = datetime.now().year
+    
+    # [V9.6优化] 确保加载历史知识和AI缓存
+    if not HISTORY_CATEGORY_MAP or not AI_CACHE_MAP:
+        load_history_knowledge(client, app_token)
+        
+    table_id = get_table_id_by_name(client, app_token, "日常台账表")
+    if not table_id: return
+    
+    # 获取指定年度数据 (减少处理量)
+    start_ts = int(datetime(year, 1, 1).timestamp() * 1000)
+    end_ts = int(datetime(year + 1, 1, 1).timestamp() * 1000)
+    filter_str = f'AND(CurrentValue.[记账日期]>={start_ts}, CurrentValue.[记账日期]<{end_ts})'
+    
+    records = get_all_records(client, app_token, table_id, filter_info=filter_str)
+    
+    updates = []
+    
+    for r in records:
+        f = r.fields
+        # 仅处理 费用/付款 类型
+        if f.get("业务类型") not in ["费用", "付款"]:
+            continue
+            
+        cat = f.get("费用归类", "")
+        desc = f.get("备注", "")
+        partner = f.get("往来单位费用", "")
+        
+        # 如果归类为空 或 为默认值 "其他"
+        if not cat or cat in ["", "nan", "其他", "未知"]:
+            # 尝试自动分类
+            new_cat = auto_categorize(desc, "其他", partner_name=partner)
+            
+            # 如果自动分类找到了非默认值，且与原值不同
+            if new_cat != "其他" and new_cat != cat:
+                print(f"   🔧 自动修复: {partner} | {desc} -> {new_cat}")
+                updates.append(AppTableRecord.builder().record_id(r.record_id).fields({"费用归类": new_cat}).build())
+                
+    if updates:
+        print(f"   📋 发现 {len(updates)} 条记录待修复，正在批量更新...")
+        # [V9.6优化] 批量更新 (Batch Update)
+        batch_size = 100
+        total_success = 0
+        
+        for i in range(0, len(updates), batch_size):
+            batch = updates[i:i+batch_size]
+            try:
+                req = BatchUpdateAppTableRecordRequest.builder() \
+                    .app_token(app_token) \
+                    .table_id(table_id) \
+                    .request_body(BatchUpdateAppTableRecordRequestBody.builder().records(batch).build()) \
+                    .build()
+                resp = client.bitable.v1.app_table_record.batch_update(req)
+                if resp.success():
+                    total_success += len(batch)
+                    print(f"      ✅ 已更新批次 {i//batch_size + 1} ({len(batch)}条)")
+                else:
+                    log.error(f"❌ 批次更新失败: {resp.msg}")
+            except Exception as e:
+                log.error(f"❌ 批次更新异常: {e}")
+                
+        print(f"   ✅ 成功修复 {total_success} 条记录")
+    else:
+        print("   ✅ 费用归类数据完整，无需修复")
 
 def one_click_daily_closing(client, app_token):
     """一键日结：自动处理单据 -> 计提折旧 -> 税务测算 -> 缺票检查 -> 结账报告 -> 备份"""
@@ -4000,6 +4478,10 @@ def one_click_daily_closing(client, app_token):
     print(f"\n{Color.HEADER}📉 检查固定资产折旧...{Color.ENDC}")
     calculate_depreciation(client, app_token, auto_run=True)
 
+    # 1.6 自动修复缺失分类 (New)
+    print(f"\n{Color.HEADER}🔧 检查并修复缺失分类...{Color.ENDC}")
+    auto_fix_missing_categories(client, app_token)
+
     # 2. 税务测算 (New)
     print(f"\n{Color.HEADER}🧮 正在进行税务测算...{Color.ENDC}")
     tax_msg = calculate_tax(client, app_token)
@@ -4021,28 +4503,34 @@ def one_click_daily_closing(client, app_token):
     
     # 5. 系统备份
     print(f"\n{Color.HEADER}💾 开始系统自动备份...{Color.ENDC}")
-    backup_system_data()
+    backup_system_data(client, app_token)
+
+    # 6. 发送每日简报
+    print(f"\n{Color.HEADER}📢 发送每日经营简报...{Color.ENDC}")
+    daily_briefing(client, app_token)
     
-    # 6. 生成日结报告
-    report_file = f"日结报告_{datetime.now().strftime('%Y%m%d')}.txt"
-    try:
-        with open(report_file, "w", encoding="utf-8") as f:
-            f.write(f"=== 飞书财务助手日结报告 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n\n")
-            f.write("【今日工作事项】\n")
-            if not summary:
-                f.write("无处理事项\n")
-            for s in summary:
-                f.write(f"- {s}\n")
-            f.write("\n")
-            f.write("\n".join(daily_log))
-            f.write("\n\n(本报告由飞书财务助手自动生成)")
-            
+    # 6. 生成日结报告 (HTML)
+    print(f"\n{Color.HEADER}📊 生成每日结账报告...{Color.ENDC}")
+    combined_log = []
+    if summary:
+        combined_log.append("【处理摘要】")
+        combined_log.extend(summary)
+    if daily_log:
+        combined_log.append("\n【详细日志】")
+        combined_log.extend(daily_log)
+        
+    report_file = generate_daily_html_report(client, app_token, summary_log=combined_log)
+    
+    if report_file:
         print(f"\n{Color.GREEN}========================================{Color.ENDC}")
         print(f"{Color.GREEN}🎉 日结完成！报告已生成: {report_file}{Color.ENDC}")
         print(f"{Color.GREEN}========================================{Color.ENDC}")
-        os.startfile(report_file)
-    except Exception as e:
-        log.error(f"生成报告失败: {e}")
+        try:
+            os.startfile(report_file)
+        except:
+            pass
+    else:
+        log.error("生成报告失败")
     
     print(f"\n{Color.GREEN}✅ 一键流程全部完成！{Color.ENDC}")
 
@@ -4076,9 +4564,11 @@ def interactive_menu():
         print("  8. 每日经营简报 (老板看板)")
         print("  9. 财务体检 (风险扫描)")
         print("  10. 智能查数助手 (AI 问答)")
+        print("  21. 生成年度报表 (可视化) [新]")
         
         print(f"\n{Color.CYAN}⚙️ 结账与设置{Color.ENDC}")
         print("  11. 月度结账 (归档/利润表)")
+        print("  22. 一键年结 (全流程) [新]")
         print("  12. 计提固定资产折旧 [新]")
         print("  13. 税务统计")
         print("  14. 往来单位别名管理")
@@ -4146,15 +4636,17 @@ def interactive_menu():
         elif choice == '10': ai_data_query(client, APP_TOKEN)
         
         elif choice == '11': monthly_close(client, APP_TOKEN)
+        elif choice == '22': year_end_closing(client, APP_TOKEN)
         elif choice == '12': calculate_depreciation(client, APP_TOKEN)
         elif choice == '13': calculate_tax(client, APP_TOKEN)
         elif choice == '14': manage_aliases()
         elif choice == '15': settings_menu()
         elif choice == '16': export_standard_voucher(client, APP_TOKEN)
         elif choice == '17': learn_category_rules(client, APP_TOKEN)
-        elif choice == '18': quick_search_records(client, APP_TOKEN)
+        elif choice == '18': quick_search_ledger(client, APP_TOKEN)
         elif choice == '19': export_to_excel(client, APP_TOKEN)
         elif choice == '20': monitor_folder_mode(client, APP_TOKEN)
+        elif choice == '21': generate_annual_report(client, APP_TOKEN)
         
         elif choice == '97': 
              print(f"{Color.WARNING}⚠️  警告: 初始化将创建新表格。{Color.ENDC}")
@@ -4236,16 +4728,26 @@ def update_env_key(key, value):
     except Exception as e:
         print(f"❌ 保存配置失败: {e}")
 
-def financial_health_check(client, app_token):
+def financial_health_check(client, app_token, target_year=None):
     """一键财务体检：扫描税务风险和数据异常 (生成HTML报告)"""
-    log.info("🏥 正在进行财务体检...", extra={"solution": "全面扫描中"})
+    if target_year:
+        log.info(f"🏥 正在进行 {target_year}年度 财务体检...", extra={"solution": "全面扫描中"})
+        year = target_year
+    else:
+        log.info("🏥 正在进行财务体检...", extra={"solution": "全面扫描中"})
+        year = datetime.now().year
     
     table_id = get_table_id_by_name(client, app_token, "日常台账表")
     if not table_id:
         log.error("❌ 找不到日常台账表", extra={"solution": "请先初始化表格"})
         return
 
-    records = get_all_records(client, app_token, table_id)
+    # 优化：只获取指定年度数据
+    start_ts = int(datetime(year, 1, 1).timestamp() * 1000)
+    end_ts = int(datetime(year + 1, 1, 1).timestamp() * 1000)
+    filter_str = f'AND(CurrentValue.[记账日期]>={start_ts}, CurrentValue.[记账日期]<{end_ts})'
+
+    records = get_all_records(client, app_token, table_id, filter_info=filter_str)
     
     risks = []
     stats = {
@@ -4272,7 +4774,7 @@ def financial_health_check(client, app_token):
         is_cash = f.get("是否现金", "否") == "是"
         has_ticket = f.get("是否有票", "有票") == "无票"
         biz_type = f.get("业务类型", "")
-        expense_type = f.get("费用类型", "")
+        expense_type = f.get("费用归类", "")
         remark = f.get("备注") or ""
         partner = f.get("往来单位费用") or ""
         date_ts = f.get("记账日期", 0)
@@ -4327,27 +4829,41 @@ def financial_health_check(client, app_token):
             print(f"ℹ️ [数据规范] 摘要过短或缺失: {amt}元")
             risk_details.append({"date": date_str, "type": "摘要缺失", "amt": amt, "desc": "摘要为空或过短", "level": "低"})
 
+        # 规则 5: 费用归类缺失 (Daily Closing Validation)
+        if biz_type == "费用" and (not expense_type or expense_type in ["", "nan", "未知"]):
+            msg = f"⚠️ [数据完善] 费用归类缺失: {amt}元 ({remark})"
+            risks.append(msg)
+            risk_details.append({"date": date_str, "type": "归类缺失", "amt": amt, "desc": "请补充费用归类", "level": "中"})
+            print(msg)
+
     # 规则 4: 本月折旧未计提
     current_month_str = datetime.now().strftime('%Y-%m')
+    check_depreciation = False
+    
+    # 仅当检查当前年份时，才检查本月折旧
+    if year == datetime.now().year:
+        check_depreciation = True
+        
     has_depreciation = False
-    for r in records:
-        f = r.fields
-        # 检查是否为本月记录且费用类型为折旧摊销
-        r_date = f.get("记账日期", 0)
-        try:
-            r_month = datetime.fromtimestamp(r_date/1000).strftime('%Y-%m')
-        except:
-            r_month = ""
+    if check_depreciation:
+        for r in records:
+            f = r.fields
+            # 检查是否为本月记录且费用归类为折旧摊销
+            r_date = f.get("记账日期", 0)
+            try:
+                r_month = datetime.fromtimestamp(r_date/1000).strftime('%Y-%m')
+            except:
+                r_month = ""
+                
+            if r_month == current_month_str and f.get("费用归类") == "折旧摊销":
+                has_depreciation = True
+                break
             
-        if r_month == current_month_str and f.get("费用类型") == "折旧摊销":
-            has_depreciation = True
-            break
-            
-    if not has_depreciation:
-        msg = f"⚠️ [合规风险] 本月尚未计提固定资产折旧 ({current_month_str})"
-        risks.append(msg)
-        risk_details.append({"date": datetime.now().strftime("%Y-%m-%d"), "type": "折旧缺失", "amt": 0, "desc": "本月未计提折旧", "level": "中"})
-        print(msg)
+        if not has_depreciation:
+            msg = f"⚠️ [合规风险] 本月尚未计提固定资产折旧 ({current_month_str})"
+            risks.append(msg)
+            risk_details.append({"date": datetime.now().strftime("%Y-%m-%d"), "type": "折旧缺失", "amt": 0, "desc": "本月未计提折旧", "level": "中"})
+            print(msg)
 
     print("-" * 40)
     print(f"扫描完成。共 {len(records)} 条记录。")
@@ -4500,6 +5016,389 @@ def financial_health_check(client, app_token):
             calculate_depreciation(client, app_token)
 
     return True
+
+def generate_daily_html_report(client, app_token, summary_log=None):
+    """生成每日结账 HTML 报告"""
+    log.info("📊 正在生成今日结账报告...", extra={"solution": "无"})
+    
+    table_id = get_table_id_by_name(client, app_token, "日常台账表")
+    if not table_id: return None
+    
+    # 1. 获取今日数据
+    now = datetime.now()
+    today_start = datetime(now.year, now.month, now.day)
+    start_ts = int(today_start.timestamp() * 1000)
+    filter_str = f'CurrentValue.[记账日期]>={start_ts}'
+    
+    records = get_all_records(client, app_token, table_id, filter_info=filter_str)
+    
+    today_income = 0.0
+    today_expense = 0.0
+    tx_count = len(records)
+    details = []
+    
+    for r in records:
+        f = r.fields
+        amt = float(f.get("实际收付金额", 0))
+        b_type = f.get("业务类型", "")
+        desc = f.get("备注") or f.get("往来单位费用", "")
+        
+        if b_type == "收款":
+            today_income += amt
+        elif b_type in ["付款", "费用"]:
+            today_expense += amt
+            
+        details.append({
+            "type": b_type,
+            "amt": amt,
+            "desc": desc,
+            "partner": f.get("往来单位费用", "-")
+        })
+        
+    # 2. 待办事项 (检查文件夹)
+    pending_files = []
+    watch_dir = "待处理单据"
+    if os.path.exists(watch_dir):
+        pending_files = [f for f in os.listdir(watch_dir) if not f.startswith("~$") and f.lower().endswith(('.xlsx', '.png', '.jpg'))]
+        
+    # 3. 待补票据 (简单查询)
+    missing_count = 0
+    # 这里为了速度，暂时不全量查，只看传入的 summary_log 是否有提及
+    
+    # 生成 HTML
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>每日结账报告 - {now.strftime('%Y-%m-%d')}</title>
+        <style>
+            body {{ font-family: 'Segoe UI', sans-serif; background: #f0f2f5; padding: 20px; }}
+            .container {{ max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+            h1 {{ color: #1a1a1a; border-bottom: 3px solid #3498db; padding-bottom: 10px; }}
+            .summary-box {{ display: flex; gap: 20px; margin: 20px 0; }}
+            .card {{ flex: 1; background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #e9ecef; }}
+            .num {{ font-size: 24px; font-weight: bold; color: #2c3e50; }}
+            .label {{ color: #7f8c8d; font-size: 14px; }}
+            .income {{ color: #27ae60; }}
+            .expense {{ color: #c0392b; }}
+            
+            h3 {{ margin-top: 30px; color: #34495e; border-left: 5px solid #3498db; padding-left: 10px; }}
+            table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
+            th, td {{ padding: 10px; text-align: left; border-bottom: 1px solid #eee; }}
+            th {{ background: #f8f9fa; color: #7f8c8d; }}
+            
+            .log-box {{ background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 5px; font-family: monospace; max-height: 200px; overflow-y: auto; }}
+            .pending-alert {{ background: #fff3cd; color: #856404; padding: 10px; border-radius: 5px; margin-top: 10px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>📅 每日结账报告 <small style="font-size: 16px; color: #7f8c8d">{now.strftime('%Y-%m-%d %H:%M')}</small></h1>
+            
+            <div class="summary-box">
+                <div class="card">
+                    <div class="num income">+{today_income:,.2f}</div>
+                    <div class="label">今日收款</div>
+                </div>
+                <div class="card">
+                    <div class="num expense">-{today_expense:,.2f}</div>
+                    <div class="label">今日支出</div>
+                </div>
+                <div class="card">
+                    <div class="num">{tx_count}</div>
+                    <div class="label">业务笔数</div>
+                </div>
+                <div class="card">
+                    <div class="num" style="color: #2980b9">{today_income - today_expense:,.2f}</div>
+                    <div class="label">今日净现金流</div>
+                </div>
+            </div>
+            
+            <h3>📝 今日业务明细</h3>
+            """
+            
+    if details:
+        html += "<table><thead><tr><th>类型</th><th>金额</th><th>对象</th><th>摘要</th></tr></thead><tbody>"
+        for d in details:
+            color = "green" if d['type'] == "收款" else "red"
+            html += f"<tr><td><span style='color:{color}'>{d['type']}</span></td><td>{d['amt']:,.2f}</td><td>{d['partner']}</td><td>{d['desc']}</td></tr>"
+        html += "</tbody></table>"
+    else:
+        html += "<p style='color:#999; text-align:center'>今日暂无收支记录</p>"
+        
+    if pending_files:
+        html += f"""
+        <h3>🔔 待办提醒</h3>
+        <div class="pending-alert">
+            <strong>发现 {len(pending_files)} 个待处理文件:</strong><br>
+            {', '.join(pending_files[:5])} {'...' if len(pending_files)>5 else ''}
+        </div>
+        """
+        
+    if summary_log:
+        html += """
+        <h3>⚙️ 系统处理日志</h3>
+        <div class="log-box">
+        """
+        for line in summary_log:
+            html += f"<div>{line}</div>"
+        html += "</div>"
+        
+    html += """
+        </div>
+    </body>
+    </html>
+    """
+    
+    report_dir = "日结报告"
+    if not os.path.exists(report_dir): os.makedirs(report_dir)
+    filename = f"{report_dir}/日结_{now.strftime('%Y%m%d')}.html"
+    
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(html)
+        
+    log.info(f"📄 日结报告已生成: {filename}")
+    return filename
+
+def generate_annual_report(client, app_token, year=None):
+    """生成年度财务报表"""
+    if not year:
+        year = datetime.now().year
+    
+    log.info(f"📊 正在生成 {year} 年度报表...", extra={"solution": "无"})
+    
+    table_id = get_table_id_by_name(client, app_token, "日常台账表")
+    if not table_id: return False
+    
+    # 获取全年数据
+    records = get_all_records(client, app_token, table_id)
+    
+    monthly_data = {m: {"income": 0.0, "expense": 0.0, "count": 0} for m in range(1, 13)}
+    category_summary = {} # {category: amount}
+    
+    total_income = 0.0
+    total_expense = 0.0
+    
+    for r in records:
+        f = r.fields
+        ts = f.get("记账日期", 0)
+        if not ts: continue
+        
+        dt = datetime.fromtimestamp(ts / 1000)
+        if dt.year != year: continue
+        
+        amt = float(f.get("实际收付金额", 0))
+        b_type = f.get("业务类型", "")
+        cat = f.get("费用归类", "未分类")
+        
+        monthly_data[dt.month]["count"] += 1
+        
+        if b_type == "收款":
+            monthly_data[dt.month]["income"] += amt
+            total_income += amt
+        elif b_type in ["付款", "费用"]:
+            monthly_data[dt.month]["expense"] += amt
+            total_expense += amt
+            
+            # 统计费用分类
+            if cat not in category_summary: category_summary[cat] = 0.0
+            category_summary[cat] += amt
+
+    # 生成 HTML
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>{year} 年度财务报表</title>
+        <style>
+            body {{ font-family: 'Segoe UI', sans-serif; background: #f0f2f5; padding: 20px; }}
+            .container {{ max-width: 1000px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+            h1 {{ color: #2c3e50; text-align: center; border-bottom: 2px solid #3498db; padding-bottom: 20px; }}
+            .summary-cards {{ display: flex; gap: 20px; margin: 30px 0; }}
+            .card {{ flex: 1; background: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }}
+            .num {{ font-size: 28px; font-weight: bold; margin: 10px 0; }}
+            .income {{ color: #27ae60; }}
+            .expense {{ color: #c0392b; }}
+            .profit {{ color: #2980b9; }}
+            
+            table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
+            th, td {{ padding: 12px; text-align: center; border-bottom: 1px solid #eee; }}
+            th {{ background: #34495e; color: white; }}
+            tr:nth-child(even) {{ background: #f9f9f9; }}
+            
+            .chart-box {{ height: 300px; margin-top: 40px; border: 1px solid #eee; padding: 10px; }}
+            h2 {{ color: #34495e; margin-top: 40px; border-left: 5px solid #3498db; padding-left: 10px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>📅 {year} 年度财务报表</h1>
+            
+            <div class="summary-cards">
+                <div class="card">
+                    <div class="label">全年总收入</div>
+                    <div class="num income">¥{total_income:,.2f}</div>
+                </div>
+                <div class="card">
+                    <div class="label">全年总支出</div>
+                    <div class="num expense">¥{total_expense:,.2f}</div>
+                </div>
+                <div class="card">
+                    <div class="label">全年净利润</div>
+                    <div class="num profit">¥{total_income - total_expense:,.2f}</div>
+                </div>
+            </div>
+            
+            <h2>📈 月度收支明细</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>月份</th>
+                        <th>收入</th>
+                        <th>支出</th>
+                        <th>结余</th>
+                        <th>笔数</th>
+                    </tr>
+                </thead>
+                <tbody>
+    """
+    
+    for m in range(1, 13):
+        d = monthly_data[m]
+        balance = d["income"] - d["expense"]
+        color = "#27ae60" if balance >= 0 else "#c0392b"
+        html += f"""
+        <tr>
+            <td>{m}月</td>
+            <td style="color:#27ae60">+{d['income']:,.2f}</td>
+            <td style="color:#c0392b">-{d['expense']:,.2f}</td>
+            <td style="font-weight:bold; color:{color}">{balance:,.2f}</td>
+            <td>{d['count']}</td>
+        </tr>
+        """
+        
+    html += """
+                </tbody>
+            </table>
+            
+            <h2>📊 费用支出分布</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>费用类型</th>
+                        <th>金额</th>
+                        <th>占比</th>
+                    </tr>
+                </thead>
+                <tbody>
+    """
+    
+    sorted_cats = sorted(category_summary.items(), key=lambda x: x[1], reverse=True)
+    for cat, amt in sorted_cats:
+        percent = (amt / total_expense * 100) if total_expense > 0 else 0
+        html += f"""
+        <tr>
+            <td>{cat}</td>
+            <td>{amt:,.2f}</td>
+            <td>{percent:.1f}%</td>
+        </tr>
+        """
+        
+    html += """
+                </tbody>
+            </table>
+            
+            <p style="margin-top: 40px; color: #7f8c8d; text-align: center; font-size: 12px;">生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Powered by 飞书财务小助手</p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    report_dir = "年度报告"
+    if not os.path.exists(report_dir): os.makedirs(report_dir)
+    filename = f"{report_dir}/{year}年度报表_{datetime.now().strftime('%Y%m%d')}.html"
+    
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(html)
+        
+    log.info(f"✅ 年度报表已生成: {filename}")
+    os.startfile(filename) # 自动打开
+    return True
+
+# 全局台账缓存 (用于快速查账)
+GLOBAL_LEDGER_CACHE = None
+
+def quick_search_ledger(client, app_token):
+    """快速查账 (优化版：内存缓存 + 循环搜索)"""
+    global GLOBAL_LEDGER_CACHE
+    
+    print(f"\n{Color.HEADER}🔍 快速查账助手{Color.ENDC}")
+    
+    table_id = get_table_id_by_name(client, app_token, "日常台账表")
+    if not table_id: return
+    
+    # 首次加载或刷新
+    if GLOBAL_LEDGER_CACHE is None:
+        print("⏳ 正在拉取全量台账数据 (首次加载)...")
+        GLOBAL_LEDGER_CACHE = get_all_records(client, app_token, table_id)
+        print(f"✅ 已缓存 {len(GLOBAL_LEDGER_CACHE)} 条记录")
+    else:
+        print(f"⚡ 使用本地缓存 ({len(GLOBAL_LEDGER_CACHE)} 条) - 输入 'reload' 强制刷新")
+
+    while True:
+        print("-" * 30)
+        keyword = input("👉 请输入关键词 (q:退出, reload:刷新): ").strip()
+        
+        if not keyword: continue
+        if keyword.lower() == 'q': break
+        
+        if keyword.lower() == 'reload':
+            print("🔄 正在刷新数据...")
+            GLOBAL_LEDGER_CACHE = get_all_records(client, app_token, table_id)
+            print(f"✅ 刷新完成: {len(GLOBAL_LEDGER_CACHE)} 条")
+            continue
+            
+        matches = []
+        total_amt = 0.0
+        
+        for r in GLOBAL_LEDGER_CACHE:
+            f = r.fields
+            # 全文搜索
+            text = str(f).lower()
+            if keyword.lower() in text:
+                matches.append(f)
+                # 统计金额
+                amt = float(f.get("实际收付金额", 0))
+                if f.get("业务类型") in ["付款", "费用"]:
+                    total_amt -= amt
+                else:
+                    total_amt += amt
+                    
+        if matches:
+            print(f"\n✅ 找到 {len(matches)} 条记录:")
+            print(f"{'日期':<12} | {'类型':<6} | {'金额':<10} | {'往来单位/备注'}")
+            print("-" * 60)
+            
+            # 按日期排序
+            matches.sort(key=lambda x: x.get("记账日期", 0), reverse=True)
+            
+            for m in matches[:15]: # 只显示前15条
+                ts = m.get("记账日期", 0)
+                date_str = datetime.fromtimestamp(ts/1000).strftime("%Y-%m-%d") if ts else "-"
+                amt = float(m.get("实际收付金额", 0))
+                b_type = m.get("业务类型", "")
+                desc = f"{m.get('往来单位费用', '')} {m.get('备注', '')}"
+                print(f"{date_str:<12} | {b_type:<6} | {amt:<10.2f} | {desc[:30]}")
+                
+            if len(matches) > 15:
+                print(f"... (还有 {len(matches)-15} 条)")
+                
+            print("-" * 60)
+            print(f"💰 净额统计: {total_amt:,.2f} 元")
+        else:
+            print("❌ 未找到相关记录")
 
 # 菜单：设置
 def settings_menu():

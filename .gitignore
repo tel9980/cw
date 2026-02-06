@@ -17,7 +17,20 @@ __pycache__/
 待处理单据/
 2_已处理归档/
 3_财务报表/
-待处理单据/处理失败/
+日结报告/
+财务数据备份/
+backup/
+
+# Generated Reports & Exports
+日结报告_*.txt
+标准凭证导出_*.xlsx
+飞书台账全量备份_*.xlsx
+利润表_*.xlsx
+往来对账单_*.xlsx
+待补录流水_*.xlsx
+
+# Logs
+sim_log.txt
 
 # Test artifacts
 verify_v9_4.py
