@@ -1,28 +1,29 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
+# Python virtual environment
 .venv/
 venv/
-env/
+ENV/
 
-# Environment Variables
+# System configuration
 .env
 
-# Data and Logs
+# Temporary files
+~$*.xlsx
 *.log
-backup/
-logs/
+*.tmp
+__pycache__/
+*.pyc
+
+# User data folders (local data that should not be public)
 待处理单据/
-1_待导入流水/
 2_已处理归档/
 3_财务报表/
+待处理单据/处理失败/
 
-# User Data (Excel)
-*.xlsx
-*.xls
-# Exception: Keep the demo script, but ignore generated demo data (which are xlsx)
+# Test artifacts
+verify_v9_4.py
+run_daily_task.bat
 
-# IDE
+# IDE settings
 .vscode/
 .idea/
+*.swp
