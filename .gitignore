@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# Environment Variables
+.env
+
+# Data and Logs
+*.log
+backup/
+logs/
+待处理单据/
+1_待导入流水/
+2_已处理归档/
+3_财务报表/
+
+# User Data (Excel)
+*.xlsx
+*.xls
+# Exception: Keep the demo script, but ignore generated demo data (which are xlsx)
+
+# IDE
+.vscode/
+.idea/

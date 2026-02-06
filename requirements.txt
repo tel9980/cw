@@ -1,0 +1,7 @@
+lark-oapi
+pandas
+requests
+python-dotenv
+openpyxl
+zhipuai
+Pillow
