@@ -1437,6 +1437,8 @@ def calculate_tax(client, app_token):
         f"💡 仅供参考，具体以申报为准"
     )
     log.info("✅ 税务统计完成", extra={"solution": "无"})
+    print(msg) # 保持原有打印
+    return msg
     
     # 构造卡片
     header_color = "green" if profit_margin >= 5 else "red"
@@ -1492,11 +1494,11 @@ def calculate_tax(client, app_token):
 
 # 导出待补票清单 (新功能)
 @retry_on_failure(max_retries=2, delay=3)
-def export_missing_tickets(client, app_token):
+def export_missing_tickets(client, app_token, silent=False):
     log.info("🔍 正在查找待补票记录...", extra={"solution": "无"})
     table_id = get_table_id_by_name(client, app_token, "日常台账表")
     if not table_id:
-        return False
+        return 0
         
     records = get_all_records(client, app_token, table_id)
     missing_list = []
@@ -1510,6 +1512,9 @@ def export_missing_tickets(client, app_token):
         
         if is_expense and (no_ticket or pending):
             row = fields.copy()
+            # 注入 record_id 以便后续更新
+            row['record_id'] = r.record_id
+            
             # 日期格式化
             if isinstance(row.get("记账日期"), int):
                 row["记账日期"] = datetime.fromtimestamp(row["记账日期"] / 1000).strftime("%Y-%m-%d")
@@ -1529,11 +1534,76 @@ def export_missing_tickets(client, app_token):
         
         msg = f"已生成待补票清单: {len(missing_list)}条"
         log.info(f"✅ {msg}", extra={"solution": "发送给业务员补票"})
-        send_bot_message(f"📢 {msg}\n📄 文件位置: {file_path}", "alert")
+        if not silent:
+            send_bot_message(f"📢 {msg}\n📄 文件位置: {file_path}", "alert")
+        
+        # 询问是否进入交互式补录模式 (仅在非静默模式下)
+        if not silent:
+            print(f"\n💡 发现 {len(missing_list)} 笔待补票记录。")
+            if input("👉 是否现在开始【交互式补录】(逐条确认收到发票)? (y/n): ").strip().lower() == 'y':
+                resolve_missing_tickets(client, app_token, missing_list, table_id)
+            
     else:
         log.info("✅ 没有发现待补票记录", extra={"solution": "无"})
-        send_bot_message("👏 只有完美的账单！目前没有待补票记录。", "alert")
-    return True
+        if not silent:
+            send_bot_message("👏 只有完美的账单！目前没有待补票记录。", "alert")
+            
+    return len(missing_list)
+
+def resolve_missing_tickets(client, app_token, missing_list, table_id):
+    """交互式补录发票状态"""
+    print(f"\n🎫 启动交互式补票模式 ({len(missing_list)}条待处理)...")
+    print("-----------------------------------")
+    print("说明: 按 'y' 标记为【有票】，按 'n' 或回车跳过，按 'q' 退出。")
+    print("-----------------------------------")
+    
+    count = 0
+    for row in missing_list:
+        # 显示记录详情
+        date_str = row.get("记账日期", "未知日期")
+        partner = row.get("往来单位费用", "未知")
+        amount = row.get("实际收付金额", 0)
+        memo = row.get("备注", "")
+        
+        print(f"\n📝 [{count+1}/{len(missing_list)}] {date_str} | {partner} | {amount}元 | {memo}")
+        choice = input("👉 是否已收到发票? (y/n/q): ").strip().lower()
+        
+        if choice == 'q':
+            break
+            
+        if choice == 'y':
+            # 更新记录
+            record_id = row.get("record_id") # 需要确保 get_all_records 返回了 record_id
+            if not record_id:
+                # 尝试通过原始对象获取 (如果 row 是 dict，可能没有 record_id，除非 get_all_records 特殊处理)
+                # 这里假设 get_all_records 返回的 record 对象包含 record_id，但我们之前转换为了 dict
+                # 这是一个潜在 bug，我们需要检查 get_all_records 的实现或 missing_list 的构造
+                # 修正: 在 export_missing_tickets 中构造 missing_list 时，应该包含 record_id
+                print("❌ 无法获取记录ID，跳过")
+                continue
+                
+            try:
+                # 更新字段: 是否有票=有票, 待补票标记=""
+                fields = {"是否有票": "有票", "待补票标记": ""}
+                
+                req = UpdateAppTableRecordRequest.builder() \
+                    .app_token(app_token) \
+                    .table_id(table_id) \
+                    .record_id(record_id) \
+                    .app_table_record(AppTableRecord.builder().fields(fields).build()) \
+                    .build()
+                    
+                resp = client.bitable.v1.app_table_record.update(req)
+                if resp.success():
+                    print("✅ 已更新为 [有票]")
+                    count += 1
+                else:
+                    print(f"❌ 更新失败: {resp.msg}")
+            except Exception as e:
+                print(f"❌ 错误: {e}")
+                
+    print(f"\n🎉 补录完成！共更新 {count} 条记录。")
+
 
 # 生成HTML可视化报表
 @retry_on_failure(max_retries=2, delay=3)
@@ -2781,7 +2851,7 @@ def smart_text_entry(client, app_token):
         except Exception as e:
             log.error(f"处理失败: {e}", extra={"solution": "请重试"})
 
-def smart_image_entry(client, app_token):
+def smart_image_entry(client, app_token, file_path=None, auto_confirm=False):
     """智能截图记账：OCR识别+AI解析"""
     if not zhipu_client:
         log.error("❌ 未配置 GLM-4 API Key", extra={"solution": "请在 .env 文件中配置 ZHIPU_API_KEY"})
@@ -2793,51 +2863,67 @@ def smart_image_entry(client, app_token):
     # 预加载历史知识
     load_history_knowledge(client, app_token)
 
-    print("\n📸 智能截图记账助手")
-    print("-----------------------------------")
-    print("👉 请先将【微信/支付宝截图】或【银行回单截图】复制到剪贴板。")
-    print("   (或者按回车键选择本地图片文件)")
-    print("-----------------------------------")
-    
-    input("📋 复制好图片后，请按回车继续... (输入 q 退出)")
-    
-    try:
-        # 1. 获取图片
-        image = ImageGrab.grabclipboard()
+    image = None
+    if file_path:
+        # 自动模式：直接使用传入的文件路径
+        try:
+            image = Image.open(file_path)
+            print(f"✅ 已加载图片: {os.path.basename(file_path)}")
+        except Exception as e:
+            log.error(f"无法打开图片: {e}")
+            return
+    else:
+        # 交互模式：从剪贴板或对话框获取
+        print("\n📸 智能截图记账助手")
+        print("-----------------------------------")
+        print("👉 请先将【微信/支付宝截图】或【银行回单截图】复制到剪贴板。")
+        print("   (或者按回车键选择本地图片文件)")
+        print("-----------------------------------")
         
-        # Windows上抓取的文件列表可能不是Image对象
-        if isinstance(image, list):
-             # 用户复制了文件，不是图片内容
-             if len(image) > 0:
-                 try:
-                     image = Image.open(image[0])
-                 except:
-                     image = None
+        input("📋 复制好图片后，请按回车继续... (输入 q 退出)")
+        
+        try:
+            # 1. 获取图片
+            image = ImageGrab.grabclipboard()
+            
+            # Windows上抓取的文件列表可能不是Image对象
+            if isinstance(image, list):
+                 # 用户复制了文件，不是图片内容
+                 if len(image) > 0:
+                     try:
+                         image = Image.open(image[0])
+                     except:
+                         image = None
 
-        if isinstance(image, Image.Image):
-            print("✅ 已从剪贴板获取图片")
-        else:
-            print("⚠️ 剪贴板中没有图片，请选择文件...")
-            # 隐藏主窗口
-            root = tk.Tk()
-            root.withdraw()
-            root.attributes('-topmost', True) # 确保弹窗在最前
-            
-            file_path = filedialog.askopenfilename(
-                title="选择图片文件",
-                filetypes=[("Images", "*.png;*.jpg;*.jpeg;*.bmp;*.webp")]
-            )
-            root.destroy()
-            
-            if not file_path:
-                print("❌ 未选择文件")
-                return
-            try:
-                image = Image.open(file_path)
-                print(f"✅ 已加载图片: {os.path.basename(file_path)}")
-            except Exception as e:
-                log.error(f"无法打开图片: {e}")
-                return
+            if isinstance(image, Image.Image):
+                print("✅ 已从剪贴板获取图片")
+            else:
+                print("⚠️ 剪贴板中没有图片，请选择文件...")
+                # 隐藏主窗口
+                root = tk.Tk()
+                root.withdraw()
+                root.attributes('-topmost', True) # 确保弹窗在最前
+                
+                file_path_dialog = filedialog.askopenfilename(
+                    title="选择图片文件",
+                    filetypes=[("Images", "*.png;*.jpg;*.jpeg;*.bmp;*.webp")]
+                )
+                root.destroy()
+                
+                if not file_path_dialog:
+                    print("❌ 未选择文件")
+                    return
+                try:
+                    image = Image.open(file_path_dialog)
+                    print(f"✅ 已加载图片: {os.path.basename(file_path_dialog)}")
+                except Exception as e:
+                    log.error(f"无法打开图片: {e}")
+                    return
+        except Exception as e:
+            log.error(f"获取图片失败: {e}")
+            return
+
+    try:
 
         # 2. 转 base64
         # 压缩图片以避免超出token限制或传输过慢
@@ -2916,7 +3002,11 @@ def smart_image_entry(client, app_token):
             print(f"  7. 🏦 账户: {'现金/私户' if data.get('is_cash') else '对公账户'}")
             print(f"  8. 🧾 发票: {data.get('has_ticket')}")
             
-            action = input("\n👉 输入 'y' 确认录入，输入数字(1-8)修改对应项，输入 'n' 取消: ").strip().lower()
+            if auto_confirm:
+                print("✅ 自动确认模式：直接录入")
+                action = 'y'
+            else:
+                action = input("\n👉 输入 'y' 确认录入，输入数字(1-8)修改对应项，输入 'n' 取消: ").strip().lower()
             
             if action == 'y':
                 break
@@ -3787,7 +3877,7 @@ def monitor_folder_mode(client, app_token):
         while True:
             # 扫描文件
             if os.path.exists(watch_dir):
-                files = [f for f in os.listdir(watch_dir) if f.lower().endswith(('.xlsx', '.xls')) and not f.startswith('~$')]
+                files = [f for f in os.listdir(watch_dir) if f.lower().endswith(('.xlsx', '.xls', '.png', '.jpg', '.jpeg', '.bmp')) and not f.startswith('~$')]
                 
                 if files:
                     print(f"\n⚡ 发现 {len(files)} 个新文件！开始处理...")
@@ -3799,19 +3889,26 @@ def monitor_folder_mode(client, app_token):
                         
                         print(f"▶️ 正在处理: {filename}")
                         try:
-                            # 默认作为数据导入
-                            is_bank_flow = False
-                            if "流水" in filename or "对账" in filename or "bank" in filename.lower():
-                                is_bank_flow = True
-                                
-                            if is_bank_flow:
-                                print(f"   🏦 识别为银行流水，启动对账模式...")
-                                reconcile_bank_flow(client, app_token, full_path)
-                                msg = f"银行流水 {filename} 对账完成！"
+                            # 图片处理
+                            if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')):
+                                print(f"   📸 识别为图片，启动 AI 记账...")
+                                smart_image_entry(client, app_token, file_path=full_path, auto_confirm=True)
+                                msg = f"图片 {filename} AI 记账完成！"
                             else:
-                                print(f"   📥 识别为业务数据，启动导入模式...")
-                                import_from_excel(client, app_token, excel_path=full_path)
-                                msg = f"业务数据 {filename} 导入成功！"
+                                # Excel 处理
+                                # 默认作为数据导入
+                                is_bank_flow = False
+                                if "流水" in filename or "对账" in filename or "bank" in filename.lower():
+                                    is_bank_flow = True
+                                    
+                                if is_bank_flow:
+                                    print(f"   🏦 识别为银行流水，启动对账模式...")
+                                    reconcile_bank_flow(client, app_token, full_path)
+                                    msg = f"银行流水 {filename} 对账完成！"
+                                else:
+                                    print(f"   📥 识别为业务数据，启动导入模式...")
+                                    import_from_excel(client, app_token, excel_path=full_path)
+                                    msg = f"业务数据 {filename} 导入成功！"
                                 
                             # 归档
                             move_to_archive(full_path)
@@ -3829,21 +3926,41 @@ def monitor_folder_mode(client, app_token):
         print("\n🛑 停止监听。")
         return
 
-def one_click_daily_work(client, app_token):
-    """一键完成日常工作：自动扫描文件 -> 导入/对账 -> 体检 -> 备份"""
-    print(f"\n{Color.HEADER}🚀 启动一键全自动日常工作流程...{Color.ENDC}")
+def one_click_daily_closing(client, app_token):
+    """一键日结：自动处理单据 -> 计提折旧 -> 税务测算 -> 缺票检查 -> 结账报告 -> 备份"""
+    print(f"\n{Color.HEADER}🚀 启动一键日结流程 (Daily Closing)...{Color.ENDC}")
     
-    # 1. 扫描当前目录下的 Excel 文件
+    summary = []
+    daily_log = [] # 报告详情
+    
+    # 1. 扫描当前目录下的 Excel 和 图片 文件
     import glob
-    all_files = [f for f in glob.glob("*.xlsx") if not f.startswith("~$") and not f.startswith("待补录") and not f.startswith("往来对账单")]
+    excel_files = [f for f in glob.glob("*.xlsx") if not f.startswith("~$") and not f.startswith("待补录") and not f.startswith("往来对账单") and not f.startswith("日结报告")]
+    image_files = [f for f in glob.glob("*.*") if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp'))]
+    
+    all_files = excel_files + image_files
     
     if not all_files:
-        print(f"{Color.WARNING}⚠️  当前目录下没有找到 Excel 文件，跳过导入/对账步骤。{Color.ENDC}")
+        print(f"{Color.WARNING}⚠️  当前目录下没有找到待处理文件。{Color.ENDC}")
+        summary.append("❌ 未发现新文件")
     else:
-        print(f"📂 发现 {len(all_files)} 个 Excel 文件，开始处理...")
+        print(f"📂 发现 {len(all_files)} 个待处理文件，开始处理...")
         for f in all_files:
             print(f"\n📄 正在处理文件: {Color.BOLD}{f}{Color.ENDC}")
             
+            # 图片处理
+            if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')):
+                print(f"   📸 识别为图片，建议进行 AI 记账")
+                if input("   ❓ 是否处理此图片? (y/n) [y]: ").strip().lower() != 'n':
+                    smart_image_entry(client, app_token, file_path=f, auto_confirm=True)
+                    summary.append(f"✅ 图片记账: {f}")
+                    if input("   ❓ 是否归档? (y/n) [y]: ").strip().lower() != 'n':
+                        move_to_archive(f)
+                else:
+                    summary.append(f"⏩ 跳过图片: {f}")
+                continue
+
+            # Excel 处理 (保留原有逻辑)
             # 智能判断建议
             suggestion = "3" # 默认跳过
             f_lower = f.lower()
@@ -3867,28 +3984,65 @@ def one_click_daily_work(client, app_token):
             
             if choice == '1':
                 import_from_excel(client, app_token, f)
-                # 询问归档
+                summary.append(f"✅ 导入: {f}")
                 if input("   ❓ 是否将文件移入 '2_已处理归档' 文件夹? (y/n) [y]: ").strip().lower() != 'n':
                     move_to_archive(f)
             elif choice == '2':
                 reconcile_bank_flow(client, app_token, f)
-                # 对账文件通常保留或归档
+                summary.append(f"✅ 对账: {f}")
                 if input("   ❓ 是否将文件移入 '2_已处理归档' 文件夹? (y/n) [y]: ").strip().lower() != 'n':
                     move_to_archive(f)
             else:
                 print("   ⏩ 已跳过")
+                summary.append(f"⏩ 跳过: {f}")
 
-    # 1.5 自动计提折旧 (新增)
+    # 1.5 自动计提折旧
     print(f"\n{Color.HEADER}📉 检查固定资产折旧...{Color.ENDC}")
     calculate_depreciation(client, app_token, auto_run=True)
 
-    # 2. 财务体检
+    # 2. 税务测算 (New)
+    print(f"\n{Color.HEADER}🧮 正在进行税务测算...{Color.ENDC}")
+    tax_msg = calculate_tax(client, app_token)
+    daily_log.append("\n【税务风险测算】\n" + str(tax_msg))
+
+    # 3. 缺票检查 (New)
+    print(f"\n{Color.HEADER}🎫 正在检查待补票据...{Color.ENDC}")
+    missing_count = export_missing_tickets(client, app_token, silent=True)
+    if missing_count > 0:
+        summary.append(f"⚠️ 发现 {missing_count} 笔待补票记录")
+        daily_log.append(f"\n【待补票据】\n发现 {missing_count} 笔支出未收发票，请及时催收！")
+    else:
+        summary.append("✅ 票据状态良好")
+        daily_log.append("\n【待补票据】\n目前没有待补票记录，非常棒！")
+
+    # 4. 财务体检
     print(f"\n{Color.HEADER}🏥 开始财务健康体检...{Color.ENDC}")
     financial_health_check(client, app_token)
     
-    # 3. 系统备份
+    # 5. 系统备份
     print(f"\n{Color.HEADER}💾 开始系统自动备份...{Color.ENDC}")
     backup_system_data()
+    
+    # 6. 生成日结报告
+    report_file = f"日结报告_{datetime.now().strftime('%Y%m%d')}.txt"
+    try:
+        with open(report_file, "w", encoding="utf-8") as f:
+            f.write(f"=== 飞书财务助手日结报告 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n\n")
+            f.write("【今日工作事项】\n")
+            if not summary:
+                f.write("无处理事项\n")
+            for s in summary:
+                f.write(f"- {s}\n")
+            f.write("\n")
+            f.write("\n".join(daily_log))
+            f.write("\n\n(本报告由飞书财务助手自动生成)")
+            
+        print(f"\n{Color.GREEN}========================================{Color.ENDC}")
+        print(f"{Color.GREEN}🎉 日结完成！报告已生成: {report_file}{Color.ENDC}")
+        print(f"{Color.GREEN}========================================{Color.ENDC}")
+        os.startfile(report_file)
+    except Exception as e:
+        log.error(f"生成报告失败: {e}")
     
     print(f"\n{Color.GREEN}✅ 一键流程全部完成！{Color.ENDC}")
 
@@ -3907,7 +4061,7 @@ def interactive_menu():
         print(f"==============================================={Color.ENDC}")
         
         print(f"\n{Color.CYAN}📝 记账录入{Color.ENDC}")
-        print("  00. 🚀 一键全自动 (导入+对账+体检) [推荐]")
+        print("  00. 🚀 一键日结 (自动处理+税务+体检+备份) [推荐]")
         print("  1. 智能截图记账 (OCR + AI)")
         print("  2. 智能文本记账 (微信/自然语言)")
         print("  3. 从 Excel 导入数据")
@@ -3933,7 +4087,7 @@ def interactive_menu():
         print("  17. 智能学习分类规则 (越用越聪明) [新]")
         print("  18. 快速查账 (关键词搜索) [新]")
         print("  19. 导出云端数据到 Excel [备份]")
-        print("  20. 启动文件夹监听模式 (挂机) [新]")
+        print("  20. 启动文件夹监听模式 (支持Excel/图片) [新]")
         
         print(f"\n{Color.CYAN}🛠️ 系统工具{Color.ENDC}")
         print("  95. 设置每日自动运行 (Windows任务) [新]")
@@ -3974,7 +4128,7 @@ def interactive_menu():
                  input(f"{Color.FAIL}❌ 初始化失败，按回车退出...{Color.ENDC}")
                  sys.exit(1)
                  
-        if choice == '00': one_click_daily_work(client, APP_TOKEN)
+        if choice == '00': one_click_daily_closing(client, APP_TOKEN)
         elif choice == '1': smart_image_entry(client, APP_TOKEN)
         elif choice == '2': smart_text_entry(client, APP_TOKEN)
         elif choice == '3': 
@@ -4453,7 +4607,7 @@ def main():
         log.info("🤖 自动运行模式启动...")
         client = init_clients()
         if client:
-            one_click_daily_work(client, APP_TOKEN)
+            one_click_daily_closing(client, APP_TOKEN)
         return
 
     if args.menu:
