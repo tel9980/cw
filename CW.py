@@ -4781,7 +4781,18 @@ def generate_partner_statement(client, app_token, start_date=None, end_date=None
     net_color = Color.GREEN if net >= 0 else Color.FAIL
     print(f"⚖️  净额 (收-付):      {net_color}{net:,.2f}{Color.ENDC}")
     print("-" * 40)
-    print(f"📝 共计 {len(partner_records)} 条记录")
+    
+    # --- 复制专用片段 ---
+    print(f"\n📋 {Color.BOLD}>>> 请复制下方内容发送给客户/供应商 <<<{Color.ENDC}")
+    print("----------------------------------------")
+    print(f"【对账单】{target_partner}")
+    print(f"统计期间：{date_desc}")
+    print(f"累计收款：{total_in:,.2f}")
+    print(f"累计付款：{total_out:,.2f}")
+    print(f"当前净额：{net:,.2f} ({'我方应收' if net > 0 else '我方应付' if net < 0 else '已结清'})")
+    print(f"明细附件：请查阅生成的 Excel/HTML 对账单")
+    print("----------------------------------------")
+    print(f"\n📝 共计 {len(partner_records)} 条记录")
     print("-" * 40)
     # ---------------------------
 
@@ -5830,6 +5841,7 @@ def manage_small_tools(client, app_token):
         print(f"\n{Color.BOLD}🧰 会计实用工具箱{Color.ENDC}")
         print("  1. 🔢 金额转大写 (壹万贰仟...)")
         print("  2. 🧮 税额计算器 (含税/不含税互转)")
+        print("  3. 📅 日期计算器 (账期推算)")
         print("  0. 返回主菜单")
         
         choice = input(f"👉 {Color.BOLD}请选择: {Color.ENDC}").strip()
@@ -5889,6 +5901,116 @@ def manage_small_tools(client, app_token):
                     print(f"   ✅ 税额:       {Color.OKGREEN}{tax:,.2f}{Color.ENDC}")
                     print(f"   ✅ 价税合计:   {Color.OKGREEN}{total:,.2f}{Color.ENDC}")
 
+        elif choice == '3':
+            print(f"\n{Color.UNDERLINE}📅 日期计算器{Color.ENDC}")
+            print("💡 示例: 输入 '30' (30天后) 或 '-7' (7天前)")
+            while True:
+                s = input("\n请输入天数 (0 返回): ").strip()
+                if s == '0': break
+                
+                try:
+                    days = int(s)
+                    target_date = datetime.now() + timedelta(days=days)
+                    desc = "后" if days > 0 else "前"
+                    print(f"👉 {abs(days)}天{desc}: {Color.OKGREEN}{target_date.strftime('%Y-%m-%d')} ({target_date.strftime('%A')}){Color.ENDC}")
+                except:
+                    print("❌ 无效天数")
+
+def register_voucher(client, app_token):
+    """手工录入凭证 (CLI Wizard)"""
+    print(f"\n{Color.HEADER}📝 手工录入凭证 (Voucher Entry){Color.ENDC}")
+    print("-----------------------------------------------")
+    
+    # 1. Date
+    default_date = datetime.now().strftime("%Y-%m-%d")
+    date_str = input(f"📅 日期 [默认 {default_date}]: ").strip()
+    if not date_str: date_str = default_date
+    try:
+        ts = int(datetime.strptime(date_str, "%Y-%m-%d").timestamp() * 1000)
+    except:
+        print("❌ 日期格式错误")
+        return
+
+    # 2. Type
+    print("\n请选择业务类型:")
+    print("  1. 收款 (+)")
+    print("  2. 付款 (-)")
+    print("  3. 费用 (-)")
+    t_map = {"1": "收款", "2": "付款", "3": "费用"}
+    t_choice = input("👉 选择 (1-3): ").strip()
+    if t_choice not in t_map: 
+        print("❌ 无效选择")
+        return
+    biz_type = t_map[t_choice]
+
+    # 3. Amount
+    amt_str = input("\n💰 金额 (正数): ").strip()
+    try:
+        # Simple eval for basic math like "100+200"
+        amount = float(eval(amt_str, {"__builtins__": None}, {}))
+    except:
+        print("❌ 金额错误")
+        return
+    
+    # 4. Partner
+    partner = input("\n👤 往来单位 (直接输入，留空为'散户'): ").strip()
+    if not partner: partner = "散户"
+    
+    # 5. Category
+    category = input("\n📂 费用归类 (如办公费/差旅费): ").strip()
+    if not category: category = "未分类"
+    
+    # 6. Remarks
+    remark = input("\n📝 备注摘要: ").strip()
+    
+    # 7. Invoice
+    has_invoice = "无票"
+    if input("\n🧾 是否有票? (y/n) [n]: ").strip().lower() == 'y':
+        has_invoice = "有票"
+        
+    # Confirm
+    print("\n--------------------------------")
+    print(f"日期: {date_str}")
+    print(f"类型: {biz_type}")
+    print(f"单位: {partner}")
+    print(f"科目: {category}")
+    print(f"金额: {amount:,.2f}")
+    print(f"备注: {remark}")
+    print("--------------------------------")
+    
+    if input("确认保存? (y/n): ").strip().lower() != 'y': return
+    
+    # Save
+    table_id = get_table_id_by_name(client, app_token, "日常台账表")
+    if not table_id: return
+    
+    fields = {
+        "记账日期": ts,
+        "业务类型": biz_type,
+        "费用归类": category,
+        "往来单位费用": partner,
+        "实际收付金额": amount,
+        "备注": remark,
+        "是否有票": has_invoice,
+        "是否现金": "否"
+    }
+    
+    try:
+        req = CreateAppTableRecordRequest.builder() \
+            .app_token(app_token) \
+            .table_id(table_id) \
+            .request_body(AppTableRecord.builder().fields(fields).build()) \
+            .build()
+            
+        resp = client.bitable.v1.app_table_record.create(req)
+        if resp.success():
+            print(f"\n✅ {Color.GREEN}凭证保存成功！{Color.ENDC}")
+        else:
+            print(f"\n❌ 保存失败: {resp.msg}")
+            
+    except Exception as e:
+        log.error(f"保存异常: {e}")
+
 def interactive_menu():
     """Python版交互主菜单"""
     # 启用 Windows ANSI 支持 (如果是 Windows)
@@ -5910,6 +6032,7 @@ def interactive_menu():
         print("  00. 🚀 一键日结 (自动处理+税务+体检+备份) [推荐]")
         print("  1. 智能截图记账 (OCR + AI)")
         print("  2. 智能文本记账 (微信/自然语言)")
+        print("  27. 凭证登记 (手工录入凭证) [新]")
         print("  3. 从 Excel 导入数据")
         
         print(f"\n{Color.CYAN}🏦 银行与对账{Color.ENDC}")
@@ -5919,6 +6042,7 @@ def interactive_menu():
         print("  24. 薪酬管理 (工资/个税/社保) [新]")
         print("  25. 发票管理 (进项/销项) [新]")
         print("  26. 加工费管理 (独立台账) [新]")
+        print("  28. 会计实用工具箱 (大写/税额/日期) [新]")
         print("  6. 查找待补票记录")
         
         print(f"\n{Color.CYAN}📊 报表与分析{Color.ENDC}")
@@ -5986,6 +6110,7 @@ def interactive_menu():
         if choice == '00': one_click_daily_closing(client, APP_TOKEN)
         elif choice == '1': smart_image_entry(client, APP_TOKEN)
         elif choice == '2': smart_text_entry(client, APP_TOKEN)
+        elif choice == '27': register_voucher(client, APP_TOKEN)
         elif choice == '3': 
              import_from_excel(client, APP_TOKEN, None)
              
