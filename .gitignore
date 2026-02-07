@@ -28,6 +28,14 @@ backup/
 利润表_*.xlsx
 往来对账单_*.xlsx
 待补录流水_*.xlsx
+往来对账单/
+查询报告/
+台账异常记录_*.xlsx
+未匹配流水_*.xlsx
+
+# Cache & Temp
+dashboard_cache.json
+test_result.txt
 
 # Logs
 sim_log.txt
