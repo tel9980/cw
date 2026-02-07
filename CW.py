@@ -5781,6 +5781,86 @@ def number_to_chinese(n):
     
     return s + ("".join(res) or "整")
 
+def draw_dashboard_ui():
+    """绘制字符画仪表盘"""
+    # 0. 获取数据
+    inc, exp, net = 0, 0, 0
+    cur_month = datetime.now().strftime("%Y-%m")
+    try:
+        if os.path.exists("dashboard_cache.json"):
+            with open("dashboard_cache.json", "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if data.get("month") == cur_month:
+                    inc = data.get("income", 0)
+                    exp = data.get("expense", 0)
+                    net = data.get("net", 0)
+    except: pass
+    
+    # 1. 待处理文件
+    watch_dir = os.path.join(os.getcwd(), "待处理单据")
+    pending_count = 0
+    if os.path.exists(watch_dir):
+        pending_count = len([f for f in os.listdir(watch_dir) if f.lower().endswith(('.xlsx', '.xls', '.csv', '.jpg', '.png'))])
+        
+    # 2. 最近备份
+    backup_dir = os.path.join(os.getcwd(), "财务数据备份")
+    last_backup = "无"
+    if os.path.exists(backup_dir):
+        try:
+            items = [os.path.join(backup_dir, d) for d in os.listdir(backup_dir)]
+            valid_backups = [f for f in items if os.path.isdir(f) or f.lower().endswith(('.xlsx', '.zip'))]
+            if valid_backups:
+                latest = max(valid_backups, key=os.path.getmtime)
+                last_backup = datetime.fromtimestamp(os.path.getmtime(latest)).strftime("%H:%M")
+        except: pass
+
+    # 3. 颜色
+    c_inc = Color.GREEN
+    c_exp = Color.FAIL
+    c_net = Color.OKBLUE if net >= 0 else Color.FAIL
+    c_rst = Color.ENDC
+    c_bld = Color.BOLD
+    
+    # 4. 绘制
+    # Width = 40 chars inside
+    # ╔══════════════════════════════════════╗
+    # ║ 📊 2026-02 财务概览                  ║
+    
+    lines = []
+    lines.append(f"{c_bld}╔════════════════════════════════════════════╗{c_rst}")
+    lines.append(f"{c_bld}║ 📊 {cur_month} 财务概览                        ║{c_rst}")
+    lines.append(f"{c_bld}╠════════════════════════════════════════════╣{c_rst}")
+    
+    # Income
+    s_inc = f"💰 收入: {inc:,.0f}"
+    lines.append(f"║ {c_inc}{s_inc:<39}{c_rst}║")
+    
+    # Expense
+    s_exp = f"💸 支出: {exp:,.0f}"
+    lines.append(f"║ {c_exp}{s_exp:<39}{c_rst}║")
+    
+    # Net
+    s_net = f"💴 净额: {net:+,.0f}"
+    lines.append(f"║ {c_net}{s_net:<39}{c_rst}║")
+    
+    lines.append(f"{c_bld}╠════════════════════════════════════════════╣{c_rst}")
+    
+    # Pending & Backup
+    # Split into two parts
+    p_color = Color.FAIL if pending_count > 0 else Color.OKGREEN
+    s_pend = f"🔔 待办: {pending_count}"
+    s_back = f"💾 备份: {last_backup}"
+    
+    # Padding calculation is tricky with ANSI codes, so we construct manually
+    # Inner width 40. "🔔 待办: 3" is roughly 10 visual width.
+    # Simple approach: standard text
+    
+    lines.append(f"║ {p_color}{s_pend:<16}{c_rst}    {Color.OKBLUE}{s_back:<16}{c_rst} ║")
+    
+    lines.append(f"{c_bld}╚════════════════════════════════════════════╝{c_rst}")
+    
+    return "\n".join(lines)
+
 def get_dashboard_status():
     """获取仪表盘状态 (财务概览/待办/备份)"""
     status_lines = []
@@ -6011,6 +6091,73 @@ def register_voucher(client, app_token):
     except Exception as e:
         log.error(f"保存异常: {e}")
 
+def manage_config_menu():
+    """配置管理菜单 (别名/规则)"""
+    while True:
+        print(f"\n{Color.HEADER}⚙️ 系统配置管理{Color.ENDC}")
+        print("--------------------------------")
+        print("  1. 往来单位别名管理 (Partner Aliases)")
+        print("  0. 返回主菜单")
+        
+        choice = input(f"\n👉 请选择: ").strip()
+        if choice == '0': break
+        
+        if choice == '1':
+            manage_partner_aliases()
+
+def manage_partner_aliases():
+    """往来单位别名管理 (CRUD)"""
+    json_file = "partner_aliases.json"
+    
+    while True:
+        # Load latest
+        aliases = {}
+        if os.path.exists(json_file):
+            try:
+                with open(json_file, "r", encoding="utf-8") as f:
+                    aliases = json.load(f)
+            except: pass
+            
+        print(f"\n{Color.UNDERLINE}👤 往来单位别名管理 ({len(aliases)} 条){Color.ENDC}")
+        print("  1. 📋 查看所有别名")
+        print("  2. ➕ 添加/修改别名")
+        print("  3. ❌ 删除别名")
+        print("  0. 返回")
+        
+        c = input("👉 请选择: ").strip()
+        if c == '0': break
+        
+        if c == '1':
+            print("\n--------------------------------")
+            print(f"{'关键词 (Excel)':<15} -> {'标准名称 (飞书)':<15}")
+            print("--------------------------------")
+            for k, v in aliases.items():
+                print(f"{k:<15} -> {Color.OKGREEN}{v}{Color.ENDC}")
+            print("--------------------------------")
+            input("按回车继续...")
+            
+        elif c == '2':
+            print("\n💡 提示: 输入 Excel 里的名字 (如 '张三') 和 飞书里的标准名 (如 'A客户')")
+            k = input("🔑 关键词 (Excel出现的名字): ").strip()
+            if not k: continue
+            v = input(f"🏷️ 标准名 (飞书里的名字) [当前: {aliases.get(k, '无')}]: ").strip()
+            if not v: continue
+            
+            aliases[k] = v
+            with open(json_file, "w", encoding="utf-8") as f:
+                json.dump(aliases, f, indent=4, ensure_ascii=False)
+            print(f"✅ 已保存: {k} -> {v}")
+            
+        elif c == '3':
+            k = input("🗑️ 请输入要删除的关键词: ").strip()
+            if k in aliases:
+                del aliases[k]
+                with open(json_file, "w", encoding="utf-8") as f:
+                    json.dump(aliases, f, indent=4, ensure_ascii=False)
+                print(f"✅ 已删除: {k}")
+            else:
+                print("❌ 找不到该关键词")
+
 def interactive_menu():
     """Python版交互主菜单"""
     # 启用 Windows ANSI 支持 (如果是 Windows)
@@ -6026,7 +6173,7 @@ def interactive_menu():
         print(f"==============================================={Color.ENDC}")
         
         # 显示仪表盘状态
-        print(f"\n{get_dashboard_status()}")
+        print(f"\n{draw_dashboard_ui()}")
         
         print(f"\n{Color.CYAN}📝 记账录入{Color.ENDC}")
         print("  00. 🚀 一键日结 (自动处理+税务+体检+备份) [推荐]")
@@ -6057,7 +6204,8 @@ def interactive_menu():
         print("  22. 一键年结 (全流程) [新]")
         print("  12. 计提固定资产折旧 [新]")
         print("  13. 税务统计")
-        print("  14. 往来单位与别名管理 [新]")
+        print("  14. 往来单位与别名管理 (Excel/手动) [新]")
+        print("  29. 系统配置管理 (别名/规则) [新]")
         print("  15. 系统设置 (税率/AI Key)")
         print("  16. 导出标准凭证 (财务软件用) [新]")
         print("  17. 智能学习分类规则 (越用越聪明) [新]")
@@ -6084,6 +6232,10 @@ def interactive_menu():
             print("👋 再见！")
             sys.exit(0)
         
+        elif choice == '29':
+            manage_config_menu()
+            continue
+            
         # [无需联网的功能优先处理]
         if choice == '95': 
             setup_auto_task()
