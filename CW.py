@@ -68,7 +68,7 @@ class FT:
     MODIFIED_USER = 1004
 
 # 加载环境变量
-load_dotenv()
+# load_dotenv() # Moved to after path config
 
 # -------------------------------------------------------------------------
 # 新增功能：启动引导向导
@@ -127,10 +127,15 @@ def select_file_interactively(pattern="*.xlsx", prompt="请选择文件"):
         root.withdraw() # 隐藏主窗口
         root.attributes('-topmost', True) # 置顶
         
+        # 优先打开待处理目录
+        init_dir = os.getcwd()
+        if 'PENDING_DIR' in globals() and os.path.exists(PENDING_DIR):
+            init_dir = PENDING_DIR
+        
         file_path = filedialog.askopenfilename(
             title=prompt,
             filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
-            initialdir=os.getcwd()
+            initialdir=init_dir
         )
         root.destroy()
         
@@ -151,7 +156,16 @@ def select_file_interactively(pattern="*.xlsx", prompt="请选择文件"):
         print(f"⚠️ GUI 启动失败 ({e})，切换回列表模式。")
 
     import glob
+    # 搜索当前目录和待处理目录
     files = [f for f in glob.glob(pattern) if not f.startswith("~$")]
+    
+    if 'PENDING_DIR' in globals() and os.path.exists(PENDING_DIR):
+        pending_files = [os.path.join(PENDING_DIR, f) for f in os.listdir(PENDING_DIR) 
+                         if f.lower().endswith('.xlsx') and not f.startswith("~$")]
+        files.extend(pending_files)
+        
+    # 去重
+    files = list(set(files))
     
     if not files:
         return None
@@ -176,15 +190,109 @@ def select_file(title="请选择Excel文件"):
     root = tk.Tk()
     root.withdraw() # 隐藏主窗口
     root.attributes('-topmost', True) # 置顶
+    
+    # 优先打开待处理目录
+    init_dir = os.getcwd()
+    if 'PENDING_DIR' in globals() and os.path.exists(PENDING_DIR):
+        init_dir = PENDING_DIR
+            
     file_path = filedialog.askopenfilename(
         title=title,
-        filetypes=[("Excel files", "*.xlsx;*.xls")]
+        filetypes=[("Excel files", "*.xlsx;*.xls")],
+        initialdir=init_dir
     )
     root.destroy()
     return file_path
 
+# -------------------------- 路径配置 --------------------------
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__)) if getattr(sys, 'frozen', False) else os.getcwd()
+DATA_ROOT = os.path.join(ROOT_DIR, "财务数据")
+CONFIG_DIR = os.path.join(DATA_ROOT, "配置文件")
+REPORT_DIR = os.path.join(DATA_ROOT, "查询报告")
+BACKUP_DIR = os.path.join(DATA_ROOT, "自动备份")
+TEMPLATE_DIR = os.path.join(DATA_ROOT, "Excel模版")
+LOG_DIR = os.path.join(DATA_ROOT, "运行日志")
+ARCHIVE_DIR = os.path.join(DATA_ROOT, "已处理归档")
+PENDING_DIR = os.path.join(DATA_ROOT, "待处理单据")
+
+# 确保目录存在
+for d in [DATA_ROOT, CONFIG_DIR, REPORT_DIR, BACKUP_DIR, TEMPLATE_DIR, LOG_DIR, ARCHIVE_DIR, PENDING_DIR]:
+    os.makedirs(d, exist_ok=True)
+
+# 加载环境变量 (优先加载配置文件目录下的，兼容根目录)
+env_path_config = os.path.join(CONFIG_DIR, ".env")
+env_path_data = os.path.join(DATA_ROOT, ".env") # Support env in Data Root
+env_path_root = os.path.join(ROOT_DIR, ".env")
+
+if os.path.exists(env_path_config):
+    load_dotenv(env_path_config)
+    print(f"🔧 已加载配置: {env_path_config}")
+elif os.path.exists(env_path_data):
+    load_dotenv(env_path_data)
+    print(f"🔧 已加载配置: {env_path_data}")
+elif os.path.exists(env_path_root):
+    load_dotenv(env_path_root)
+    
+# 文件路径常量
+FILE_CATEGORY_RULES = os.path.join(CONFIG_DIR, "category_rules.json")
+FILE_PARTNER_ALIASES = os.path.join(CONFIG_DIR, "partner_aliases.json")
+FILE_VOUCHER_TEMPLATES = os.path.join(CONFIG_DIR, "voucher_templates.json")
+FILE_AI_CACHE = os.path.join(DATA_ROOT, "ai_category_cache.json")
+FILE_DASHBOARD_CACHE = os.path.join(DATA_ROOT, "dashboard_cache.json")
+
+# 自动迁移旧文件
+def migrate_legacy_files():
+    # 1. Migrate Files
+    moves = [
+        ("category_rules.json", FILE_CATEGORY_RULES),
+        ("partner_aliases.json", FILE_PARTNER_ALIASES),
+        ("voucher_templates.json", FILE_VOUCHER_TEMPLATES),
+        ("ai_category_cache.json", FILE_AI_CACHE),
+        ("dashboard_cache.json", FILE_DASHBOARD_CACHE),
+    ]
+    for src_name, dst_path in moves:
+        src = os.path.join(ROOT_DIR, src_name)
+        if os.path.exists(src) and not os.path.exists(dst_path):
+            try:
+                shutil.move(src, dst_path)
+                print(f"📦 已迁移: {src_name} -> {dst_path}")
+            except: pass
+
+    # 2. Migrate Directories
+    dir_moves = [
+        ("待处理单据", PENDING_DIR),
+        ("财务数据备份", BACKUP_DIR),
+        ("查询报告", REPORT_DIR),
+        ("Excel模版", TEMPLATE_DIR),
+        ("运行日志", LOG_DIR),
+        ("已处理归档", ARCHIVE_DIR)
+    ]
+    for src_name, dst_path in dir_moves:
+        src = os.path.join(ROOT_DIR, src_name)
+        # Avoid moving if src is same as dst (e.g. if ROOT_DIR is already DATA_ROOT's parent correctly configured)
+        if os.path.exists(src) and os.path.abspath(src) != os.path.abspath(dst_path):
+            try:
+                if not os.path.exists(dst_path):
+                    shutil.move(src, dst_path)
+                    print(f"📦 已迁移目录: {src_name} -> {dst_path}")
+                else:
+                    # Merge contents
+                    for item in os.listdir(src):
+                        s = os.path.join(src, item)
+                        d = os.path.join(dst_path, item)
+                        if not os.path.exists(d):
+                            shutil.move(s, d)
+                    # Try remove empty src dir
+                    try:
+                        os.rmdir(src)
+                    except: pass
+            except Exception as e:
+                pass
+
+migrate_legacy_files()
+
 # -------------------------- 核心配置 --------------------------
-LOG_FILE = f"feishu_table_log_{datetime.now().strftime('%Y%m%d')}.log"
+LOG_FILE = os.path.join(LOG_DIR, f"feishu_table_log_{datetime.now().strftime('%Y%m%d')}.log")
 TEST_PRODUCT_COUNT = 10
 TEST_LEDGER_COUNT = 5
 # TABLE_NAME 在此处意为 Base Name (应用名称)
@@ -193,8 +301,8 @@ BOT_WEBHOOK = os.getenv("BOT_WEBHOOK", "")
 WIKI_LINK = os.getenv("WIKI_LINK", "")
 WIKI_EXCEPTION = f"{WIKI_LINK}# 异常排查" if WIKI_LINK else "请联系管理员"
 WIKI_TAX = f"{WIKI_LINK}# 税务申报" if WIKI_LINK else "请联系管理员"
-LOCAL_FOLDER = "财务数据备份"
-os.makedirs(LOCAL_FOLDER, exist_ok=True)
+LOCAL_FOLDER = BACKUP_DIR
+# os.makedirs(LOCAL_FOLDER, exist_ok=True) # Already created in path config
 
 # 业务配置
 VAT_RATE = float(os.getenv("VAT_RATE", 3))
@@ -651,9 +759,9 @@ def load_category_rules():
         "微信提现": "现金互转"
     }
     
-    if os.path.exists("category_rules.json"):
+    if os.path.exists(FILE_CATEGORY_RULES):
         try:
-            with open("category_rules.json", "r", encoding="utf-8") as f:
+            with open(FILE_CATEGORY_RULES, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
             log.warning(f"⚠️ 规则文件读取失败: {e}，使用默认规则")
@@ -661,7 +769,7 @@ def load_category_rules():
     else:
         # 创建默认文件方便用户修改
         try:
-            with open("category_rules.json", "w", encoding="utf-8") as f:
+            with open(FILE_CATEGORY_RULES, "w", encoding="utf-8") as f:
                 json.dump(default_rules, f, ensure_ascii=False, indent=4)
         except:
             pass
@@ -672,9 +780,9 @@ AUTO_CATEGORY_RULES = load_category_rules()
 def load_partner_aliases():
     """加载往来单位别名映射"""
     default_aliases = {}
-    if os.path.exists("partner_aliases.json"):
+    if os.path.exists(FILE_PARTNER_ALIASES):
         try:
-            with open("partner_aliases.json", "r", encoding="utf-8") as f:
+            with open(FILE_PARTNER_ALIASES, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
             log.warning(f"⚠️ 别名文件读取失败: {e}")
@@ -796,7 +904,7 @@ def read_excel_smart(file_path):
 
 # 智能分类：历史记忆库
 HISTORY_CATEGORY_MAP = {}
-AI_CACHE_FILE = "ai_category_cache.json"
+AI_CACHE_FILE = FILE_AI_CACHE
 AI_CACHE_MAP = {}
 AI_CACHE_LOADED = False
 
@@ -3589,13 +3697,12 @@ def daily_briefing(client, app_token):
             "expense": month_cost,
             "net": net_cash
         }
-        with open("dashboard_cache.json", "w", encoding="utf-8") as f:
-            json.dump(cache_data, f)
-    except:
-        pass
+        with open(FILE_DASHBOARD_CACHE, "w", encoding="utf-8") as f:
+            json.dump(cache_data, f, ensure_ascii=False)
+    except: pass
 
     # [V9.4] 检查待处理单据
-    watch_dir = os.path.join(os.getcwd(), "待处理单据")
+    watch_dir = PENDING_DIR
     if os.path.exists(watch_dir):
         pending_files = [f for f in os.listdir(watch_dir) if f.lower().endswith(('.xlsx', '.xls'))]
         if pending_files:
@@ -3666,6 +3773,49 @@ def daily_briefing(client, app_token):
     log.info("✅ 每日简报已推送", extra={"solution": "查看飞书"})
     return True
 
+def update_dashboard_cache_silent(client, app_token):
+    """静默更新仪表盘缓存 (不发送通知，不打印日志)"""
+    try:
+        table_id = get_table_id_by_name(client, app_token, "日常台账表")
+        if not table_id: return
+
+        # 获取本月数据
+        now = datetime.now()
+        start_of_month = datetime(now.year, now.month, 1)
+        start_ts = int(start_of_month.timestamp() * 1000)
+        filter_info = f'CurrentValue.[记账日期]>={start_ts}'
+        
+        records = get_all_records(client, app_token, table_id, filter_info=filter_info)
+        
+        month_income = 0.0
+        month_cost = 0.0
+        
+        for r in records:
+            fields = r.fields
+            amt = float(fields.get("实际收付金额", 0))
+            biz_type = fields.get("业务类型", "")
+            
+            if biz_type == "收款":
+                month_income += amt
+            elif biz_type in ["付款", "费用"]:
+                month_cost += amt
+                
+        net_cash = month_income - month_cost
+        
+        cache_data = {
+            "updated_at": now.strftime("%Y-%m-%d %H:%M"),
+            "month": now.strftime("%Y-%m"),
+            "income": month_income,
+            "expense": month_cost,
+            "net": net_cash
+        }
+        
+        with open(FILE_DASHBOARD_CACHE, "w", encoding="utf-8") as f:
+            json.dump(cache_data, f, ensure_ascii=False)
+            
+    except Exception:
+        pass
+
 # 显示数据后台链接
 def show_cloud_urls(client, app_token):
     print("\n🌐 飞书云端数据后台 (请复制链接在浏览器打开):")
@@ -3679,7 +3829,7 @@ def show_cloud_urls(client, app_token):
             
     print("\n💡 提示:")
     print("1. 往来单位、产品信息、银行账户等**基础档案**，请直接在网页端修改。")
-    print("2. 自动分类规则，请修改本地的 category_rules.json 文件。")
+    print(f"2. 自动分类规则，请修改本地的 {FILE_CATEGORY_RULES} 文件。")
     print("3. 税率、容差等参数，请使用 [8. 系统设置] 修改。")
     
     # 尝试自动打开
@@ -4245,7 +4395,7 @@ def learn_category_rules(client, app_token):
         # 更新规则文件
         import json
         try:
-            with open("category_rules.json", "r", encoding="utf-8") as f:
+            with open(FILE_CATEGORY_RULES, "r", encoding="utf-8") as f:
                 rules = json.load(f)
         except:
             rules = {}
@@ -4256,7 +4406,7 @@ def learn_category_rules(client, app_token):
             AUTO_CATEGORY_RULES[k] = v # 更新内存
             count += 1
             
-        with open("category_rules.json", "w", encoding="utf-8") as f:
+        with open(FILE_CATEGORY_RULES, "w", encoding="utf-8") as f:
             json.dump(rules, f, ensure_ascii=False, indent=4)
             
         print(f"✅ 已成功添加 {count} 条新规则！下次记账更智能。")
@@ -4460,7 +4610,7 @@ def manage_aliases():
             
             # 保存
             try:
-                with open("partner_aliases.json", "w", encoding="utf-8") as f:
+                with open(FILE_PARTNER_ALIASES, "w", encoding="utf-8") as f:
                     json.dump(PARTNER_ALIASES, f, ensure_ascii=False, indent=4)
                 print(f"✅ 已添加: {alias} -> {real_name}")
             except Exception as e:
@@ -4472,7 +4622,7 @@ def manage_aliases():
                 del PARTNER_ALIASES[alias]
                 # 保存
                 try:
-                    with open("partner_aliases.json", "w", encoding="utf-8") as f:
+                    with open(FILE_PARTNER_ALIASES, "w", encoding="utf-8") as f:
                         json.dump(PARTNER_ALIASES, f, ensure_ascii=False, indent=4)
                     print(f"✅ 已删除: {alias}")
                 except Exception as e:
@@ -4513,7 +4663,7 @@ def manage_aliases():
             if count > 0:
                 # Save
                 try:
-                    with open("partner_aliases.json", "w", encoding="utf-8") as f:
+                    with open(FILE_PARTNER_ALIASES, "w", encoding="utf-8") as f:
                         json.dump(PARTNER_ALIASES, f, ensure_ascii=False, indent=4)
                     print(f"✅ 成功导入 {count} 条别名！")
                 except Exception as e:
@@ -4564,7 +4714,7 @@ def manage_aliases():
                         
                 if count > 0:
                      # Save
-                    with open("partner_aliases.json", "w", encoding="utf-8") as f:
+                    with open(FILE_PARTNER_ALIASES, "w", encoding="utf-8") as f:
                         json.dump(PARTNER_ALIASES, f, ensure_ascii=False, indent=4)
                     print(f"✅ 成功导入 {count} 条别名！")
                 else:
@@ -5385,7 +5535,7 @@ def backup_system_data(client=None, app_token=None):
 
 def move_to_archive(filename):
     """归档文件"""
-    target_dir = "2_已处理归档"
+    target_dir = ARCHIVE_DIR
     if not os.path.exists(target_dir):
         os.makedirs(target_dir)
     try:
@@ -5437,7 +5587,7 @@ def move_to_error(filename, error_msg=""):
 
 def monitor_folder_mode(client, app_token):
     """自动监听文件夹模式"""
-    watch_dir = "待处理单据"
+    watch_dir = PENDING_DIR
     watch_dir_abs = os.path.abspath(watch_dir)
     if not os.path.exists(watch_dir):
         os.makedirs(watch_dir)
@@ -5586,9 +5736,28 @@ def one_click_daily_closing(client, app_token):
     
     # 1. 扫描当前目录下的 Excel 和 图片 文件
     import glob
-    excel_files = [f for f in glob.glob("*.xlsx") if not f.startswith("~$") and not f.startswith("待补录") and not f.startswith("往来对账单") and not f.startswith("日结报告")]
-    image_files = [f for f in glob.glob("*.*") if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp'))]
+    # 修改：扫描 PENDING_DIR 目录
+    search_path = PENDING_DIR
+    if not os.path.exists(search_path):
+        os.makedirs(search_path)
+        
+    excel_files = []
+    image_files = []
     
+    # 扫描 PENDING_DIR
+    excel_files.extend([os.path.join(search_path, f) for f in os.listdir(search_path) if f.lower().endswith(('.xlsx', '.xls')) and not f.startswith("~$")])
+    image_files.extend([os.path.join(search_path, f) for f in os.listdir(search_path) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp'))])
+    
+    # 兼容根目录（为了方便用户过渡，也扫描根目录，但建议用户用新文件夹）
+    root_excels = [f for f in glob.glob("*.xlsx") if not f.startswith("~$") and not f.startswith("待补录") and not f.startswith("往来对账单") and not f.startswith("日结报告")]
+    root_images = [f for f in glob.glob("*.*") if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp'))]
+    
+    # 如果根目录有文件，提示用户
+    if root_excels or root_images:
+        print(f"{Color.WARNING}⚠️  提示：建议将文件放入 '{os.path.basename(PENDING_DIR)}' 文件夹中，系统管理更规范。{Color.ENDC}")
+        excel_files.extend(root_excels)
+        image_files.extend(root_images)
+
     all_files = excel_files + image_files
     
     if not all_files:
@@ -5636,12 +5805,12 @@ def one_click_daily_closing(client, app_token):
             if choice == '1':
                 import_from_excel(client, app_token, f)
                 summary.append(f"✅ 导入: {f}")
-                if input("   ❓ 是否将文件移入 '2_已处理归档' 文件夹? (y/n) [y]: ").strip().lower() != 'n':
+                if input("   ❓ 是否将文件移入 '已处理归档' 文件夹? (y/n) [y]: ").strip().lower() != 'n':
                     move_to_archive(f)
             elif choice == '2':
                 reconcile_bank_flow(client, app_token, f)
                 summary.append(f"✅ 对账: {f}")
-                if input("   ❓ 是否将文件移入 '2_已处理归档' 文件夹? (y/n) [y]: ").strip().lower() != 'n':
+                if input("   ❓ 是否将文件移入 '已处理归档' 文件夹? (y/n) [y]: ").strip().lower() != 'n':
                     move_to_archive(f)
             else:
                 print("   ⏩ 已跳过")
@@ -5787,8 +5956,8 @@ def draw_dashboard_ui():
     inc, exp, net = 0, 0, 0
     cur_month = datetime.now().strftime("%Y-%m")
     try:
-        if os.path.exists("dashboard_cache.json"):
-            with open("dashboard_cache.json", "r", encoding="utf-8") as f:
+        if os.path.exists(FILE_DASHBOARD_CACHE):
+            with open(FILE_DASHBOARD_CACHE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if data.get("month") == cur_month:
                     inc = data.get("income", 0)
@@ -5797,13 +5966,13 @@ def draw_dashboard_ui():
     except: pass
     
     # 1. 待处理文件
-    watch_dir = os.path.join(os.getcwd(), "待处理单据")
+    watch_dir = PENDING_DIR
     pending_count = 0
     if os.path.exists(watch_dir):
         pending_count = len([f for f in os.listdir(watch_dir) if f.lower().endswith(('.xlsx', '.xls', '.csv', '.jpg', '.png'))])
         
     # 2. 最近备份
-    backup_dir = os.path.join(os.getcwd(), "财务数据备份")
+    backup_dir = BACKUP_DIR
     last_backup = "无"
     if os.path.exists(backup_dir):
         try:
@@ -5867,8 +6036,8 @@ def get_dashboard_status():
     
     # 0. 财务概览 (本月)
     try:
-        if os.path.exists("dashboard_cache.json"):
-            with open("dashboard_cache.json", "r", encoding="utf-8") as f:
+        if os.path.exists(FILE_DASHBOARD_CACHE):
+            with open(FILE_DASHBOARD_CACHE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 cur_month = datetime.now().strftime("%Y-%m")
                 if data.get("month") == cur_month:
@@ -5886,7 +6055,7 @@ def get_dashboard_status():
         pass
     
     # 1. 检查待处理文件
-    watch_dir = os.path.join(os.getcwd(), "待处理单据")
+    watch_dir = PENDING_DIR
     pending_count = 0
     if os.path.exists(watch_dir):
         pending_files = [f for f in os.listdir(watch_dir) if f.lower().endswith(('.xlsx', '.xls', '.csv', '.jpg', '.png'))]
@@ -5922,6 +6091,8 @@ def manage_small_tools(client, app_token):
         print("  1. 🔢 金额转大写 (壹万贰仟...)")
         print("  2. 🧮 税额计算器 (含税/不含税互转)")
         print("  3. 📅 日期计算器 (账期推算)")
+        print("  4. 📥 生成 Excel 导入模板 [新]")
+        print("  5. 📤 导出最新备份到桌面 [新]")
         print("  0. 返回主菜单")
         
         choice = input(f"👉 {Color.BOLD}请选择: {Color.ENDC}").strip()
@@ -5996,14 +6167,189 @@ def manage_small_tools(client, app_token):
                 except:
                     print("❌ 无效天数")
 
+        elif choice == '4':
+            generate_excel_template()
+
+        elif choice == '5':
+            print(f"\n{Color.UNDERLINE}📤 导出最新备份{Color.ENDC}")
+            backup_root = BACKUP_DIR
+            if not os.path.exists(backup_root):
+                print("❌ 没有找到备份记录")
+                continue
+                
+            # Find latest
+            try:
+                items = [os.path.join(backup_root, d) for d in os.listdir(backup_root)]
+                valid = [d for d in items if os.path.isdir(d) or d.endswith('.zip')]
+                if not valid:
+                    print("❌ 没有找到有效备份")
+                    continue
+                    
+                latest = max(valid, key=os.path.getmtime)
+                fname = os.path.basename(latest)
+                
+                # Desktop path
+                desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+                target = os.path.join(desktop, fname)
+                
+                import shutil
+                if os.path.isdir(latest):
+                    if os.path.exists(target):
+                        shutil.rmtree(target)
+                    shutil.copytree(latest, target)
+                else:
+                    shutil.copy2(latest, target)
+                    
+                print(f"✅ 已导出到桌面: {Color.GREEN}{target}{Color.ENDC}")
+            except Exception as e:
+                print(f"❌ 导出失败: {e}")
+
+def generate_excel_template():
+    """生成 Excel 导入模板"""
+    print(f"\n{Color.UNDERLINE}📥 生成 Excel 导入模板{Color.ENDC}")
+    try:
+        import pandas as pd
+        
+        # 1. 定义标准列名
+        columns = ["记账日期", "业务类型", "费用归类", "实际收付金额", "往来单位费用", "备注", "是否有票", "是否现金"]
+        
+        # 2. 创建示例数据
+        data = [
+            ["2024-01-01", "收款", "", 10000, "客户A", "货款", "有票", "否"],
+            ["2024-01-02", "付款", "原材料采购", 5000, "供应商B", "采购材料", "有票", "否"],
+            ["2024-01-03", "费用", "办公费", 200, "京东", "买纸笔", "有票", "否"],
+            ["2024-01-04", "费用", "差旅费-交通", 50, "滴滴", "打车去税务局", "无票", "否"]
+        ]
+        
+        df = pd.DataFrame(data, columns=columns)
+        
+        # 3. 保存文件
+        if not os.path.exists(TEMPLATE_DIR):
+            os.makedirs(TEMPLATE_DIR)
+            
+        fname = os.path.join(TEMPLATE_DIR, f"导入模板_{datetime.now().strftime('%Y%m%d')}.xlsx")
+        
+        # 使用 ExcelWriter 设置列宽
+        with pd.ExcelWriter(fname, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name="日常台账表")
+            
+        print(f"✅ 模板已生成: {Color.OKGREEN}{fname}{Color.ENDC}")
+        # 尝试打开文件夹
+        try:
+            os.startfile(TEMPLATE_DIR)
+        except:
+            pass
+            
+            # 尝试调整列宽
+            worksheet = writer.sheets['日常台账表']
+            for i, col in enumerate(columns):
+                worksheet.column_dimensions[chr(65+i)].width = 15
+                
+        print(f"✅ 模板已生成: {Color.GREEN}{fname}{Color.ENDC}")
+        print("💡 提示: 请在模板中填入数据，然后使用 '3. 从 Excel 导入数据' 功能。")
+        
+        # 尝试打开文件夹
+        try:
+            os.startfile(os.getcwd())
+        except: pass
+        
+    except Exception as e:
+        print(f"❌ 生成失败: {e}")
+
+
+def load_voucher_templates():
+    """加载凭证模板"""
+    if os.path.exists(FILE_VOUCHER_TEMPLATES):
+        try:
+            with open(FILE_VOUCHER_TEMPLATES, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except: pass
+    return {}
+
+def save_voucher_templates(templates):
+    """保存凭证模板"""
+    try:
+        with open(FILE_VOUCHER_TEMPLATES, "w", encoding="utf-8") as f:
+            json.dump(templates, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"❌ 保存模板失败: {e}")
+
+def update_dashboard_cache_silent(client, app_token):
+    """静默更新仪表盘缓存 (不打印日志)"""
+    try:
+        table_id = get_table_id_by_name(client, app_token, "日常台账表")
+        if not table_id: return
+
+        cur_month = datetime.now().strftime("%Y-%m")
+        start_date = datetime.now().replace(day=1).strftime("%Y-%m-%d")
+        
+        # 获取本月数据
+        # 这里为了速度，我们只获取本月的
+        # 注意：get_all_records 默认没有过滤日期，我们需要手动过滤或者用 search
+        # 为了简单，我们复用 get_all_records 但只处理本月
+        
+        records = get_all_records(client, app_token, table_id, field_names=["记账日期", "实际收付金额", "业务类型"])
+        
+        inc = 0.0
+        exp = 0.0
+        
+        for r in records:
+            f = r.fields
+            try:
+                ts = f.get("记账日期", 0)
+                d_str = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m")
+                if d_str == cur_month:
+                    val = float(f.get("实际收付金额", 0))
+                    b_type = f.get("业务类型", "")
+                    
+                    if b_type == "收款":
+                        inc += val
+                    elif b_type in ["付款", "费用"]:
+                        exp += val
+            except: pass
+            
+        net = inc - exp
+        
+        data = {
+            "month": cur_month,
+            "income": inc,
+            "expense": exp,
+            "net": net,
+            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        
+        with open(FILE_DASHBOARD_CACHE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
+            
+    except Exception:
+        pass # Silent
+
 def register_voucher(client, app_token):
-    """手工录入凭证 (CLI Wizard)"""
+    """手工录入凭证 (CLI Wizard) - 支持模板"""
     print(f"\n{Color.HEADER}📝 手工录入凭证 (Voucher Entry){Color.ENDC}")
     print("-----------------------------------------------")
     
+    # 0. Load Template Option
+    templates = load_voucher_templates()
+    template_data = None
+    
+    if templates:
+        print(f"{Color.CYAN}📋 可用模板:{Color.ENDC}")
+        t_keys = list(templates.keys())
+        for idx, k in enumerate(t_keys):
+            t = templates[k]
+            print(f"  {idx+1}. {k} ({t.get('type', '')} {t.get('amount', '')})")
+        print("  0. 不使用模板")
+        
+        t_choice = input(f"\n👉 选择模板 (0-{len(t_keys)}): ").strip()
+        if t_choice.isdigit() and 1 <= int(t_choice) <= len(t_keys):
+            key = t_keys[int(t_choice)-1]
+            template_data = templates[key]
+            print(f"✅ 已加载模板: {key}")
+    
     # 1. Date
     default_date = datetime.now().strftime("%Y-%m-%d")
-    date_str = input(f"📅 日期 [默认 {default_date}]: ").strip()
+    date_str = input(f"\n1. 📅 日期 [{default_date}]: ").strip()
     if not date_str: date_str = default_date
     try:
         ts = int(datetime.strptime(date_str, "%Y-%m-%d").timestamp() * 1000)
@@ -6012,55 +6358,67 @@ def register_voucher(client, app_token):
         return
 
     # 2. Type
-    print("\n请选择业务类型:")
+    default_type = template_data.get('type', '费用') if template_data else '费用'
+    print(f"\n2. 🏷️ 业务类型 (当前默认: {default_type})")
     print("  1. 收款 (+)")
     print("  2. 付款 (-)")
     print("  3. 费用 (-)")
     t_map = {"1": "收款", "2": "付款", "3": "费用"}
-    t_choice = input("👉 选择 (1-3): ").strip()
-    if t_choice not in t_map: 
-        print("❌ 无效选择")
-        return
-    biz_type = t_map[t_choice]
+    
+    t_input = input("👉 选择 (1-3) 或直接回车: ").strip()
+    if t_input in t_map:
+        biz_type = t_map[t_input]
+    else:
+        biz_type = default_type
 
     # 3. Amount
-    amt_str = input("\n💰 金额 (正数): ").strip()
+    default_amt = str(template_data.get('amount', '')) if template_data else ''
+    amt_prompt = f"[{default_amt}]" if default_amt else ""
+    amt_str = input(f"\n3. 💰 金额 {amt_prompt}: ").strip()
+    if not amt_str and default_amt: amt_str = default_amt
+    
     try:
-        # Simple eval for basic math like "100+200"
         amount = float(eval(amt_str, {"__builtins__": None}, {}))
     except:
         print("❌ 金额错误")
         return
-    
+
     # 4. Partner
-    partner = input("\n👤 往来单位 (直接输入，留空为'散户'): ").strip()
-    if not partner: partner = "散户"
-    
+    default_partner = template_data.get('partner', '') if template_data else ''
+    partner_prompt = f"[{default_partner}]" if default_partner else ""
+    partner = input(f"\n4. 👤 往来单位 {partner_prompt}: ").strip()
+    if not partner: partner = default_partner if default_partner else "散户"
+
     # 5. Category
-    category = input("\n📂 费用归类 (如办公费/差旅费): ").strip()
-    if not category: category = "未分类"
-    
-    # 6. Remarks
-    remark = input("\n📝 备注摘要: ").strip()
-    
+    default_cat = template_data.get('category', '') if template_data else ''
+    cat_prompt = f"[{default_cat}]" if default_cat else ""
+    category = input(f"\n5. 📂 费用归类 {cat_prompt}: ").strip()
+    if not category: category = default_cat if default_cat else "未分类"
+
+    # 6. Remark
+    default_remark = template_data.get('remark', '') if template_data else ''
+    remark_prompt = f"[{default_remark}]" if default_remark else ""
+    remark = input(f"\n6. 📝 备注摘要 {remark_prompt}: ").strip()
+    if not remark: remark = default_remark
+
     # 7. Invoice
     has_invoice = "无票"
-    if input("\n🧾 是否有票? (y/n) [n]: ").strip().lower() == 'y':
+    if input("\n7. 🧾 是否有票? (y/n) [n]: ").strip().lower() == 'y':
         has_invoice = "有票"
-        
-    # Confirm
-    print("\n--------------------------------")
-    print(f"日期: {date_str}")
-    print(f"类型: {biz_type}")
-    print(f"单位: {partner}")
-    print(f"科目: {category}")
-    print(f"金额: {amount:,.2f}")
-    print(f"备注: {remark}")
-    print("--------------------------------")
+
+    # Review
+    print(f"\n{Color.BOLD}👀 确认信息:{Color.ENDC}")
+    print(f"  📅 日期: {date_str}")
+    print(f"  🏷️ 类型: {biz_type}")
+    print(f"  💰 金额: {amount:,.2f}")
+    print(f"  🏢 单位: {partner}")
+    print(f"  📂 分类: {category}")
+    print(f"  📝 备注: {remark}")
+    print(f"  🧾 发票: {has_invoice}")
     
-    if input("确认保存? (y/n): ").strip().lower() != 'y': return
-    
-    # Save
+    if input("\n确认保存吗? (y/n): ").strip().lower() != 'y': return
+
+    # Save to Feishu
     table_id = get_table_id_by_name(client, app_token, "日常台账表")
     if not table_id: return
     
@@ -6085,11 +6443,99 @@ def register_voucher(client, app_token):
         resp = client.bitable.v1.app_table_record.create(req)
         if resp.success():
             print(f"\n✅ {Color.GREEN}凭证保存成功！{Color.ENDC}")
-        else:
-            print(f"\n❌ 保存失败: {resp.msg}")
             
+            # Silent Update Dashboard
+            print("⏳ 正在更新仪表盘...", end="", flush=True)
+            update_dashboard_cache_silent(client, app_token)
+            print("\r" + " " * 30 + "\r", end="", flush=True)
+            
+            # Save as Template Option
+            if input("\n💾 是否保存为常用模板? (y/n): ").strip().lower() == 'y':
+                t_name = input("请输入模板名称 (如 '每月房租'): ").strip()
+                if t_name:
+                    new_t = {
+                        "type": biz_type,
+                        "category": category,
+                        "amount": amount,
+                        "partner": partner,
+                        "remark": remark
+                    }
+                    templates = load_voucher_templates()
+                    templates[t_name] = new_t
+                    save_voucher_templates(templates)
+                    print(f"✅ 模板 '{t_name}' 已保存")
+                
+        # 静默更新缓存 (新增)
+        update_dashboard_cache_silent(client, app_token)
+        
     except Exception as e:
         log.error(f"保存异常: {e}")
+
+
+def manage_category_rules():
+    """管理自动分类规则"""
+    global AUTO_CATEGORY_RULES
+    
+    while True:
+        print(f"\n{Color.HEADER}🏷️ 自动分类规则管理{Color.ENDC}")
+        print("-------------------")
+        print("1. 查看当前规则")
+        print("2. 添加新规则")
+        print("3. 删除规则")
+        print("0. 返回")
+        print("-------------------")
+        
+        choice = input("请选择 (0-3): ").strip()
+        
+        if choice == '0':
+            break
+            
+        elif choice == '1':
+            print(f"\n📋 当前规则 ({len(AUTO_CATEGORY_RULES)}条):")
+            print(f"{'关键词':<20} -> {'分类'}")
+            print("-" * 40)
+            if not AUTO_CATEGORY_RULES:
+                print("(暂无规则)")
+            else:
+                # 只显示前50条，避免太长
+                count = 0
+                for k, v in AUTO_CATEGORY_RULES.items():
+                    print(f"{k:<20} -> {v}")
+                    count += 1
+                    if count >= 50:
+                        print(f"... (还有 {len(AUTO_CATEGORY_RULES)-50} 条)")
+                        break
+            input("\n按回车继续...")
+            
+        elif choice == '2':
+            print("\n➕ 添加新规则")
+            key = input("请输入关键词 (如 '滴滴'): ").strip()
+            if not key: continue
+            
+            cat = input(f"请输入 '{key}' 对应的分类 (如 '差旅费-交通'): ").strip()
+            if not cat: continue
+            
+            AUTO_CATEGORY_RULES[key] = cat
+            
+            try:
+                with open(FILE_CATEGORY_RULES, "w", encoding="utf-8") as f:
+                    json.dump(AUTO_CATEGORY_RULES, f, ensure_ascii=False, indent=4)
+                print(f"✅ 已添加: {key} -> {cat}")
+            except Exception as e:
+                log.error(f"保存失败: {e}")
+                
+        elif choice == '3':
+            key = input("请输入要删除的关键词: ").strip()
+            if key in AUTO_CATEGORY_RULES:
+                del AUTO_CATEGORY_RULES[key]
+                try:
+                    with open(FILE_CATEGORY_RULES, "w", encoding="utf-8") as f:
+                        json.dump(AUTO_CATEGORY_RULES, f, ensure_ascii=False, indent=4)
+                    print(f"✅ 已删除: {key}")
+                except Exception as e:
+                    log.error(f"保存失败: {e}")
+            else:
+                print("❌ 找不到该规则")
 
 def manage_config_menu():
     """配置管理菜单 (别名/规则)"""
@@ -6103,11 +6549,13 @@ def manage_config_menu():
         if choice == '0': break
         
         if choice == '1':
-            manage_partner_aliases()
+            manage_aliases()
+        elif choice == '2':
+            manage_category_rules()
 
 def manage_partner_aliases():
     """往来单位别名管理 (CRUD)"""
-    json_file = "partner_aliases.json"
+    json_file = FILE_PARTNER_ALIASES
     
     while True:
         # Load latest
@@ -8064,7 +8512,12 @@ def quick_search_ledger(client, app_token):
                 matched = True
             
             if matched:
-                matches.append(r.fields) # Store fields directly
+                # 注入 record_id 以便后续操作 (如删除)
+                item = r.fields.copy()
+                if hasattr(r, 'record_id'):
+                    item['_record_id'] = r.record_id
+                matches.append(item)
+                
                 if b_type == "收款":
                     total_income += r_amt
                 elif b_type in ["付款", "费用"]:
@@ -8101,10 +8554,48 @@ def quick_search_ledger(client, app_token):
             net = total_income - total_expense
             print(f"💰 统计结果: 收入 {total_income:,.2f} | 支出 {total_expense:,.2f} | 净额 {net:,.2f}")
             
-            # 导出选项
-            opt = input("👉 导出结果? (x=Excel / h=HTML报表 / n=取消) [n]: ").strip().lower()
+            # 操作选项
+            print(f"{Color.CYAN}操作: [x]Excel [h]HTML报表 [d]删除记录 [n]新搜索{Color.ENDC}")
+            opt = input("👉 请输入操作指令 [n]: ").strip().lower()
             
-            if opt == 'x':
+            if opt == 'd':
+                try:
+                    max_idx = min(len(matches), limit)
+                    del_idx = int(input(f"👉 输入要删除的序号 (1-{max_idx}): ")) - 1
+                    if 0 <= del_idx < max_idx:
+                        target = matches[del_idx]
+                        rid = target.get('_record_id')
+                        if not rid:
+                            print("❌ 无法删除：未找到记录ID")
+                            continue
+                        
+                        ts = target.get('记账日期', 0)
+                        d_str = datetime.fromtimestamp(ts/1000).strftime("%Y-%m-%d") if ts else "-"
+                        desc_str = f"{d_str} | {target.get('实际收付金额', 0)} | {target.get('备注', '')}"
+                        
+                        confirm = input(f"{Color.FAIL}⚠️ 确认删除? {desc_str} (y/n): {Color.ENDC}")
+                        
+                        if confirm.lower() == 'y':
+                            req = DeleteAppTableRecordRequest.builder() \
+                                .app_token(app_token) \
+                                .table_id(table_id) \
+                                .record_id(rid) \
+                                .build()
+                            resp = client.bitable.v1.app_table_record.delete(req)
+                            
+                            if resp.success():
+                                print("✅ 删除成功")
+                                # Update cache
+                                GLOBAL_LEDGER_CACHE = [r for r in GLOBAL_LEDGER_CACHE if getattr(r, 'record_id', '') != rid]
+                                print("🔄 数据已更新")
+                            else:
+                                print(f"❌ 删除失败: {resp.msg}")
+                    else:
+                        print("❌ 序号无效")
+                except ValueError:
+                    print("❌ 输入无效")
+
+            elif opt == 'x':
                 try:
                     df = pd.DataFrame(matches)
                     # 简单清洗列
@@ -8269,9 +8760,9 @@ def quick_search_ledger(client, app_token):
                     </html>
                     """
                     
-                    report_dir = "查询报告"
-                    if not os.path.exists(report_dir): os.makedirs(report_dir)
-                    fname = f"{report_dir}/查账_{query.replace(':','-')}_{datetime.now().strftime('%Y%m%d%H%M%S')}.html"
+                    report_dir = REPORT_DIR
+                    # if not os.path.exists(report_dir): os.makedirs(report_dir) # Already created
+                    fname = os.path.join(report_dir, f"查账_{query.replace(':','-')}_{datetime.now().strftime('%Y%m%d%H%M%S')}.html")
                     
                     with open(fname, "w", encoding="utf-8") as f:
                         f.write(html)

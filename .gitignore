@@ -14,6 +14,7 @@ __pycache__/
 *.pyc
 
 # User data folders (local data that should not be public)
+财务数据/
 待处理单据/
 2_已处理归档/
 3_财务报表/
