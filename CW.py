@@ -14,6 +14,9 @@ import logging
 import requests
 import itertools
 import pandas as pd
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 import tkinter as tk
 from tkinter import filedialog
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -3282,12 +3285,12 @@ def create_ledger_table(client, app_token):
                         AppTableFieldPropertyOption.builder().name("费用").build()
                     ]).build()).build(),
                     AppTableCreateHeader.builder().field_name("费用归类").type(FT.SELECT).property(AppTableFieldProperty.builder().options([
-                        AppTableFieldPropertyOption.builder().name("办公费").build(),
-                        AppTableFieldPropertyOption.builder().name("差旅费").build(),
+                        AppTableFieldPropertyOption.builder().name("原材料-三酸/片碱/色粉").build(),
+                        AppTableFieldPropertyOption.builder().name("辅料-挂具/除油剂").build(),
+                        AppTableFieldPropertyOption.builder().name("外协加工费").build(),
                         AppTableFieldPropertyOption.builder().name("房租水电").build(),
                         AppTableFieldPropertyOption.builder().name("人力成本").build(),
-                        AppTableFieldPropertyOption.builder().name("营销推广").build(),
-                        AppTableFieldPropertyOption.builder().name("采购成本").build(),
+                        AppTableFieldPropertyOption.builder().name("日常费用").build(),
                         AppTableFieldPropertyOption.builder().name("税费").build(),
                         AppTableFieldPropertyOption.builder().name("其他").build()
                     ]).build()).build(),
@@ -3296,8 +3299,8 @@ def create_ledger_table(client, app_token):
                     AppTableCreateHeader.builder().field_name("账面金额").type(FT.NUMBER).build(),
                     AppTableCreateHeader.builder().field_name("实际收付金额").type(FT.NUMBER).build(),
                     AppTableCreateHeader.builder().field_name("交易银行").type(FT.SELECT).property(AppTableFieldProperty.builder().options([
-                         AppTableFieldPropertyOption.builder().name("G银行基本户").build(),
-                         AppTableFieldPropertyOption.builder().name("N银行/微信（现金）").build()
+                         AppTableFieldPropertyOption.builder().name("G银行基本户(有票)").build(),
+                         AppTableFieldPropertyOption.builder().name("N银行/微信(无票)").build()
                     ]).build()).build(),
                     AppTableCreateHeader.builder().field_name("是否现金").type(FT.SELECT).property(AppTableFieldProperty.builder().options([ # Use Select for Yes/No
                          AppTableFieldPropertyOption.builder().name("是").build(),
@@ -3566,6 +3569,54 @@ def monthly_close(client, app_token, ym_input=None):
     else:
         log.error("❌ 结账部分失败", extra={"solution": "检查日志"})
         return False
+
+def apply_excel_styles(ws, title_row=1):
+    """通用 Excel 样式美化函数"""
+    try:
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+        thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+        
+        # 打印设置
+        ws.page_setup.paperSize = ws.PAPERSIZE_A4
+        # 如果列数较多 (>5)，自动横向
+        if ws.max_column > 5:
+            ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
+        ws.page_setup.fitToPage = True
+        ws.page_setup.fitToHeight = False # 允许无限长
+        ws.page_setup.fitToWidth = 1      # 限制一页宽
+        
+        # 遍历单元格
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
+            for cell in row:
+                cell.border = thin_border
+                cell.alignment = Alignment(vertical='center')
+                
+                # 表头
+                if row[0].row == title_row:
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                # 数据行
+                elif isinstance(cell.value, (int, float)):
+                    # 模糊匹配金额列 (列名包含 金额/单价/Cost/Price)
+                    col_header = ws.cell(row=title_row, column=cell.column).value
+                    if col_header and any(k in str(col_header) for k in ["金额", "单价", "Cost", "Price", "费用", "余额"]):
+                        cell.number_format = '#,##0.00'
+                        
+        # 自动列宽
+        for col in ws.columns:
+            max_length = 0
+            column = col[0].column_letter
+            for cell in col:
+                try:
+                    if len(str(cell.value)) > max_length: max_length = len(str(cell.value))
+                except: pass
+            ws.column_dimensions[column].width = min((max_length + 2) * 1.2, 50)
+    except Exception as e:
+        print(f"⚠️ 样式应用失败: {e}")
 
 def year_end_closing(client, app_token):
     """一键年结：调用月度结账逻辑，但锁定为年度模式"""
@@ -4972,661 +5023,341 @@ def manage_aliases():
             except Exception as e:
                 log.error(f"导入失败: {e}")
 
-def generate_partner_statement(client, app_token, start_date=None, end_date=None):
-    """生成往来对账单 (支持日期筛选)"""
-    log.info("📊 准备生成往来对账单...", extra={"solution": "请按提示操作"})
+def generate_business_statement(client, app_token):
+    """生成往来对账单 (支持加工费+收付款合并对账)"""
+    print(f"\n{Color.CYAN}🧾 生成往来对账单 (Statement){Color.ENDC}")
+    print("--------------------------------")
+    print("功能：合并【加工费明细】(应收/应付) 与 【日常台账】(实收/实付)，生成对账单。")
     
-    table_id = get_table_id_by_name(client, app_token, "日常台账表")
-    if not table_id: return
+    # 1. 选择客户/供应商
+    pf_table_id = get_table_id_by_name(client, app_token, "加工费明细表")
+    ledger_table_id = get_table_id_by_name(client, app_token, "日常台账表")
     
-    # 1. 获取全量数据以计算余额
-    print("正在拉取全量数据计算余额...")
+    if not pf_table_id or not ledger_table_id: return
     
-    # 尝试使用全局缓存
-    global GLOBAL_LEDGER_CACHE
-    if GLOBAL_LEDGER_CACHE and len(GLOBAL_LEDGER_CACHE) > 0:
-         print(f"⚡ 使用内存缓存 ({len(GLOBAL_LEDGER_CACHE)} 条)")
-         records = GLOBAL_LEDGER_CACHE
-    else:
-         records = get_all_records(client, app_token, table_id, field_names=["往来单位费用", "实际收付金额", "业务类型"])
-         # 顺便更新缓存（如果字段够用的话，不过这里只取了部分字段，更新全局缓存可能不安全，还是算了）
-         # 或者我们可以拉取全部字段？为了速度，先只拉取部分。
-
-    # 计算每个单位的余额
-    partner_balances = {} # {partner: balance}
+    print("⏳ 正在获取往来单位列表...")
+    # 从加工费表获取最近活跃的单位
+    now = datetime.now()
+    start_ts_preview = int((now - timedelta(days=60)).timestamp() * 1000)
+    filter_preview = f'CurrentValue.[日期]>={start_ts_preview}'
+    recs = get_all_records(client, app_token, pf_table_id, filter_info=filter_preview)
     
-    for r in records:
-        f = r.fields
-        p = f.get("往来单位费用")
-        if not p or p == "散户": continue
-        
-        amt = float(f.get("实际收付金额", 0))
-        b_type = f.get("业务类型", "")
-        
-        if p not in partner_balances: partner_balances[p] = 0.0
-        
-        # 逻辑：正数=我方收，负数=我方付
-        # 余额 = 我方应收 - 我方应付
-        # 收款 -> 增加余额 (对方欠我/我收到钱) ? 不，这里通常指"未结清金额"
-        # 让我们定义 Balance 为 "对方欠我方金额" (Receivable)
-        # 收款: 余额减少 (对方还钱了) -> -amt
-        # 付款: 余额增加 (我方付钱了?) -> Wait.
-        
-        # 让我们换个角度：Net Balance = Total In - Total Out
-        # Net > 0: 我方净收 (我方赚了/对方付多了)
-        # Net < 0: 我方净付 (我方亏了/对方还没付?)
-        
-        # 通常对账单：
-        # 销售对账: 应收 = 销售额 - 已收款
-        # 采购对账: 应付 = 采购额 - 已付款
-        
-        # 这里是混合流水。
-        # 收款: +amt
-        # 付款/费用: -amt (注意：费用通常是负数入库吗？在 ledger 里通常是正数，业务类型区分)
-        
-        # 假设 ledger 记录：
-        # 业务类型="收款", 金额=1000  -> Total In += 1000
-        # 业务类型="付款", 金额=200   -> Total Out += 200
-        
-        val = amt
-        if b_type == "收款":
-            partner_balances[p] += val
-        elif b_type in ["付款", "费用"]:
-            partner_balances[p] -= val
-            
-    # 排序：按余额绝对值从大到小
-    sorted_partners = sorted(partner_balances.keys(), key=lambda x: abs(partner_balances[x]), reverse=True)
+    partners = set()
+    for r in recs:
+        p = r.fields.get("往来单位", "").strip()
+        if p: partners.add(p)
     
-    print(f"\n👥 往来单位列表 (按余额排序):")
-    print(f"{'序号':<5} | {'单位名称':<20} | {'当前净额 (收-付)':<15}")
-    print("-" * 50)
+    sorted_partners = sorted(list(partners))
     
+    if not sorted_partners:
+        print("❌ 无近期往来记录")
+        # 允许手动输入
+    
+    print("\n📋 最近往来单位:")
     for i, p in enumerate(sorted_partners):
-        bal = partner_balances[p]
-        bal_str = f"{bal:,.2f}"
-        if bal > 0: bal_str = f"+{bal_str}"
+        print(f"  {i+1}. {p}")
         
-        # Color
-        c = ""
-        if bal > 0: c = Color.GREEN
-        elif bal < 0: c = Color.FAIL
-            
-        print(f"{i+1:<5} | {p:<20} | {c}{bal_str:<15}{Color.ENDC}")
-        
-    # 2. 选择单位
-    print("-" * 50)
-    choice = input("请输入序号或直接输入单位名称 (输入 '0' 退出): ").strip()
-    if choice == '0': return
-
+    p_choice = input("\n👉 请选择单位序号 (或直接输入名称): ").strip()
     target_partner = ""
-    
-    if choice.isdigit() and 1 <= int(choice) <= len(sorted_partners):
-        target_partner = sorted_partners[int(choice)-1]
+    if p_choice.isdigit() and 1 <= int(p_choice) <= len(sorted_partners):
+        target_partner = sorted_partners[int(p_choice)-1]
     else:
-        # 模糊匹配
-        matches = [p for p in sorted_partners if choice in p]
-        if len(matches) == 1:
-            target_partner = matches[0]
-        elif len(matches) > 1:
-            print(f"❌ 找到多个匹配: {matches}，请更精确一点")
-            return
-        elif choice in sorted_partners: # 精确匹配
-            target_partner = choice
-        else:
-            print("❌ 未找到该单位")
-            return
-            
-    print(f"✅ 已选择: 【{target_partner}】")
-
-    # 2.1 日期筛选
-    start_ts = None
-    end_ts = None
-    date_desc = "全部历史"
-
-    if start_date and end_date:
-        try:
-            s_dt = datetime.strptime(start_date, "%Y-%m-%d")
-            e_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
-            start_ts = int(s_dt.timestamp() * 1000)
-            end_ts = int(e_dt.timestamp() * 1000)
-            date_desc = f"{start_date}至{end_date}"
-        except:
-            pass
-    else:
-        print("-" * 30)
-        use_date = input("📅 是否筛选特定日期范围? (y/n) [n]: ").strip().lower()
-        if use_date == 'y':
-            s_in = input("   起始日期 (YYYY-MM-DD): ").strip()
-            e_in = input("   结束日期 (YYYY-MM-DD): ").strip()
-            if s_in and e_in:
-                try:
-                    s_dt = datetime.strptime(s_in, "%Y-%m-%d")
-                    e_dt = datetime.strptime(e_in, "%Y-%m-%d") + timedelta(days=1)
-                    start_ts = int(s_dt.timestamp() * 1000)
-                    end_ts = int(e_dt.timestamp() * 1000)
-                    date_desc = f"{s_in}至{e_in}"
-                except:
-                    print("❌ 日期格式错误，将导出全部数据")
-    
-    # 3. 获取该单位所有记录 (全量获取，本地过滤以计算期初期末)
-    print(f"正在拉取 {target_partner} 的全量记录以计算余额...")
-    
-    # 构造过滤器: 仅筛选往来单位
-    conditions = [f'CurrentValue.[往来单位费用]="{target_partner}"']
-    filter_cmd = "&&".join(conditions)
-    
-    all_records = get_all_records(client, app_token, table_id, filter_info=filter_cmd)
-    
-    # 按日期排序
-    all_records.sort(key=lambda x: x.fields.get("记账日期", 0))
-    
-    partner_records = [] # 仅包含筛选期间内的
-    
-    # 余额计算变量
-    opening_balance = 0.0
-    period_in = 0.0
-    period_out = 0.0
-    closing_balance = 0.0
-    
-    # 遍历全量记录
-    for r in all_records:
-        f = r.fields
-        date_ts = f.get("记账日期", 0)
-        amt = float(f.get("实际收付金额", 0))
-        b_type = f.get("业务类型", "")
+        target_partner = p_choice
         
-        # 计算净额贡献: 收款+, 付款/费用-
-        val = 0.0
-        if b_type == "收款": val = amt
-        elif b_type in ["付款", "费用"]: val = -amt
-        
-        # 判断时间段
-        is_before = False
-        is_after = False
-        
-        if start_ts and date_ts < start_ts:
-            is_before = True
-        if end_ts and date_ts >= end_ts:
-            is_after = True
-            
-        # 1. 期初余额 (开始时间之前的所有变动)
-        if is_before:
-            opening_balance += val
-            
-        # 2. 期间变动
-        elif not is_after:
-            if b_type == "收款": period_in += amt
-            elif b_type in ["付款", "费用"]: period_out += amt
-            
-            # 收集记录用于导出
-            date_str = datetime.fromtimestamp(date_ts/1000).strftime('%Y-%m-%d') if date_ts else ""
-            row = {
-                "日期": date_str,
-                "业务类型": b_type,
-                "费用类型": f.get("费用归类", ""),
-                "金额": amt,
-                "备注": f.get("备注", ""),
-                "是否有票": f.get("是否有票", "无票"),
-                "ts": date_ts # 用于排序
-            }
-            partner_records.append(row)
-            
-    # 期末余额 = 期初 + 期间净额
-    closing_balance = opening_balance + (period_in - period_out)
+    if not target_partner: return
     
-    # --- 账龄分析 (Aging Analysis) ---
-    # 逻辑: 采用"倒推法"。假设期末余额是由最近的交易构成的。
-    # 仅当余额不为0时计算
-    aging = {"0-30天": 0.0, "31-60天": 0.0, "61-90天": 0.0, "90天以上": 0.0}
+    # 2. 日期范围
+    print("\n📅 选择对账期间:")
+    start_date_str = input("   起始日期 (YYYY-MM-DD) [默认本月1号]: ").strip()
+    end_date_str = input("   结束日期 (YYYY-MM-DD) [默认今天]: ").strip()
     
-    if abs(closing_balance) > 0.01:
-        # 确定方向: 我们是欠款方(Balance<0) 还是 收款方(Balance>0)
-        # 如果 Balance > 0 (应收): 我们看最近的 "收款应计项" (即我们支出的钱/销售的货? 混乱)
-        # 让我们统一标准: 
-        # Net > 0: 对方欠我 (Receivable). 来源是 "收款" (我方收)? 不, "收款"是减少应收.
-        # 来源应该是 "销售/应收增加". 但这是流水账.
-        # 在流水账中: 
-        #   余额 > 0 (我方净收): 意味着我方收到的钱 > 付出的钱. 这通常意味着 "预收账款" 或 "利润".
-        #   余额 < 0 (我方净付): 意味着我方付出的钱 > 收到的钱. 这通常意味着 "预付账款" 或 "费用消耗".
-        #   
-        #   如果用于 "对账": 
-        #   Supplier (供应商): 我方付钱(Out), 对方发货. 
-        #       Balance < 0 (Total Out > Total In): 我方已付 1000. 还没收到货? 或者已经收到货但没入账?
-        #       Wait, usually Supplier reconciliation compares "Payments" vs "Invoices".
-        #       If we only have "Payments", Balance is just "Total Payments".
-        #
-        #   既然无法区分 "应收/应付" (Accrual), 所谓的 "账龄" 只能分析 "余额的构成时间".
-        #   即: 这笔余额是何时产生的?
-        #   算法: 倒序遍历交易. 
-        #   如果 Balance > 0: 寻找最近的 "正向交易" (In) 直到填满 Balance.
-        #   如果 Balance < 0: 寻找最近的 "负向交易" (Out) 直到填满 Balance.
+    if not start_date_str:
+        start_date_str = datetime.now().strftime("%Y-%m-01")
+    if not end_date_str:
+        end_date_str = datetime.now().strftime("%Y-%m-%d")
         
-        remaining = abs(closing_balance)
-        target_sign = 1 if closing_balance > 0 else -1
-        
-        now_ts = datetime.now().timestamp() * 1000
-        
-        # 倒序遍历所有记录 (包括期后的? 不, 截止到 end_date)
-        # 应该使用截止到 end_date 的所有记录
-        records_until_end = [r for r in all_records if (not end_ts or r.fields.get("记账日期", 0) < end_ts)]
-        
-        for r in reversed(records_until_end):
-            f = r.fields
-            amt = float(f.get("实际收付金额", 0))
-            b_type = f.get("业务类型", "")
-            ts = f.get("记账日期", 0)
-            
-            # 计算该交易的符号方向
-            val = 0.0
-            if b_type == "收款": val = amt
-            elif b_type in ["付款", "费用"]: val = -amt
-            
-            # 如果交易方向与余额方向一致 (例如余额是正, 交易也是正), 则这笔交易贡献了余额
-            if (val > 0 and target_sign > 0) or (val < 0 and target_sign < 0):
-                contrib = min(abs(val), remaining)
-                
-                # 计算天数
-                days = (now_ts - ts) / (1000 * 3600 * 24)
-                
-                if days <= 30: aging["0-30天"] += contrib
-                elif days <= 60: aging["31-60天"] += contrib
-                elif days <= 90: aging["61-90天"] += contrib
-                else: aging["90天以上"] += contrib
-                
-                remaining -= contrib
-                if remaining <= 0.01: break
-        
-        # 修正符号: 保持与 Balance 同号
-        if target_sign < 0:
-             for k in aging: aging[k] = -aging[k]
-
-    if not partner_records and opening_balance == 0 and closing_balance == 0:
-        print("⚠️ 未找到任何记录")
+    try:
+        s_dt = datetime.strptime(start_date_str, "%Y-%m-%d")
+        e_dt = datetime.strptime(end_date_str, "%Y-%m-%d") + timedelta(days=1) - timedelta(seconds=1)
+        start_ts = int(s_dt.timestamp() * 1000)
+        end_ts = int(e_dt.timestamp() * 1000)
+    except:
+        print("❌ 日期格式错误")
         return
         
-    # --- 新增：控制台汇总输出 ---
-    print(f"\n📊 {Color.HEADER}【{target_partner}】对账汇总{Color.ENDC}")
-    print(f"📅 期间: {date_desc}")
-    print("-" * 40)
-    print(f"🔹 期初余额:      {Color.BOLD}{opening_balance:,.2f}{Color.ENDC}")
-    print(f"💰 期间收款 (+):  {Color.GREEN}{period_in:,.2f}{Color.ENDC}")
-    print(f"💸 期间付款 (-):  {Color.FAIL}{period_out:,.2f}{Color.ENDC}")
+    print(f"\n🔍 正在拉取【{target_partner}】的全量记录以计算期初余额...")
     
-    net = period_in - period_out
-    print(f"⚖️  期间净额:      {net:+,.2f}")
-    print("-" * 40)
+    # 3. 拉取数据 (全量以计算期初)
+    # 3.1 加工费 (Charges)
+    filter_pf = f'CurrentValue.[往来单位]="{target_partner}"'
+    pf_recs = get_all_records(client, app_token, pf_table_id, filter_info=filter_pf)
     
-    cb_color = Color.GREEN if closing_balance >= 0 else Color.FAIL
-    print(f"🏁 期末余额:      {cb_color}{closing_balance:,.2f}{Color.ENDC}")
+    # 3.2 台账 (Payments)
+    filter_lg = f'CurrentValue.[往来单位费用]="{target_partner}"'
+    lg_recs = get_all_records(client, app_token, ledger_table_id, filter_info=filter_lg)
     
-    # 打印账龄
-    if abs(closing_balance) > 0.01:
-        print(f"\n🕰️  余额账龄分析:")
-        print(f"   0-30天:   {aging['0-30天']:,.2f}")
-        print(f"   31-60天:  {aging['31-60天']:,.2f}")
-        print(f"   61-90天:  {aging['61-90天']:,.2f}")
-        print(f"   >90天:    {aging['90天以上']:,.2f}")
-
-    # --- 复制专用片段 ---
-    print(f"\n📋 {Color.BOLD}>>> 请复制下方内容发送给客户/供应商 <<<{Color.ENDC}")
-    print("----------------------------------------")
-    print(f"【对账单】{target_partner}")
-    print(f"统计期间：{date_desc}")
-    print(f"期初余额：{opening_balance:,.2f}")
-    print(f"本期收款：{period_in:,.2f}")
-    print(f"本期付款：{period_out:,.2f}")
-    print(f"期末余额：{closing_balance:,.2f}")
-    print(f"明细附件：请查阅生成的 Excel/HTML 对账单")
-    print("----------------------------------------")
-    print(f"\n📝 共计 {len(partner_records)} 条记录")
-    print("-" * 40)
-    # ---------------------------
-
-    # 4. 生成 Excel
-    df = pd.DataFrame(partner_records)
-    if not df.empty:
-        df = df.sort_values(by="日期")
+    # 4. 合并数据 & 计算
+    # 定义统一结构: {date, type, desc, qty, unit, price, charge, payment, balance}
+    # 规则:
+    #   加工费(收入-加工服务) -> Charge (+)
+    #   加工费(支出-外协加工) -> Charge (-) [如果是供应商对账，这是"应付"，显示为正向的债务增加?]
+    #   
+    #   让我们统一逻辑：
+    #   【客户对账单】 (We are Seller)
+    #      Charge (借方/应收): 增加 (Positive)
+    #      Payment (贷方/已收): 减少 (Negative)
+    #      Balance > 0: 客户欠我们要付钱
+    #
+    #   【供应商对账单】 (We are Buyer)
+    #      Charge (贷方/应付): 增加 (Positive) [Purchase]
+    #      Payment (借方/已付): 减少 (Negative)
+    #      Balance > 0: 我们欠供应商要付钱
+    
+    # 自动判定角色: 根据加工费类型
+    # 如果大部分是 "收入-加工服务"，则是客户。
+    # 如果大部分是 "支出-外协加工"，则是供应商。
+    
+    income_count = sum(1 for r in pf_recs if r.fields.get("类型") == "收入-加工服务")
+    outcome_count = sum(1 for r in pf_recs if r.fields.get("类型") == "支出-外协加工")
+    
+    is_supplier = False
+    if outcome_count > income_count:
+        is_supplier = True
+        role_str = "供应商"
     else:
-        # 创建空DataFrame以防报错
-        df = pd.DataFrame(columns=["日期", "业务类型", "费用类型", "金额", "备注", "是否有票"])
+        role_str = "客户"
+        
+    print(f"ℹ️ 识别为: {role_str} (收入记录: {income_count}, 外协记录: {outcome_count})")
     
-    # 创建输出目录
-    output_dir = "往来对账单"
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
-    timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename_base = f"往来对账单_{target_partner}_{date_desc}_{timestamp_str}".replace(":", "").replace("/", "-")
-    excel_path = os.path.join(output_dir, f"{filename_base}.xlsx")
-    html_path = os.path.join(output_dir, f"{filename_base}.html")
+    all_txns = []
     
-    # --- Excel 生成 (带美化) ---
-    # with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
-    with pd.ExcelWriter(excel_path, engine='xlsxwriter') as writer:
-        workbook = writer.book
+    # 处理加工费
+    for r in pf_recs:
+        f = r.fields
+        d = f.get("日期", 0)
+        typ = f.get("类型", "")
+        amt = float(f.get("总金额", 0))
+        item = f.get("品名", "")
+        spec = f.get("规格", "")
+        qty = f.get("数量", 0)
+        unit = f.get("单位", "")
+        price = f.get("单价", 0)
+        rem = f.get("备注", "")
         
-        # 格式定义
-        header_fmt = workbook.add_format({'bold': True, 'bg_color': '#D7E4BC', 'border': 1})
-        money_fmt = workbook.add_format({'num_format': '#,##0.00', 'border': 1})
-        date_fmt = workbook.add_format({'num_format': 'yyyy-mm-dd', 'border': 1})
-        border_fmt = workbook.add_format({'border': 1})
-        title_fmt = workbook.add_format({'bold': True, 'font_size': 14})
+        charge = 0.0
+        payment = 0.0
         
-        # 汇总页
-        summary = [
-            ["项目", "金额", "说明"],
-            ["往来单位", target_partner, ""],
-            ["统计期间", date_desc, ""],
-            ["期初余额", opening_balance, "期初累计净额"],
-            ["本期收款", period_in, "我方收到"],
-            ["本期付款", period_out, "我方支付"],
-            ["期末余额", closing_balance, "截止期末累计净额"],
-            ["", "", ""],
-            ["账龄分析", "", "基于期末余额倒推"],
-            ["0-30天", aging["0-30天"], "近期发生"],
-            ["31-60天", aging["31-60天"], ""],
-            ["61-90天", aging["61-90天"], ""],
-            ["90天以上", aging["90天以上"], "长期未结"],
-            ["", "", ""],
-            ["生成时间", datetime.now().strftime('%Y-%m-%d %H:%M:%S'), ""]
-        ]
-        
-        df_sum = pd.DataFrame(summary)
-        df_sum.to_excel(writer, sheet_name="对账汇总", index=False, header=False)
-        
-        ws_sum = writer.sheets['对账汇总']
-        ws_sum.set_column(0, 0, 20, border_fmt)
-        ws_sum.set_column(1, 1, 20, money_fmt) # 金额列
-        ws_sum.set_column(2, 2, 30, border_fmt)
-        
-        # 明细页
-        if not df.empty:
-            # 移除 ts 列
-            df_export = df.drop(columns=["ts"], errors="ignore")
-            df_export.to_excel(writer, sheet_name="流水明细", index=False)
-            
-            ws_detail = writer.sheets['流水明细']
-            
-            # 设置表头
-            for col_num, value in enumerate(df_export.columns.values):
-                ws_detail.write(0, col_num, value, header_fmt)
+        if not is_supplier: # 客户模式
+            if typ == "收入-加工服务":
+                charge = amt
+            elif typ == "支出-外协加工": 
+                # 罕见：客户同时也做外协? 忽略或作为抵扣?
+                # 假设作为"应付"，即减少应收 -> payment
+                payment = amt 
+        else: # 供应商模式
+            if typ == "支出-外协加工":
+                charge = amt # 应付增加
+            elif typ == "收入-加工服务":
+                payment = amt # 抵扣?
                 
-            # 设置列宽和格式
-            for i, col in enumerate(df_export.columns):
-                width = 15
-                fmt = border_fmt
+        if abs(charge) < 0.01 and abs(payment) < 0.01: continue
+        
+        all_txns.append({
+            "ts": d,
+            "date": datetime.fromtimestamp(d/1000).strftime("%Y-%m-%d"),
+            "desc": f"{item} {spec}",
+            "qty": qty,
+            "unit": unit,
+            "price": price,
+            "charge": charge,
+            "payment": payment,
+            "remark": rem,
+            "source": "PF"
+        })
+        
+    # 处理台账 (收付款)
+    for r in lg_recs:
+        f = r.fields
+        d = f.get("记账日期", 0)
+        b_type = f.get("业务类型", "")
+        amt = float(f.get("实际收付金额", 0))
+        rem = f.get("备注", "")
+        summary = f.get("摘要", "")
+        
+        charge = 0.0
+        payment = 0.0
+        
+        if not is_supplier: # 客户模式
+            if b_type == "收款":
+                payment = amt # 客户还款，应收减少
+            elif b_type == "付款":
+                # 退款给客户?
+                charge = amt # 应收增加? 或者作为负的 Payment
+                payment = -amt
+        else: # 供应商模式
+            if b_type == "付款":
+                payment = amt # 我们付款，应付减少
+            elif b_type == "收款":
+                payment = -amt # 退款?
                 
-                if '金额' in col: 
-                    fmt = money_fmt
-                    width = 15
-                elif '日期' in col:
-                    fmt = date_fmt
-                    width = 15
-                elif '备注' in col or '摘要' in col:
-                    width = 40
-                elif '往来' in col:
-                    width = 25
-                    
-                ws_detail.set_column(i, i, width, fmt)
-        
-    log.info(f"✅ Excel对账单已生成: {excel_path}")
+        if abs(charge) < 0.01 and abs(payment) < 0.01: continue
 
-    # --- HTML 生成 (可视化报表) ---
-    print("📊 正在生成可视化HTML报表...")
-    
-    # 准备图表数据 (按日期累计净额)
-    chart_labels = []
-    chart_data = []
-    running_balance = 0.0
-    
-    # 确保按日期排序
-    sorted_records = sorted(partner_records, key=lambda x: x['日期'])
-    
-    for r in sorted_records:
-        chart_labels.append(r['日期'])
-        val = r['金额']
-        if r['业务类型'] in ["付款", "费用"]:
-            val = -val
-        running_balance += val
-        chart_data.append(round(running_balance, 2))
+        all_txns.append({
+            "ts": d,
+            "date": datetime.fromtimestamp(d/1000).strftime("%Y-%m-%d"),
+            "desc": f"【财务】{summary}",
+            "qty": "",
+            "unit": "",
+            "price": "",
+            "charge": charge,
+            "payment": payment,
+            "remark": rem,
+            "source": "LG"
+        })
         
-    # 简单的 JS 图表 (使用 Chart.js CDN，如果没有网则只显示表格)
-    # 为了离线可用，我们也可以用 SVG，但 Chart.js 更好看。这里我们假设有网，或者回退。
-    # 实际上，我们可以嵌入一个简单的 SVG 折线图生成逻辑，保证 100% 离线可用。
-    # 这里我们用一个极简的 SVG 生成器。
+    # 按日期排序
+    all_txns.sort(key=lambda x: x["ts"])
     
-    svg_points = ""
-    if chart_data:
-        max_val = max(max(chart_data), abs(min(chart_data)), 1)
-        min_val = min(chart_data)
-        width = 800
-        height = 200
-        # Normalize
-        # Y axis: 0 is at height/2 if min < 0 < max? No, let's map min~max to height~0
-        y_range = max_val - min_val if max_val != min_val else 1
-        x_step = width / (len(chart_data) - 1) if len(chart_data) > 1 else width
-        
-        points = []
-        for i, val in enumerate(chart_data):
-            x = i * x_step
-            # y: map val to height...0
-            # val = min -> y = height
-            # val = max -> y = 0
-            y = height - ((val - min_val) / y_range * height)
-            points.append(f"{x:.1f},{y:.1f}")
+    # 计算期初 & 筛选期间数据
+    opening_balance = 0.0
+    period_txns = []
+    
+    for txn in all_txns:
+        if txn["ts"] < start_ts:
+            opening_balance += (txn["charge"] - txn["payment"])
+        elif txn["ts"] <= end_ts:
+            # 期间内
+            period_txns.append(txn)
             
-        # Optimization: If only one point, draw a flat line
-        if len(chart_data) == 1:
-            points.append(f"{width:.1f},{points[0].split(',')[1]}")
-            
-        svg_points = " ".join(points)
-        
-    # 生成 HTML 内容
-    net_val = total_in - total_out
-    net_cls = "income" if net_val >= 0 else "expense"
+    # 计算行余额
+    running_balance = opening_balance
+    total_charge = 0.0
+    total_payment = 0.0
     
-    # SVG Chart Generation (Cumulative Sum)
-    # 假设 df 按日期排序
-    df_sorted = df.sort_values(by="日期") # 修正列名
+    html_rows = ""
     
-    # 计算累计净额序列
-    cumulative_data = []
-    current_sum = 0
-    dates = []
+    for txn in period_txns:
+        c = txn["charge"]
+        p = txn["payment"]
+        running_balance += (c - p)
+        
+        total_charge += c
+        total_payment += p
+        
+        c_str = f"{c:,.2f}" if c != 0 else ""
+        p_str = f"{p:,.2f}" if p != 0 else ""
+        
+        bg = "#fff"
+        if txn["source"] == "LG": bg = "#f0f8ff" # 财务记录淡蓝背景
+        
+        html_rows += f"""
+        <tr style="background-color:{bg}">
+            <td>{txn['date']}</td>
+            <td>{txn['desc']}</td>
+            <td style="text-align:right">{txn['qty']}</td>
+            <td style="text-align:center">{txn['unit']}</td>
+            <td style="text-align:right">{txn['price']}</td>
+            <td style="text-align:right; color:#d9534f">{c_str}</td>
+            <td style="text-align:right; color:#5cb85c">{p_str}</td>
+            <td style="text-align:right; font-weight:bold">{running_balance:,.2f}</td>
+            <td style="font-size:12px; color:#666">{txn['remark']}</td>
+        </tr>
+        """
+        
+    closing_balance = running_balance
     
-    for _, row in df_sorted.iterrows():
-        # 金额：如果是收入则为正，支出则为负（假设业务类型已区分）
-        # 这里需要判断：如果是 "收入" -> +, "支出" -> -
-        # 但 df 里金额都是正数，要看 "业务类型"
-        amt = float(row.get("金额", 0)) # 修正列名
-        b_type = str(row.get("类型", "")) # 修正列名
-        
-        if "收" in b_type or "进" in b_type:
-             current_sum += amt
-        else:
-             current_sum -= amt
-             
-        cumulative_data.append(current_sum)
-        # 日期转字符串
-        dates.append(str(row.get("日期", "")))
-        
-    # 生成 SVG Points
-    svg_points = ""
-    chart_data = cumulative_data
-    if chart_data:
-        max_val = max(max(chart_data), abs(min(chart_data)))
-        if max_val == 0: max_val = 1
-        
-        # Normalize to 0-200 height, 0-800 width
-        # Center line at y=100
-        step_x = 800 / (len(chart_data) - 1) if len(chart_data) > 1 else 800
-        
-        points = []
-        for i, val in enumerate(chart_data):
-            x = i * step_x
-            # val > 0 goes up (smaller y), val < 0 goes down (larger y)
-            # scale factor: 90 / max_val (leave 10px margin)
-            y = 100 - (val / max_val * 90)
-            points.append(f"{x:.1f},{y:.1f}")
-            
-        svg_points = " ".join(points)
+    # 5. 生成 HTML
+    title_str = "客户对账单" if not is_supplier else "供应商对账单"
     
-    html_content = f"""
+    html = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="utf-8">
-        <title>往来对账单 - {target_partner}</title>
+        <title>{target_partner} - {title_str}</title>
         <style>
-            body {{ font-family: 'Segoe UI', sans-serif; background: #f5f7fa; color: #333; padding: 20px; }}
-            .container {{ max-width: 900px; margin: 0 auto; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }}
-            .header {{ border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: center; }}
-            .title h1 {{ margin: 0; font-size: 24px; color: #2c3e50; }}
-            .title p {{ margin: 5px 0 0; color: #7f8c8d; font-size: 14px; }}
-            .meta {{ text-align: right; color: #95a5a6; font-size: 13px; }}
-            
-            .cards {{ display: flex; gap: 20px; margin-bottom: 40px; }}
-            .card {{ flex: 1; background: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center; border: 1px solid #e9ecef; }}
-            .card .val {{ font-size: 24px; font-weight: bold; margin-bottom: 5px; }}
-            .card .lbl {{ font-size: 13px; color: #7f8c8d; }}
-            .c-in {{ color: #27ae60; }}
-            .c-out {{ color: #c0392b; }}
-            .c-net {{ color: #2980b9; }}
-            
-            table {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
-            th {{ text-align: left; padding: 12px; background: #f8f9fa; color: #7f8c8d; border-bottom: 2px solid #eee; }}
-            td {{ padding: 12px; border-bottom: 1px solid #f1f1f1; }}
-            tr:hover {{ background: #fafafa; }}
-            
-            .chart-container {{ margin: 30px 0; padding: 20px; border: 1px solid #eee; border-radius: 8px; background: #fff; }}
-            .chart-title {{ font-size: 14px; font-weight: bold; color: #34495e; margin-bottom: 15px; }}
-            
-            /* Tag styles */
-            .tag {{ padding: 2px 8px; border-radius: 4px; font-size: 12px; }}
-            .tag-in {{ background: #e8f5e9; color: #2e7d32; }}
-            .tag-out {{ background: #ffebee; color: #c62828; }}
+            body {{ font-family: 'SimHei', 'Microsoft YaHei', sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; }}
+            .header {{ text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px; }}
+            .title {{ font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+            .info-row {{ display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 14px; }}
+            table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; border: 1px solid #ccc; }}
+            th, td {{ border: 1px solid #ccc; padding: 8px; font-size: 13px; }}
+            th {{ background-color: #eee; text-align: center; }}
+            .summary-box {{ background-color: #f9f9f9; padding: 15px; border: 1px solid #ddd; margin-bottom: 20px; }}
+            .footer {{ margin-top: 40px; display: flex; justify-content: space-between; font-size: 14px; }}
+            .sign {{ border-top: 1px solid #000; width: 150px; display: inline-block; margin-left: 10px; }}
         </style>
     </head>
     <body>
-        <div class="container">
-            <div class="header">
-                <div class="title">
-                    <h1>往来对账单</h1>
-                    <p>单位: <strong>{target_partner}</strong></p>
-                </div>
-                <div class="meta">
-                    期间: {date_desc}<br>
-                    生成: {datetime.now().strftime('%Y-%m-%d %H:%M')}
-                </div>
-            </div>
-            
-            <div class="cards">
-                <div class="card">
-                    <div class="val c-in">+{total_in:,.2f}</div>
-                    <div class="lbl">累计收款 (我方收)</div>
-                </div>
-                <div class="card">
-                    <div class="val c-out">-{total_out:,.2f}</div>
-                    <div class="lbl">累计付款 (我方付)</div>
-                </div>
-                <div class="card">
-                    <div class="val {net_cls}">{net_val:+,.2f}</div>
-                    <div class="lbl">净额 (收-付)</div>
-                </div>
-            </div>
-            
-            <div class="chart-container">
-                <div class="chart-title">📈 累计净额走势 (Cumulative Net Balance)</div>
-                <svg width="100%" height="200" viewBox="0 0 800 200" preserveAspectRatio="none">
-                    <defs>
-                        <linearGradient id="grad" x1="0%" y1="0%" x2="0%" y2="100%">
-                            <stop offset="0%" style="stop-color:#3498db;stop-opacity:0.2" />
-                            <stop offset="100%" style="stop-color:#3498db;stop-opacity:0" />
-                        </linearGradient>
-                    </defs>
-                    <!-- Grid lines -->
-                    <line x1="0" y1="100" x2="800" y2="100" stroke="#eee" stroke-width="1" stroke-dasharray="4" />
-                    <line x1="0" y1="0" x2="800" y2="0" stroke="#eee" stroke-width="1" />
-                    <line x1="0" y1="200" x2="800" y2="200" stroke="#eee" stroke-width="1" />
-                    
-                    <!-- The Line -->
-                    <polyline points="{svg_points}" fill="none" stroke="#3498db" stroke-width="2" />
-                </svg>
-                <div style="text-align: center; font-size: 12px; color: #999; margin-top: 5px;">
-                    (起始: {chart_data[0] if chart_data else 0:.0f} &rarr; 结束: {chart_data[-1] if chart_data else 0:.0f})
-                </div>
-            </div>
-            
-            <h3>📄 交易明细</h3>
-            <table>
-                <thead>
-                    <tr>
-                        <th width="120">日期</th>
-                        <th width="80">类型</th>
-                        <th width="120">金额</th>
-                        <th>摘要/备注</th>
-                        <th width="80">凭证</th>
-                    </tr>
-                </thead>
-                <tbody>
-    """
-    
-    for r in sorted_records:
-        type_cls = "tag-in" if r['业务类型'] == "收款" else "tag-out"
-        amt_color = "#27ae60" if r['业务类型'] == "收款" else "#c0392b"
-        prefix = "+" if r['业务类型'] == "收款" else "-"
+        <div class="header">
+            <div style="font-size:18px; font-weight:bold">五金氧化加工中心</div>
+            <div class="title">{title_str}</div>
+        </div>
         
-        html_content += f"""
-        <tr>
-            <td>{r['日期']}</td>
-            <td><span class="tag {type_cls}">{r['业务类型']}</span></td>
-            <td style="color: {amt_color}; font-family: monospace; font-weight: bold;">{prefix}{r['金额']:,.2f}</td>
-            <td>{r['备注']} <span style="color:#999; font-size:12px">({r['费用类型']})</span></td>
-            <td>{r['是否有票']}</td>
-        </tr>
-        """
+        <div class="info-row">
+            <div>往来单位: <b>{target_partner}</b></div>
+            <div>对账期间: {start_date_str} 至 {end_date_str}</div>
+            <div>打印日期: {datetime.now().strftime('%Y-%m-%d')}</div>
+        </div>
         
-    html_content += """
-                </tbody>
+        <div class="summary-box">
+            <table style="width:100%; border:none; margin:0;">
+                <tr style="background:none;">
+                    <td style="border:none"><b>期初余额:</b> {opening_balance:,.2f}</td>
+                    <td style="border:none"><b>本期发生(应收/付):</b> {total_charge:,.2f}</td>
+                    <td style="border:none"><b>本期已结(实收/付):</b> {total_payment:,.2f}</td>
+                    <td style="border:none; font-size:16px"><b>期末应结:</b> <span style="color:red">{closing_balance:,.2f}</span></td>
+                </tr>
             </table>
-            
-            <div style="margin-top: 40px; text-align: center; color: #ccc; font-size: 12px; border-top: 1px solid #eee; padding-top: 20px;">
-                Generated by Feishu Financial Assistant
+        </div>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th width="12%">日期</th>
+                    <th width="25%">品名/摘要</th>
+                    <th width="8%">数量</th>
+                    <th width="5%">单位</th>
+                    <th width="8%">单价</th>
+                    <th width="10%">应收/应付</th>
+                    <th width="10%">实收/实付</th>
+                    <th width="10%">结余</th>
+                    <th width="12%">备注</th>
+                </tr>
+            </thead>
+            <tbody>
+                {html_rows}
+            </tbody>
+        </table>
+        
+        <div class="footer">
+            <div>制单人: 财务部</div>
+            <div>
+                确认签字: <span class="sign"></span>
+                <br><br>日期: ________________
             </div>
         </div>
     </body>
     </html>
     """
     
-    with open(html_path, "w", encoding="utf-8") as f:
-        f.write(html_content)
-        
-    log.info(f"✅ HTML对账单已生成: {html_path}", extra={"solution": "浏览器打开查看"})
-
-    try:
-        os.startfile(html_path)
-    except:
-        pass
-
-    # --- 5. 生成微信发送模板 ---
-    print("\n" + "="*40)
-    print("✂️  微信/IM 发送模板 (请复制下方内容)")
-    print("="*40)
+    save_dir = os.path.join(DATA_ROOT, "往来对账单")
+    if not os.path.exists(save_dir): os.makedirs(save_dir)
     
-    wx_template = f"""
-【对账单】{target_partner}
-📅 期间: {date_desc}
-----------------
-💰 我方收款: {total_in:,.2f}
-💸 我方付款: {total_out:,.2f}
-⚖️ 结余净额: {net:+,.2f} ({'我方净收' if net >=0 else '我方净付'})
-----------------
-详情请见附件对账单 (HTML/Excel)。
-如有疑问请及时沟通，谢谢！
-生成时间: {datetime.now().strftime('%m-%d %H:%M')}
-    """
-    print(wx_template.strip())
-    print("="*40 + "\n")
+    fname = os.path.join(save_dir, f"对账单_{target_partner}_{start_date_str}_{end_date_str}.html")
+    with open(fname, "w", encoding="utf-8") as f:
+        f.write(html)
+        
+    print(f"✅ 对账单已生成: {Color.UNDERLINE}{fname}{Color.ENDC}")
+    try: os.startfile(fname)
+    except: pass
+
+
+
+
+
+            
+
 
 # -------------------------------------------------------------------------
 # 新增功能：固定资产折旧
@@ -6585,6 +6316,17 @@ def draw_dashboard_ui():
                 last_backup = datetime.fromtimestamp(os.path.getmtime(latest)).strftime("%H:%M")
         except: pass
 
+    # 2.5 库存预警
+    inv_alert = ""
+    try:
+        inv_file = os.path.join(DATA_ROOT, "cache", "inventory_alert.json")
+        if os.path.exists(inv_file):
+            with open(inv_file, "r") as f:
+                alerts = json.load(f)
+                if alerts:
+                    inv_alert = f"⚠️ 库存告急: {len(alerts)}项"
+    except: pass
+
     # 3. 颜色
     c_inc = Color.GREEN
     c_exp = Color.FAIL
@@ -6593,10 +6335,6 @@ def draw_dashboard_ui():
     c_bld = Color.BOLD
     
     # 4. 绘制
-    # Width = 40 chars inside
-    # ╔══════════════════════════════════════╗
-    # ║ 📊 2026-02 财务概览                  ║
-    
     lines = []
     lines.append(f"{c_bld}╔════════════════════════════════════════════╗{c_rst}")
     lines.append(f"{c_bld}║ 📊 {cur_month} 财务概览                        ║{c_rst}")
@@ -6616,76 +6354,62 @@ def draw_dashboard_ui():
     
     lines.append(f"{c_bld}╠════════════════════════════════════════════╣{c_rst}")
     
-    # Pending & Backup
-    # Split into two parts
+    # [New] Production Stats
+    prod_stats = ""
+    try:
+        if os.path.exists(FILE_DASHBOARD_CACHE):
+            with open(FILE_DASHBOARD_CACHE, "r", encoding="utf-8") as f:
+                d = json.load(f)
+                p = d.get("production", {})
+                if p:
+                    kg = p.get("kg", 0)
+                    area = p.get("area", 0)
+                    cnt = p.get("count", 0)
+                    if kg > 0 or area > 0:
+                         prod_stats = f"🏭 产量: {int(kg)}kg / {int(area)}m² ({cnt}笔)"
+    except: pass
+    
+    if prod_stats:
+        lines.append(f"║ {Color.OKBLUE}{prod_stats:<39}{c_rst}║")
+        lines.append(f"{c_bld}╠════════════════════════════════════════════╣{c_rst}")
+    
+    # Pending & Backup & Alert
     p_color = Color.FAIL if pending_count > 0 else Color.OKGREEN
     s_pend = f"🔔 待办: {pending_count}"
     s_back = f"💾 备份: {last_backup}"
     
-    # Padding calculation is tricky with ANSI codes, so we construct manually
-    # Inner width 40. "🔔 待办: 3" is roughly 10 visual width.
-    # Simple approach: standard text
-    
     lines.append(f"║ {p_color}{s_pend:<16}{c_rst}    {Color.OKBLUE}{s_back:<16}{c_rst} ║")
+    
+    if inv_alert:
+        lines.append(f"║ {Color.FAIL}{inv_alert:<39}{c_rst}║")
     
     lines.append(f"{c_bld}╚════════════════════════════════════════════╝{c_rst}")
     
     return "\n".join(lines)
 
-def get_dashboard_status():
-    """获取仪表盘状态 (财务概览/待办/备份)"""
-    status_lines = []
-    
-    # 0. 财务概览 (本月)
+def update_inventory_alert_cache(client, app_token):
+    """更新库存预警缓存"""
     try:
-        if os.path.exists(FILE_DASHBOARD_CACHE):
-            with open(FILE_DASHBOARD_CACHE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                cur_month = datetime.now().strftime("%Y-%m")
-                if data.get("month") == cur_month:
-                    inc = data.get("income", 0)
-                    exp = data.get("expense", 0)
-                    net = data.get("net", 0)
-                    
-                    c_inc = Color.GREEN
-                    c_exp = Color.FAIL
-                    c_net = Color.OKBLUE if net >= 0 else Color.FAIL
-                    
-                    summary = f"{cur_month} 概览: {c_inc}+{inc:,.0f}{Color.ENDC} / {c_exp}-{exp:,.0f}{Color.ENDC} = {c_net}{net:+,.0f}{Color.ENDC}"
-                    status_lines.append(summary)
-    except:
-        pass
-    
-    # 1. 检查待处理文件
-    watch_dir = PENDING_DIR
-    pending_count = 0
-    if os.path.exists(watch_dir):
-        pending_files = [f for f in os.listdir(watch_dir) if f.lower().endswith(('.xlsx', '.xls', '.csv', '.jpg', '.png'))]
-        pending_count = len(pending_files)
+        t_id = get_table_id_by_name(client, app_token, "库存管理表")
+        if not t_id: return
+        recs = get_all_records(client, app_token, t_id)
+        low_stock = []
+        if recs:
+            for r in recs:
+                c = float(r.fields.get("当前库存", 0))
+                s = float(r.fields.get("安全库存", 0))
+                if s > 0 and c < s:
+                    low_stock.append(r.fields.get("物品名称"))
         
-    if pending_count > 0:
-        status_lines.append(f"{Color.FAIL}🔔 待处理单据: {pending_count} 个 (建议立即运行 '00'){Color.ENDC}")
-    else:
-        status_lines.append(f"{Color.OKGREEN}✅ 待处理单据: 无{Color.ENDC}")
+        cache_dir = os.path.join(DATA_ROOT, "cache")
+        if not os.path.exists(cache_dir): os.makedirs(cache_dir)
         
-    # 2. 检查最近备份
-    backup_dir = os.path.join(os.getcwd(), "财务数据备份")
-    last_backup = "无"
-    if os.path.exists(backup_dir):
-        try:
-            # 检查子目录 (旧模式) 或 文件 (新模式)
-            items = [os.path.join(backup_dir, d) for d in os.listdir(backup_dir)]
-            valid_backups = [f for f in items if os.path.isdir(f) or f.lower().endswith(('.xlsx', '.zip'))]
+        with open(os.path.join(cache_dir, "inventory_alert.json"), "w") as f:
+            json.dump(low_stock, f)
             
-            if valid_backups:
-                latest = max(valid_backups, key=os.path.getmtime)
-                last_time = datetime.fromtimestamp(os.path.getmtime(latest)).strftime("%m-%d %H:%M")
-                last_backup = last_time
-        except: pass
-            
-    status_lines.append(f"{Color.OKBLUE}💾 最近备份: {last_backup}{Color.ENDC}")
-    
-    return " | ".join(status_lines)
+    except: pass
+
+
 
 def generate_monthly_expenses(client, app_token):
     """生成每月固定支出"""
@@ -6782,25 +6506,856 @@ def generate_monthly_expenses(client, app_token):
     # Update cache
     try:
         update_dashboard_cache_silent(client, app_token)
+        update_inventory_alert_cache(client, app_token)
     except: pass
+
+def reconcile_bank_account(client, app_token):
+    """资金账户对账"""
+    # 1. Load Initial Balance
+    config_file = os.path.join(DATA_ROOT, "config", "capital_account.json")
+    if not os.path.exists(os.path.dirname(config_file)):
+        os.makedirs(os.path.dirname(config_file), exist_ok=True)
+        
+    data = {}
+    if os.path.exists(config_file):
+        try:
+            with open(config_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except: pass
+        
+    print(f"\n{Color.HEADER}💰 资金账户对账 (Reconciliation){Color.ENDC}")
+    print("--------------------------------")
+    print("功能说明: 核对【系统账面余额】与【实际资金余额】是否一致。")
+    
+    init_date = data.get("init_date", "2024-01-01")
+    init_balance = data.get("init_balance", 0.0)
+    
+    print(f"\n⚙️  当前期初设置: {init_date} 余额: {init_balance:,.2f}")
+    if input("👉 是否修改期初余额? (y/n) [n]: ").strip().lower() == 'y':
+        d = input("请输入期初日期 (YYYY-MM-DD): ").strip()
+        if d: init_date = d
+        b = input("请输入期初余额: ").strip()
+        if b: 
+            try: init_balance = float(b)
+            except: pass
+        
+        data["init_date"] = init_date
+        data["init_balance"] = init_balance
+        try:
+            with open(config_file, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+            print("✅ 设置已保存")
+        except Exception as e:
+            print(f"❌ 保存失败: {e}")
+            
+    # Calculate System Balance
+    print("\n⏳ 正在计算系统余额 (请稍候)...")
+    
+    t_id = get_table_id_by_name(client, app_token, "日常台账表")
+    if not t_id: return
+    
+    # 既然是小会计，数据量应该不会特别大，直接全量拉取比较稳
+    # 如果有缓存用缓存，但为了对账准确，建议刷新
+    recs = get_all_records(client, app_token, t_id)
+    
+    total_in = 0.0
+    total_out = 0.0
+    
+    try:
+        init_ts = int(datetime.strptime(init_date, "%Y-%m-%d").timestamp() * 1000)
+    except:
+        print("❌ 日期格式错误")
+        return
+    
+    valid_count = 0
+    for r in recs:
+        d = r.fields.get("记账日期", 0)
+        if d < init_ts: continue
+        
+        t = r.fields.get("业务类型", "")
+        amt = float(r.fields.get("实际收付金额", 0))
+        
+        valid_count += 1
+        if t == "收款": total_in += amt
+        elif t in ["付款", "费用"]: total_out += amt
+        
+    sys_balance = init_balance + total_in - total_out
+    
+    print(f"\n📊 系统账面计算 ({init_date} 至今, 共 {valid_count} 笔):")
+    print(f"   ➕ 期间收入: {Color.GREEN}{total_in:,.2f}{Color.ENDC}")
+    print(f"   ➖ 期间支出: {Color.FAIL}{total_out:,.2f}{Color.ENDC}")
+    print(f"   💰 理论余额: {Color.BOLD}{sys_balance:,.2f}{Color.ENDC}")
+    
+    # User Input
+    print(f"\n{Color.CYAN}💳 请输入您手头所有资金的总和 (银行卡+微信+支付宝+现金){Color.ENDC}")
+    real_str = input("👉 实际余额: ").strip()
+    if not real_str: return
+    
+    try:
+        real_balance = float(real_str)
+        diff = real_balance - sys_balance
+        
+        print("-" * 30)
+        if abs(diff) < 1.0: # 允许1元误差
+            print(f"✅ {Color.OKGREEN}完美！账实相符！(差异 {diff:.2f}){Color.ENDC}")
+            print("🎉 您今天的账记得很棒！")
+        else:
+            print(f"❌ {Color.FAIL}对账不平！差异: {diff:,.2f}{Color.ENDC}")
+            if diff > 0:
+                print(f"   🤔 实际比账面【多】了 {abs(diff):,.2f}")
+                print("   可能原因: 1. 有收款忘了记  2. 支出记多了  3. 期初余额偏低")
+            else:
+                print(f"   🤔 实际比账面【少】了 {abs(diff):,.2f}")
+                print("   可能原因: 1. 有支出忘了记  2. 收款记多了  3. 期初余额偏高")
+                
+            if input("\n🔎 是否需要列出今日收支以供核对? (y/n): ").strip().lower() == 'y':
+                # Show today's entries
+                today_start = int(datetime(datetime.now().year, datetime.now().month, datetime.now().day).timestamp() * 1000)
+                print(f"\n📅 今日 ({datetime.now().strftime('%Y-%m-%d')}) 记录:")
+                for r in recs:
+                    if r.fields.get("记账日期", 0) >= today_start:
+                         print(f"   {r.fields.get('业务类型')} | {r.fields.get('实际收付金额')} | {r.fields.get('往来单位费用')} | {r.fields.get('备注')}")
+    except:
+        print("❌ 金额无效")
+    
+    input("\n按回车键返回...")
+
+def create_inventory_table(client, app_token):
+    """创建库存管理表 (Consumables Inventory)"""
+    table_name = "库存管理表"
+    table_id = get_table_id_by_name(client, app_token, table_name)
+    
+    if table_id: return table_id
+    
+    print(f"⏳ 正在初始化 {table_name} ...")
+    
+    req = CreateAppTableRequest.builder() \
+        .app_token(app_token) \
+        .request_body(CreateAppTableRequestBody.builder()
+            .table(AppTable.builder()
+                .name(table_name)
+                .default_view_name("默认视图")
+                .fields([
+                    AppTableCreateHeader.builder().field_name("物品名称").type(1).build(), # Text
+                    AppTableCreateHeader.builder().field_name("规格型号").type(1).build(), # Text
+                    AppTableCreateHeader.builder().field_name("当前库存").type(2).build(), # Number
+                    AppTableCreateHeader.builder().field_name("单位").type(1).build(),     # Text
+                    AppTableCreateHeader.builder().field_name("安全库存").type(2).build(), # Number (Alert Level)
+                    AppTableCreateHeader.builder().field_name("最后变动时间").type(5).build(), # Date
+                    AppTableCreateHeader.builder().field_name("备注").type(1).build(),
+                ])
+                .build())
+            .build()) \
+        .build()
+        
+    resp = client.bitable.v1.app_table.create(req)
+    if resp.success():
+        print(f"✅ {table_name} 创建成功")
+        return resp.data.table_id
+    else:
+        print(f"❌ 创建失败: {resp.msg}")
+        return None
+
+def manage_inventory(client, app_token):
+    """车间耗材库存管理"""
+    table_id = create_inventory_table(client, app_token)
+    if not table_id: return
+    
+    while True:
+        print(f"\n{Color.HEADER}📦 车间耗材库存管理 (Inventory){Color.ENDC}")
+        print("--------------------------------")
+        
+        # 1. Show Dashboard (Low Stock)
+        recs = get_all_records(client, app_token, table_id)
+        low_stock = []
+        total_items = 0
+        
+        if recs:
+            total_items = len(recs)
+            for r in recs:
+                curr = float(r.fields.get("当前库存", 0))
+                safe = float(r.fields.get("安全库存", 0))
+                if safe > 0 and curr < safe:
+                    low_stock.append(r)
+        
+        if low_stock:
+            print(f"{Color.FAIL}⚠️  库存预警: {len(low_stock)} 种物品低于安全库存!{Color.ENDC}")
+            for r in low_stock[:3]:
+                print(f"   - {r.fields.get('物品名称')} (余 {r.fields.get('当前库存')}{r.fields.get('单位')})")
+        else:
+            print(f"{Color.OKGREEN}✅ 库存状态良好 (共 {total_items} 种物品){Color.ENDC}")
+            
+        print("\n1. 📋 查看所有库存")
+        print("2. 📥 采购入库 (Stock In)")
+        print("3. 📤 领料出库 (Stock Out)")
+        print("4. 🔄 库存盘点 (Stock Take)")
+        print("0. 返回")
+        
+        choice = input(f"\n👉 请选择: ").strip()
+        
+        if choice == '0': break
+        
+        elif choice == '1':
+            print(f"\n📋 库存列表:")
+            print(f"{'序号':<4} | {'物品名称':<15} | {'规格':<10} | {'当前库存':<10} | {'状态'}")
+            print("-" * 60)
+            
+            # Sort by name
+            recs.sort(key=lambda x: x.fields.get("物品名称", ""))
+            
+            for i, r in enumerate(recs):
+                f = r.fields
+                curr = float(f.get("当前库存", 0))
+                safe = float(f.get("安全库存", 0))
+                unit = f.get("单位", "")
+                status = "✅"
+                if safe > 0 and curr < safe: status = f"{Color.FAIL}⚠️ 补货{Color.ENDC}"
+                
+                print(f"{i+1:<4} | {f.get('物品名称'):<15} | {f.get('规格型号',''):<10} | {curr:<6}{unit} | {status}")
+            input("\n按回车继续...")
+            
+        elif choice == '2': # 入库
+            print(f"\n{Color.CYAN}📥 采购入库{Color.ENDC}")
+            name = input("物品名称 (如 '片碱'): ").strip()
+            if not name: continue
+            
+            # Check existing
+            target_rec = None
+            for r in recs:
+                if r.fields.get("物品名称") == name:
+                    target_rec = r
+                    break
+            
+            curr_qty = 0
+            unit = "kg"
+            
+            if target_rec:
+                print(f"✅ 找到已有物品: {name} (当前: {target_rec.fields.get('当前库存')})")
+                curr_qty = float(target_rec.fields.get("当前库存", 0))
+                unit = target_rec.fields.get("单位", "kg")
+            else:
+                print("🆕 新物品登记")
+                unit = input("单位 (默认 kg): ").strip()
+                if not unit: unit = "kg"
+                
+            qty_in = float(input(f"入库数量 ({unit}): ").strip())
+            
+            new_qty = curr_qty + qty_in
+            
+            # Save
+            fields = {
+                "物品名称": name,
+                "当前库存": new_qty,
+                "最后变动时间": int(datetime.now().timestamp() * 1000),
+                "单位": unit
+            }
+            
+            if target_rec:
+                # Update
+                client.bitable.v1.app_table_record.update(
+                    UpdateAppTableRecordRequest.builder().app_token(app_token).table_id(table_id).record_id(target_rec.record_id)
+                    .request_body(AppTableRecord.builder().fields(fields).build()).build()
+                )
+            else:
+                # Create
+                # Ask for safety stock
+                s_stock = input("设置安全库存 (默认 0): ").strip()
+                if s_stock: fields["安全库存"] = float(s_stock)
+                
+                client.bitable.v1.app_table_record.create(
+                    CreateAppTableRecordRequest.builder().app_token(app_token).table_id(table_id)
+                    .request_body(AppTableRecord.builder().fields(fields).build()).build()
+                )
+            
+            print(f"✅ 入库完成！当前库存: {new_qty} {unit}")
+            
+            # Link to Expense
+            if input("💰 是否同时记录一笔【采购支出】? (y/n) [y]: ").strip().lower() != 'n':
+                amt = float(input("采购金额 (元): ").strip())
+                remark = f"采购 {name} {qty_in}{unit}"
+                
+                # Call register logic directly
+                l_id = get_table_id_by_name(client, app_token, "日常台账表")
+                if l_id:
+                     ef = {
+                         "记账日期": int(datetime.now().timestamp() * 1000),
+                         "业务类型": "费用",
+                         "费用归类": "原材料-三酸/片碱/色粉", # Default
+                         "实际收付金额": amt,
+                         "备注": remark,
+                         "往来单位费用": "供应商"
+                     }
+                     client.bitable.v1.app_table_record.create(
+                        CreateAppTableRecordRequest.builder().app_token(app_token).table_id(l_id)
+                        .request_body(AppTableRecord.builder().fields(ef).build()).build()
+                     )
+                     print("✅ 支出已记录")
+
+        elif choice == '3': # 出库
+            print(f"\n{Color.CYAN}📤 领料出库{Color.ENDC}")
+            name = input("物品名称: ").strip()
+            target_rec = None
+            for r in recs:
+                if r.fields.get("物品名称") == name:
+                    target_rec = r
+                    break
+            
+            if not target_rec:
+                print("❌ 物品不存在")
+                continue
+                
+            curr = float(target_rec.fields.get("当前库存", 0))
+            print(f"当前库存: {curr} {target_rec.fields.get('单位')}")
+            
+            qty_out = float(input("领用数量: ").strip())
+            if qty_out > curr:
+                print(f"⚠️ 库存不足! (缺 {qty_out - curr})")
+                if input("是否强制出库? (y/n): ").strip().lower() != 'y':
+                    continue
+            
+            new_qty = curr - qty_out
+            client.bitable.v1.app_table_record.update(
+                UpdateAppTableRecordRequest.builder().app_token(app_token).table_id(table_id).record_id(target_rec.record_id)
+                .request_body(AppTableRecord.builder().fields({"当前库存": new_qty, "最后变动时间": int(datetime.now().timestamp() * 1000)}).build()).build()
+            )
+            print(f"✅ 出库完成！剩余: {new_qty}")
+            
+        elif choice == '4': # 盘点
+             print(f"\n{Color.CYAN}🔄 库存盘点{Color.ENDC}")
+             name = input("物品名称: ").strip()
+             target_rec = None
+             for r in recs:
+                 if r.fields.get("物品名称") == name:
+                     target_rec = r
+                     break
+             if not target_rec:
+                 print("❌ 物品不存在")
+                 continue
+                 
+             print(f"系统库存: {target_rec.fields.get('当前库存')}")
+             real_qty = float(input("实际盘点数量: ").strip())
+             
+             client.bitable.v1.app_table_record.update(
+                 UpdateAppTableRecordRequest.builder().app_token(app_token).table_id(table_id).record_id(target_rec.record_id)
+                 .request_body(AppTableRecord.builder().fields({"当前库存": real_qty, "最后变动时间": int(datetime.now().timestamp() * 1000)}).build()).build()
+             )
+             print(f"✅ 盘点已更新")
+
+# 智能回款/付款核销助手
+def smart_payment_matcher(client, app_token):
+    """智能凑单工具：查找哪几笔账单凑成了这笔款项 (支持回款和付款)"""
+    print(f"\n{Color.HEADER}🧩 智能核销助手 (Smart Matcher){Color.ENDC}")
+    print("功能: 输入金额，自动查找对应的未结账单组合。")
+    print("--------------------------------")
+    print("1. 客户回款凑单 (查加工费收入)")
+    print("2. 供应商付款凑单 (查外协/材料支出)")
+    print("0. 返回")
+    
+    mode = input(f"\n👉 请选择模式 (1/2): ").strip()
+    if mode == '0': return
+    
+    pf_table_id = get_table_id_by_name(client, app_token, "加工费明细表")
+    if not pf_table_id: return
+
+    if mode == '1':
+        target_type = "收入-加工服务"
+        name_prompt = "客户名称"
+        amt_prompt = "回款金额"
+    else:
+        target_type = "支出-外协加工" # 简单起见先查外协，如果需要查材料可能要去日常台账
+        # But wait, user said "Outsourced processing" is a major cost.
+        # "Acid/Soda" might be in inventory or daily ledger.
+        # Let's check "加工费明细表" first for outsourcing.
+        name_prompt = "供应商名称"
+        amt_prompt = "付款金额"
+
+    name = input(f"👉 请输入{name_prompt} (支持模糊): ").strip()
+    if not name: return
+    
+    # 1. Fetch Records
+    print(f"⏳ 正在查询 '{name}' 的相关记录...")
+    
+    # Fetch based on mode
+    target_recs = []
+    
+    if mode == '1' or mode == '2':
+        # Check Processing Fee Table (covers Income and Outsourcing)
+        filter_p = f'CurrentValue.[类型]="{target_type}"'
+        records = get_all_records(client, app_token, pf_table_id, filter_info=filter_p)
+        
+        for r in records:
+            p = r.fields.get("往来单位", "")
+            if name in p:
+                try:
+                    amt = float(r.fields.get("总金额", 0))
+                except: amt = 0
+                
+                target_recs.append({
+                    "amt": amt,
+                    "date": r.fields.get("日期", 0),
+                    "item": r.fields.get("物品名称", "未知"),
+                    "spec": r.fields.get("规格", ""),
+                    "id": r.record_id,
+                    "source": "加工费表"
+                })
+                
+    # If mode 2, also check Daily Ledger for "Material" costs if not found enough?
+    # For now, keep it simple.
+            
+    if not target_recs:
+        print(f"❌ 未找到包含 '{name}' 的相关未结记录")
+        return
+        
+    print(f"✅ 找到 {len(target_recs)} 条相关记录")
+    
+    # 2. Input Amount
+    try:
+        target_amt = float(input(f"👉 请输入{amt_prompt} (实际发生额): ").strip())
+    except:
+        print("❌ 金额无效")
+        return
+        
+    print(f"⏳ 正在计算凑单组合 (目标: {target_amt})...")
+    
+    # 3. Find Subset
+    import itertools
+    
+    found = False
+    
+    # Limit records to last 50 to avoid explosion
+    target_recs.sort(key=lambda x: x["date"], reverse=True)
+    working_recs = target_recs[:50] 
+    
+    for r in range(1, 6): # Try 1 to 5 bills
+        for combo in itertools.combinations(working_recs, r):
+            s = sum(c["amt"] for c in combo)
+            if abs(s - target_amt) < 1.0: # Tolerance 1 yuan
+                print(f"\n{Color.OKGREEN}🎉 找到匹配组合! (误差: {s - target_amt:.2f}){Color.ENDC}")
+                for c in combo:
+                    d_str = datetime.fromtimestamp(c["date"]/1000).strftime("%Y-%m-%d")
+                    print(f" - {d_str} | {c['item']} {c['spec']} | ¥ {c['amt']}")
+                found = True
+                break
+        if found: break
+        
+    if not found:
+        print(f"\n{Color.WARNING}⚠️ 未找到精确匹配的组合 (尝试了最近50笔中的1-5笔组合){Color.ENDC}")
+        print("建议：手动核对或检查是否有抹零/扣款。")
+        
+    input("\n按回车继续...")
+
+# 老板查账/业务速查
+def boss_quick_search(client, app_token):
+    """老板查账：快速查询客户/供应商/库存/资金"""
+    while True:
+        print(f"\n{Color.HEADER}🔎 老板查账 (Quick Search){Color.ENDC}")
+        print("--------------------------------")
+        print("1. 👤 查客户 (欠款/最近交易)")
+        print("2. 🏭 查供应商 (应付/最近采购)")
+        print("3. 📦 查库存 (数量/价格)")
+        print("4. 💰 查资金 (账户余额)")
+        print("5. 🏷️ 查历史单价 (Price History)")
+        print("0. 返回")
+        
+        c = input(f"\n👉 请选择: ").strip()
+        if c == '0': break
+        
+        if c == '1': # Customer
+            name = input("请输入客户名称 (模糊): ").strip()
+            if not name: continue
+            
+            # Fetch Processing Fee (Income)
+            pf_id = get_table_id_by_name(client, app_token, "加工费明细表")
+            if not pf_id: continue
+            
+            print(f"⏳ 正在查询 '{name}' ...")
+            filter_p = f'CurrentValue.[类型]="收入-加工服务"'
+            recs = get_all_records(client, app_token, pf_id, filter_info=filter_p)
+            
+            found_recs = [r for r in recs if name in r.fields.get("往来单位", "")]
+            if not found_recs:
+                print("❌ 未找到记录")
+                continue
+            
+            # Calc Stats
+            total_amt = sum([float(r.fields.get("总金额", 0)) for r in found_recs])
+            unpaid = 0.0
+            for r in found_recs:
+                # 简单判断：如果状态不是"已结清" (需确保字段存在)
+                status = r.fields.get("状态", "未结") 
+                if status != "已结清":
+                    unpaid += float(r.fields.get("总金额", 0))
+            
+            found_recs.sort(key=lambda x: x.fields.get("日期", 0), reverse=True)
+            last_3 = found_recs[:3]
+            
+            print(f"\n📊 {name} 数据概览:")
+            print(f"   💰 累计加工费: {total_amt:,.2f}")
+            print(f"   ⚠️ 当前未结清: {Color.FAIL}{unpaid:,.2f}{Color.ENDC}")
+            print(f"   📝 最近3笔交易:")
+            for r in last_3:
+                d = datetime.fromtimestamp(r.fields.get("日期",0)/1000).strftime("%Y-%m-%d")
+                item = r.fields.get("物品名称","")
+                spec = r.fields.get("规格","")
+                amt = float(r.fields.get("总金额", 0))
+                print(f"     - {d} | {item} {spec} | ¥ {amt}")
+                
+        elif c == '2': # Supplier
+             name = input("请输入供应商名称 (模糊): ").strip()
+             pf_id = get_table_id_by_name(client, app_token, "加工费明细表")
+             print(f"⏳ 正在查询 '{name}' ...")
+             
+             # Check Outsourcing
+             filter_p = f'CurrentValue.[类型]="支出-外协加工"'
+             recs = get_all_records(client, app_token, pf_id, filter_info=filter_p)
+             found = [r for r in recs if name in r.fields.get("往来单位", "")]
+             
+             total = sum([float(r.fields.get("总金额", 0)) for r in found])
+             unpaid = sum([float(r.fields.get("总金额", 0)) for r in found if r.fields.get("状态") != "已结清"])
+             
+             print(f"\n📊 {name} (外协) 数据概览:")
+             print(f"   💰 累计外协费: {total:,.2f}")
+             print(f"   ⚠️ 当前未付:   {Color.FAIL}{unpaid:,.2f}{Color.ENDC}")
+             if found:
+                 found.sort(key=lambda x: x.fields.get("日期", 0), reverse=True)
+                 print(f"   📝 最近3笔:")
+                 for r in found[:3]:
+                     d = datetime.fromtimestamp(r.fields.get("日期",0)/1000).strftime("%Y-%m-%d")
+                     print(f"     - {d} | {r.fields.get('物品名称')} | ¥ {r.fields.get('总金额')}")
+                     
+        elif c == '3': # Stock
+             name = input("请输入物品名称 (模糊): ").strip()
+             inv_id = get_table_id_by_name(client, app_token, "车间耗材库存表")
+             if not inv_id: 
+                 print("❌ 未启用库存表")
+                 continue
+             recs = get_all_records(client, app_token, inv_id)
+             found = [r for r in recs if name in r.fields.get("物品名称", "")]
+             
+             if not found:
+                 print("❌ 未找到物品")
+             else:
+                 print(f"\n📦 库存查询结果:")
+                 for r in found:
+                     n = r.fields.get("物品名称")
+                     q = r.fields.get("当前库存")
+                     u = r.fields.get("单位")
+                     safe = r.fields.get("安全库存", 0)
+                     print(f"   - {n}: {Color.OKGREEN}{q} {u}{Color.ENDC} (安全线: {safe})")
+        
+        elif c == '4': # Cash
+             l_id = get_table_id_by_name(client, app_token, "日常台账表")
+             recs = get_all_records(client, app_token, l_id)
+             
+             total_inc = sum([float(r.fields.get("实际收付金额",0)) for r in recs if r.fields.get("业务类型")=="收款"])
+             total_exp = sum([float(r.fields.get("实际收付金额",0)) for r in recs if r.fields.get("业务类型") in ["付款","费用"]])
+             
+             print(f"\n💰 资金概览 (基于流水计算):")
+             print(f"   总收入: {total_inc:,.2f}")
+             print(f"   总支出: {total_exp:,.2f}")
+             print(f"   💵 结余: {Color.OKGREEN}{total_inc - total_exp:,.2f}{Color.ENDC}")
+
+        elif c == '5': # Price History
+             p_name = input("请输入物品名称 (模糊): ").strip()
+             c_name = input("请输入客户名称 (可选, 回车跳过): ").strip()
+             
+             pf_id = get_table_id_by_name(client, app_token, "加工费明细表")
+             if pf_id:
+                 print(f"⏳ 正在查询 '{p_name}' ...")
+                 # Filter: Type="收入-加工服务"
+                 filter_p = f'CurrentValue.[类型]="收入-加工服务"'
+                 recs = get_all_records(client, app_token, pf_id, filter_info=filter_p)
+                 
+                 found = []
+                 for r in recs:
+                     item = r.fields.get("品名", "")
+                     spec = r.fields.get("规格", "")
+                     cust = r.fields.get("往来单位", "")
+                     
+                     if p_name in item or p_name in spec:
+                         if c_name and c_name not in cust:
+                             continue
+                         found.append(r)
+                 
+                 if not found:
+                     print("❌ 未找到记录")
+                 else:
+                     # Sort by date desc
+                     found.sort(key=lambda x: x.fields.get("日期", 0), reverse=True)
+                     
+                     print(f"\n🏷️ 历史单价查询结果 (最近 10 笔):")
+                     print(f"{'日期':<10} | {'客户':<10} | {'品名/规格':<20} | {'数量':<8} | {'单价':<8} | {'备注'}")
+                     print("-" * 80)
+                     
+                     for r in found[:10]:
+                         d = datetime.fromtimestamp(r.fields.get("日期",0)/1000).strftime("%Y-%m-%d")
+                         cust = r.fields.get("往来单位", "")[:10]
+                         desc = f"{r.fields.get('品名','')} {r.fields.get('规格','')}"[:20]
+                         qty = f"{r.fields.get('数量',0)}{r.fields.get('单位','')}"
+                         price = f"{r.fields.get('单价',0)}"
+                         rem = r.fields.get("备注", "")
+                         
+                         print(f"{d:<10} | {cust:<10} | {desc:<20} | {qty:<8} | {Color.OKGREEN}{price:<8}{Color.ENDC} | {rem}")
+             
+        input("\n按回车继续...")
+
+def calculate_piecework_salary():
+    """简易计件工资计算器"""
+    print(f"\n{Color.HEADER}👷 简易计件工资计算器{Color.ENDC}")
+    print("--------------------------------")
+    
+    entries = []
+    while True:
+        print(f"\n📝 录入第 {len(entries)+1} 项 (输入 0 结束录入, c 清空):")
+        process = input("   工序/产品 (如 '挂具', 'A款灯杯'): ").strip()
+        if process == '0': break
+        if process.lower() == 'c':
+            entries = []
+            print("已清空")
+            continue
+            
+        try:
+            qty_str = input("   数量 (个/扎): ").strip()
+            price_str = input("   单价 (元): ").strip()
+            
+            qty = float(qty_str)
+            price = float(price_str)
+            total = qty * price
+            
+            entries.append({
+                "process": process,
+                "qty": qty,
+                "price": price,
+                "total": total
+            })
+            
+            print(f"   ✅ 已记: {qty} * {price} = {total:.2f}")
+            
+        except:
+            print("❌ 输入格式错误，请重试")
+            
+    if not entries: return
+    
+    # 汇总
+    print(f"\n{Color.OKGREEN}📊 工资汇总单{Color.ENDC}")
+    print("-" * 50)
+    print(f"{'工序/产品':<15} | {'数量':<10} | {'单价':<8} | {'金额':<10}")
+    print("-" * 50)
+    
+    grand_total = 0.0
+    for e in entries:
+        print(f"{e['process']:<15} | {e['qty']:<10.1f} | {e['price']:<8.3f} | {e['total']:<10.2f}")
+        grand_total += e['total']
+        
+    print("-" * 50)
+    print(f"{'总计':<37} | {Color.FAIL}¥ {grand_total:,.2f}{Color.ENDC}")
+    
+    # 复制提示
+    print("\n💡 提示: 您可以截图或复制上方表格到微信发给员工核对。")
+    input("按回车返回...")
+
+def anodizing_price_calculator():
+    """氧化计价助手 (面积/重量/价格计算)"""
+    import math
+    
+    print(f"\n{Color.HEADER}📐 氧化计价助手 (报价神器){Color.ENDC}")
+    print("--------------------------------")
+    
+    # 铝密度 (kg/m3)
+    DENSITY_AL = 2700.0 
+    
+    while True:
+        print("\n请选择计算模式:")
+        print("1. 🟢 管/棒材 (输入: 直径x壁厚x长度)")
+        print("2. 🟨 板/片材 (输入: 长x宽x厚)")
+        print("3. 🔷 型材 (输入: 截面周长x米重x长度)")
+        print("0. 返回")
+        
+        mode = input("👉 请选择: ").strip()
+        if mode == '0': break
+        
+        area_total = 0.0 # 平方米
+        weight_total = 0.0 # kg
+        count = 0
+        desc = ""
+        
+        try:
+            if mode == '1': # 管/棒
+                d_mm = float(input("   外径 (mm): "))
+                wall_str = input("   壁厚 (mm) [实心棒填0]: ").strip()
+                wall_mm = float(wall_str) if wall_str else 0
+                l_m = float(input("   长度 (m): "))
+                qty = int(input("   数量 (支): "))
+                
+                # Area = pi * d * L * qty (外表面积)
+                area_one = math.pi * (d_mm / 1000.0) * l_m
+                area_total = area_one * qty
+                
+                # Weight
+                if wall_mm > 0:
+                    # Tube: pi * (R^2 - r^2) * L * density
+                    R = d_mm / 2.0 / 1000.0
+                    r = (d_mm - 2*wall_mm) / 2.0 / 1000.0
+                    vol_one = math.pi * (R**2 - r**2) * l_m
+                    desc = f"管材 (Φ{d_mm}*{wall_mm}mm * {l_m}m)"
+                else:
+                    # Rod: pi * R^2 * L * density
+                    R = d_mm / 2.0 / 1000.0
+                    vol_one = math.pi * (R**2) * l_m
+                    desc = f"棒材 (Φ{d_mm}mm * {l_m}m)"
+                    
+                weight_total = vol_one * DENSITY_AL * qty
+                count = qty
+                
+            elif mode == '2': # 板
+                l_mm = float(input("   长 (mm): "))
+                w_mm = float(input("   宽 (mm): "))
+                h_str = input("   厚 (mm) [用于算重/侧边]: ").strip()
+                h_mm = float(h_str) if h_str else 0
+                
+                is_double = input("   是否双面氧化? (y/n) [y]: ").strip().lower() != 'n'
+                qty = int(input("   数量 (片): "))
+                
+                # Area (Main face)
+                area_one = (l_mm / 1000.0) * (w_mm / 1000.0)
+                if is_double: area_one *= 2
+                
+                # Add side area if thickness provided
+                if h_mm > 0:
+                    perim = 2 * (l_mm + w_mm) / 1000.0
+                    area_one += perim * (h_mm / 1000.0)
+                
+                area_total = area_one * qty
+                
+                # Weight
+                if h_mm > 0:
+                    vol_one = (l_mm/1000.0) * (w_mm/1000.0) * (h_mm/1000.0)
+                    weight_total = vol_one * DENSITY_AL * qty
+                    
+                desc = f"板材 ({l_mm}*{w_mm}*{h_mm}mm)"
+                count = qty
+                
+            elif mode == '3': # 型材
+                p_mm = float(input("   截面周长 (mm): "))
+                w_str = input("   米重 (kg/m) [用于算重, 不知可空]: ").strip()
+                w_per_m = float(w_str) if w_str else 0
+                
+                l_m = float(input("   长度 (m): "))
+                qty = int(input("   数量 (支): "))
+                
+                area_total = (p_mm / 1000.0) * l_m * qty
+                
+                if w_per_m > 0:
+                    weight_total = w_per_m * l_m * qty
+                    
+                desc = f"型材 (周长{p_mm}mm * {l_m}m)"
+                count = qty
+                
+            else:
+                continue
+                
+            print(f"\n📊 计算结果: {desc}")
+            print(f"   数量: {count}")
+            print(f"   总面积: {Color.OKGREEN}{area_total:.4f} m²{Color.ENDC}")
+            if weight_total > 0:
+                print(f"   总重量: {Color.OKBLUE}{weight_total:.3f} kg{Color.ENDC} (估算)")
+            
+            # 算钱
+            print("\n💰 计价方式:")
+            print("   1. 按面积 (元/m²)")
+            if weight_total > 0:
+                print("   2. 按重量 (元/kg)")
+            print("   3. 按数量 (元/件)")
+            
+            p_mode = input("👉 请选择计价方式 [1]: ").strip()
+            
+            total_amt = 0.0
+            price_unit = ""
+            
+            if p_mode == '2' and weight_total > 0:
+                price = float(input("   请输入单价 (元/kg): "))
+                total_amt = weight_total * price
+                price_unit = "元/kg"
+            elif p_mode == '3':
+                price = float(input("   请输入单价 (元/件): "))
+                total_amt = count * price
+                price_unit = "元/件"
+            else:
+                # Default Area
+                price = float(input("   请输入单价 (元/m²): "))
+                total_amt = area_total * price
+                price_unit = "元/m²"
+                
+            price_per_item = total_amt / count if count > 0 else 0
+            
+            print(f"   --------------------")
+            print(f"   总金额: {Color.FAIL}¥ {total_amt:,.2f}{Color.ENDC}")
+            print(f"   折合单价: ¥ {price_per_item:.4f} /支(片)")
+            
+            input("\n按回车继续...")
+            
+        except Exception as e:
+            print(f"❌ 输入错误: {e}")
 
 def manage_small_tools(client, app_token):
     while True:
         print(f"\n{Color.BOLD}🧰 会计实用工具箱{Color.ENDC}")
-        print("  1. 🔢 金额转大写 (壹万贰仟...)")
-        print("  2. 🧮 税额计算器 (含税/不含税互转)")
-        print("  3. 📅 日期计算器 (账期推算)")
-        print("  4. 📥 生成 Excel 导入模板 [新]")
-        print("  5. 📤 导出最新备份到桌面 [新]")
-        print("  6. ♻️ 从回收站还原数据 [新]")
-        print("  7. 💸 贷款计算器 (等额本息) [新]")
-        print("  8. 📅 生成每月固定支出 (房租等) [新]")
-        print("  9. 🧾 增值税估算器 (进项抵扣测算) [新]")
-        print(" 10. 🏭 氧化厂模拟数据 (一键生成并导入) [新]")
+        print(f"{Color.CYAN}--- 常用计算器 ---{Color.ENDC}")
+        print("  1. 🔢 金额转大写")
+        print("  2. 🧮 税额计算器 (含税/不含税)")
+        print("  3. 📅 日期计算器")
+        print("  7. 💸 贷款计算器 (等额本息)")
+        print("  9. 🧾 增值税估算器 (进项抵扣)")
+        
+        print(f"{Color.CYAN}--- 数据维护 ---{Color.ENDC}")
+        print("  4. 📥 生成 Excel 导入模板")
+        print("  5. 📤 导出最新备份到桌面")
+        print("  6. ♻️ 从回收站还原数据")
+        print("  8. 📅 生成每月固定支出 (房租等)")
+        
+        print(f"{Color.CYAN}--- 行业与管理工具 ---{Color.ENDC}")
+        print(" 10. 🏭 氧化厂模拟数据生成")
+        print(" 11. 💰 资金账户对账 (余额核对)")
+        print(" 12. 📦 车间耗材库存管理")
+        print(" 13. 📢 应收账款催收助手")
+        print(" 14. 📊 月度经营分析报告 (Visual)")
+        print(" 15. 💴 薪酬个税管理")
+        print(" 16. 🧩 智能回款核销助手")
+        print(" 17. 🔎 老板查账 (Quick Search)")
+        print(" 18. 👷 简易计件工资计算器")
+        print(" 19. 📐 氧化计价助手 (报价神器)")
+        
         print("  0. 返回主菜单")
         
         choice = input(f"👉 {Color.BOLD}请选择: {Color.ENDC}").strip()
         if choice == '0': break
+
+        if choice == '19':
+            anodizing_price_calculator()
+
+        if choice == '18':
+            calculate_piecework_salary()
+
+        if choice == '17':
+            boss_quick_search(client, app_token)
+        
+        if choice == '16':
+            smart_payment_matcher(client, app_token)
+            
+        if choice == '15':
+            manage_salary_flow(client, app_token)
+
+        if choice == '13':
+            debt_collection_assistant(client, app_token)
+
+        if choice == '14':
+            generate_monthly_visual_report(client, app_token)
+
+        if choice == '12':
+            manage_inventory(client, app_token)
+            
+        if choice == '11':
+            reconcile_bank_account(client, app_token)
         
         if choice == '1':
             print(f"\n{Color.UNDERLINE}🔢 金额转大写{Color.ENDC}")
@@ -7670,7 +8225,7 @@ def interactive_menu():
         print("  11. 📉 计提折旧 (固定资产)")
         print("  12. 💰 薪酬工资 (个税/社保)")
         print("  13. 🧾 发票管理 (进项/销项)")
-        print("  14. 🤝 往来对账 (客户/供应商)")
+        print("  14. 🤝 往来对账中心 (New!)")
         print("  15. 🗓️ 月度结账 (利润表/归档)")
         
         print(f"\n{Color.OKBLUE}🔧 实用工具 (Tools){Color.ENDC}")
@@ -7775,7 +8330,7 @@ def interactive_menu():
         elif choice == '4':
             reconcile_bank_flow(client, app_token, None)
         elif choice == '5':
-            generate_partner_statement(client, app_token)
+            reconciliation_hub(client, app_token)
         elif choice == '6':
             export_missing_tickets(client, app_token)
         elif choice == '7':
@@ -7902,7 +8457,7 @@ def interactive_menu():
         elif choice == '4': 
              reconcile_bank_flow(current_client, current_token, None)
              
-        elif choice == '5': generate_partner_statement(current_client, current_token)
+        elif choice == '5': generate_business_statement(current_client, current_token)
         elif choice == '23': reconcile_external_bill(current_client, current_token)
         elif choice == '24': manage_salary_flow(current_client, current_token)
         elif choice == '25': manage_invoice_flow(current_client, current_token)
@@ -8258,46 +8813,1313 @@ def manage_price_list(client, app_token):
                 print(f"❌ 导入出错: {e}")
 
 
-def ensure_processing_fee_fields(client, app_token, table_id):
-    """确保加工费明细表包含 '品名' 和 '规格' 字段 (Migration)"""
+
+def archive_report(file_path):
+    """自动归档报表"""
     try:
-        fields = client.bitable.v1.app_table_field.list(
-            ListAppTableFieldRequest.builder().app_token(app_token).table_id(table_id).build()
-        ).data.items
+        if not os.path.exists(file_path): return
         
-        field_names = [f.field_name for f in fields]
-        
-        if "品名" not in field_names:
-            print("🔨 正在升级表结构: 添加 '品名'...")
-            client.bitable.v1.app_table_field.create(
-                CreateAppTableFieldRequest.builder().app_token(app_token).table_id(table_id)
-                .request_body(AppTableField.builder().field_name("品名").type(FT.TEXT).build()).build()
-            )
+        # 归档路径: 财务数据/报表存档/YYYY年/MM月/
+        now = datetime.now()
+        archive_dir = os.path.join(DATA_ROOT, "报表存档", f"{now.year}年", f"{now.month:02d}月")
+        if not os.path.exists(archive_dir):
+            os.makedirs(archive_dir)
             
-        if "规格" not in field_names:
-            print("🔨 正在升级表结构: 添加 '规格'...")
-            client.bitable.v1.app_table_field.create(
-                CreateAppTableFieldRequest.builder().app_token(app_token).table_id(table_id)
-                .request_body(AppTableField.builder().field_name("规格").type(FT.TEXT).build()).build()
-            )
+        fname = os.path.basename(file_path)
+        dest = os.path.join(archive_dir, fname)
+        
+        # 复制而非移动，保留根目录副本方便用户立即查看 (或者移动并创建快捷方式? 还是复制简单)
+        # 为了保持根目录整洁，建议移动。但用户刚生成可能想打开。
+        # 策略：复制一份到归档，根目录保留。用户如果不清理，那是用户的事。
+        # 或者：移动到归档，并在根目录打印路径。
+        # 既然是 "存档"，应该是移动。但为了用户体验，保留一份在根目录 (或 "查询报告" 目录) 更好。
+        # 现有的 "查询报告" 目录 (DATA_ROOT/查询报告) 似乎没怎么用。
+        # 让我们把文件移动到 `财务数据/查询报告` 并在 `报表存档` 留底。
+        # 简单点：只复制到 `报表存档`，根目录保留。
+        
+        import shutil
+        shutil.copy2(file_path, dest)
+        # print(f"💾 报表已归档至: {dest}")
+    except: pass
+
+def generate_customer_processing_report(client, app_token):
+    """生成客户分品类加工费月报 (增强版: 拆分/标准价/归档)"""
+    print(f"\n{Color.CYAN}📊 正在生成客户加工费月报...{Color.ENDC}")
+    
+    table_id = get_table_id_by_name(client, app_token, "加工费明细表")
+    if not table_id:
+        print("❌ 未找到加工费明细表")
+        return
+
+    # 预加载价目表 (Standard Price)
+    price_map = {}
+    try:
+        pt_id = create_processing_price_table(client, app_token)
+        if pt_id:
+            p_recs = get_all_records(client, app_token, pt_id)
+            if p_recs:
+                for r in p_recs:
+                    # Key: (品名, 规格) -> 单价
+                    k = (r.fields.get('品名', '').strip(), r.fields.get('规格', '').strip())
+                    v = float(r.fields.get('单价', 0))
+                    price_map[k] = v
+    except: pass
+
+    # 选择月份 (智能默认: 1-10号默认上月, 否则本月)
+    now = datetime.now()
+    default_input = now.strftime("%Y-%m")
+    if now.day <= 10:
+        last_month_dt = now.replace(day=1) - timedelta(days=1)
+        default_input = last_month_dt.strftime("%Y-%m")
+        
+    user_input = input(f"请输入查询月份 (YYYY-MM) 或年份 (YYYY) [{default_input}]: ").strip()
+    if not user_input: user_input = default_input
+    
+    is_annual = False
+    try:
+        if len(user_input) == 4 and user_input.isdigit():
+            is_annual = True
+            year = int(user_input)
+            start_ts = int(datetime(year, 1, 1).timestamp() * 1000)
+            end_ts = int(datetime(year + 1, 1, 1).timestamp() * 1000)
+            report_name = f"{year}年度客户加工费总表"
+        else:
+            start_dt = datetime.strptime(user_input, "%Y-%m")
+            if start_dt.month == 12:
+                end_dt = datetime(start_dt.year + 1, 1, 1)
+            else:
+                end_dt = datetime(start_dt.year, start_dt.month + 1, 1)
+            
+            start_ts = int(start_dt.timestamp() * 1000)
+            end_ts = int(end_dt.timestamp() * 1000)
+            report_name = f"客户加工费月报_{user_input}"
+    except:
+        print("❌ 日期格式错误")
+        return
+
+    # 加载别名映射
+    aliases = {}
+    if os.path.exists(FILE_PARTNER_ALIASES):
+        try:
+            with open(FILE_PARTNER_ALIASES, "r", encoding="utf-8") as f:
+                aliases = json.load(f)
+        except: pass
+
+    # 拉取数据
+    filter_cmd = f'AND(CurrentValue.[日期]>={start_ts}, CurrentValue.[日期]<{end_ts}, CurrentValue.[类型]="收入-加工服务")'
+    records = get_all_records(client, app_token, table_id, filter_info=filter_cmd)
+    
+    if not records:
+        print(f"📭 {user_input} 无加工费收入记录")
+        return
+
+    # 聚合数据
+    # Key: (客户, 品名, 规格, 计价方式, 单位)
+    data_map = {}
+    
+    # 额外聚合用于图表
+    chart_cust_stats = {}
+    chart_prod_stats = {}
+    
+    # 年度趋势数据 (仅年度模式用)
+    # Key: 客户 -> {Month: Amount}
+    annual_trend = {}
+    
+    for r in records:
+        f = r.fields
+        raw_cust = f.get("往来单位", "未知客户")
+        # 别名清洗
+        customer = aliases.get(raw_cust, raw_cust)
+        
+        product = f.get("品名", "未知品名")
+        spec = f.get("规格", "-")
+        unit = f.get("单位", "")
+        pricing = f.get("计价方式", "按件/个")
+        
+        qty = float(f.get("数量", 0))
+        amt = float(f.get("总金额", 0))
+        ts = f.get("日期", 0)
+        
+        key = (customer, product, spec, pricing, unit)
+        
+        if key not in data_map:
+            data_map[key] = {"qty": 0.0, "amt": 0.0}
+        
+        data_map[key]["qty"] += qty
+        data_map[key]["amt"] += amt
+        
+        # 图表聚合
+        chart_cust_stats[customer] = chart_cust_stats.get(customer, 0) + amt
+        chart_prod_stats[product] = chart_prod_stats.get(product, 0) + amt
+        
+        if is_annual:
+            month_str = datetime.fromtimestamp(ts/1000).strftime("%m月")
+            if customer not in annual_trend: annual_trend[customer] = {}
+            annual_trend[customer][month_str] = annual_trend[customer].get(month_str, 0) + amt
+
+    # 生成报表数据
+    report_data = []
+    for k, v in data_map.items():
+        avg_price = v["amt"] / v["qty"] if v["qty"] != 0 else 0
+        
+        # 标准价对比
+        std_price = price_map.get((k[1], k[2]), 0) # (品名, 规格)
+        diff_pct = 0.0
+        if std_price > 0:
+            diff_pct = (avg_price - std_price) / std_price
+            
+        report_data.append({
+            "客户": k[0],
+            "品名": k[1],
+            "规格": k[2],
+            "计价方式": k[3],
+            "单位": k[4],
+            "总数量": v["qty"],
+            "平均单价": avg_price,
+            "标准单价": std_price,
+            "偏差%": diff_pct,
+            "总金额": v["amt"]
+        })
+    
+    # 转 DataFrame 并排序
+    df = pd.DataFrame(report_data)
+    df.sort_values(by=["客户", "总金额"], ascending=[True, False], inplace=True)
+    
+    # 导出
+    fname = f"{report_name}_{datetime.now().strftime('%H%M')}.xlsx"
+    
+    # 计算合计行 (用于明细表)
+    total_row = pd.DataFrame([{
+        "客户": "合计",
+        "品名": "-",
+        "规格": "-",
+        "计价方式": "-",
+        "单位": "-",
+        "总数量": df["总数量"].sum(),
+        "平均单价": 0,
+        "标准单价": 0,
+        "偏差%": 0,
+        "总金额": df["总金额"].sum()
+    }])
+    df_with_total = pd.concat([df, total_row], ignore_index=True)
+    
+    # 询问是否拆分文件
+    split_files = False
+    if not is_annual: # 年度报表通常不需要拆分月度明细，或者也可以拆
+        split_files = input("📂 是否为每个客户生成独立文件? (y/n) [n]: ").strip().lower() == 'y'
+    
+    # 使用 openpyxl 进行美化导出
+    with pd.ExcelWriter(fname, engine='openpyxl') as writer:
+        from openpyxl.chart import BarChart, Reference, PieChart, LineChart
+        
+        # 0. 汇总看板 (Dashboard)
+        # 准备数据
+        dash_cust_df = pd.DataFrame(list(chart_cust_stats.items()), columns=["客户", "总金额"]).sort_values("总金额", ascending=False).head(10)
+        dash_prod_df = pd.DataFrame(list(chart_prod_stats.items()), columns=["品名", "总金额"]).sort_values("总金额", ascending=False)
+        
+        dash_cust_df.to_excel(writer, sheet_name='汇总看板', index=False, startrow=0, startcol=0)
+        dash_prod_df.to_excel(writer, sheet_name='汇总看板', index=False, startrow=0, startcol=4)
+        
+        ws_dash = writer.sheets['汇总看板']
+        apply_excel_styles(ws_dash)
+        
+        # 插入图表 - 客户排行
+        chart1 = BarChart()
+        chart1.title = f"{user_input} 客户加工费 Top 10"
+        chart1.y_axis.title = "金额 (元)"
+        data1 = Reference(ws_dash, min_col=2, min_row=1, max_row=len(dash_cust_df)+1)
+        cats1 = Reference(ws_dash, min_col=1, min_row=2, max_row=len(dash_cust_df)+1)
+        chart1.add_data(data1, titles_from_data=True)
+        chart1.set_categories(cats1)
+        ws_dash.add_chart(chart1, "A15")
+        
+        # 插入图表 - 品类分布
+        chart2 = PieChart()
+        chart2.title = f"{user_input} 加工品类分布"
+        data2 = Reference(ws_dash, min_col=6, min_row=1, max_row=len(dash_prod_df)+1)
+        cats2 = Reference(ws_dash, min_col=5, min_row=2, max_row=len(dash_prod_df)+1)
+        chart2.add_data(data2, titles_from_data=True)
+        chart2.set_categories(cats2)
+        ws_dash.add_chart(chart2, "E15")
+        
+        # 年度模式额外图表：月度趋势
+        if is_annual:
+            # 构建透视数据: Top 5 客户的月度趋势
+            top_customers = dash_cust_df["客户"].tolist()[:5]
+            months = [f"{i:02d}月" for i in range(1, 13)]
+            trend_data = []
+            for cust in top_customers:
+                row = {"客户": cust}
+                for m in months:
+                    row[m] = annual_trend.get(cust, {}).get(m, 0)
+                trend_data.append(row)
+            
+            trend_df = pd.DataFrame(trend_data)
+            trend_df.to_excel(writer, sheet_name='汇总看板', index=False, startrow=0, startcol=8) # 放在右边
+            
+            # 折线图
+            chart3 = LineChart()
+            chart3.title = "Top 5 客户年度月度走势"
+            chart3.y_axis.title = "金额"
+            chart3.x_axis.title = "月份"
+            
+            # 数据引用 (假设最多5个客户，12个月)
+            # Row 1 is header. Data starts row 2. Cols I(9) to U(21)
+            # Reference logic: min_col=9 (I), min_row=1 (Header), max_col=21 (U), max_row=len(trend_df)+1
+            # But Series are rows.
+            data3 = Reference(ws_dash, min_col=9, min_row=1, max_col=21, max_row=len(trend_df)+1)
+            # cats3 should be the header row? No, cats are columns (Jan-Dec).
+            # LineChart expects columns as categories usually if plotting rows as series.
+            # Let's double check openpyxl behavior.
+            # Usually: add_data(data, titles_from_data=True, from_rows=True)
+            
+            chart3.add_data(data3, titles_from_data=True, from_rows=True)
+            # Categories are the first row (headers) from col 2 to end?
+            cats3 = Reference(ws_dash, min_col=10, min_row=1, max_col=21, max_row=1)
+            chart3.set_categories(cats3)
+            
+            ws_dash.add_chart(chart3, "A32")
+            
+            # Apply styles again to cover new data
+            apply_excel_styles(ws_dash)
+
+        # 1. 明细 Sheet (包含所有)
+        sheet_title = '年度明细' if is_annual else '月报明细'
+        df_with_total.to_excel(writer, index=False, sheet_name=sheet_title)
+        apply_excel_styles(writer.sheets[sheet_title])
+        
+        # 格式化偏差列
+        ws_detail = writer.sheets[sheet_title]
+        for row in ws_detail.iter_rows(min_row=2, max_row=ws_detail.max_row, min_col=9, max_col=9): # I列是偏差%
+            for cell in row:
+                cell.number_format = '0.0%'
+                if cell.value and (cell.value > 0.1 or cell.value < -0.1): # 偏差超过10%
+                     cell.font = Font(color="9C0006")
+                     cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+
+        # 2. 分客户 Sheet (Top 20 + Others)
+        if not is_annual: # 年度报表数据量大，分Sheet可能太慢，且通常用于总览。如果需要可以开启。
+            # 获取所有唯一客户
+            all_customers = df["客户"].unique()
+            
+            # 简单策略：每个客户一个 Sheet
+            for cust in all_customers:
+                cust_df = df[df["客户"] == cust].copy()
+                if cust_df.empty: continue
+                
+                # 添加该客户的合计
+                total_qty = cust_df["总数量"].sum()
+                total_amt = cust_df["总金额"].sum()
+                
+                cust_total_row = pd.DataFrame([{
+                    "客户": "合计",
+                    "品名": "-",
+                    "规格": "-",
+                    "计价方式": "-",
+                    "单位": "-",
+                    "总数量": total_qty,
+                    "平均单价": 0,
+                    "标准单价": 0,
+                    "偏差%": 0,
+                    "总金额": total_amt
+                }])
+                cust_df = pd.concat([cust_df, cust_total_row], ignore_index=True)
+                
+                # Sheet 名称清洗
+                sheet_name = str(cust)[:30].replace(":", "").replace("\\", "").replace("/", "").replace("?", "").replace("*", "").replace("[", "").replace("]", "")
+                
+                cust_df.to_excel(writer, index=False, sheet_name=sheet_name)
+                ws = writer.sheets[sheet_name]
+                apply_excel_styles(ws)
+                
+                # 偏差高亮
+                for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=9, max_col=9):
+                    for cell in row:
+                        cell.number_format = '0.0%'
+                        if cell.value and abs(cell.value) > 0.1:
+                             cell.font = Font(color="9C0006")
+                             cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+
+    print(f"✅ 报表已生成: {fname}")
+    try: os.startfile(fname)
+    except: pass
+    
+    # 拆分文件逻辑
+    if split_files:
+        split_dir = os.path.join(DATA_ROOT, "报表存档", f"{now.year}年", f"{now.month:02d}月", f"客户分表_{user_input}")
+        if not os.path.exists(split_dir): os.makedirs(split_dir)
+        
+        print(f"📂 正在生成分客户独立文件 (保存至: {split_dir})...")
+        for cust in all_customers:
+            cust_df = df[df["客户"] == cust].copy()
+            if cust_df.empty: continue
+            
+            # 合计
+            total_qty = cust_df["总数量"].sum()
+            total_amt = cust_df["总金额"].sum()
+            cust_total_row = pd.DataFrame([{
+                "客户": "合计",
+                "品名": "-",
+                "规格": "-",
+                "计价方式": "-",
+                "单位": "-",
+                "总数量": total_qty,
+                "平均单价": 0,
+                "标准单价": 0,
+                "偏差%": 0,
+                "总金额": total_amt
+            }])
+            cust_df = pd.concat([cust_df, cust_total_row], ignore_index=True)
+            
+            # 保存
+            safe_cust = str(cust).replace("/", "_").replace("\\", "_")
+            c_fname = os.path.join(split_dir, f"{safe_cust}_{user_input}.xlsx")
+            with pd.ExcelWriter(c_fname, engine='openpyxl') as c_writer:
+                cust_df.to_excel(c_writer, index=False, sheet_name="对账单")
+                apply_excel_styles(c_writer.sheets["对账单"])
+        print(f"✅ 已生成 {len(all_customers)} 个独立对账单")
+        try: os.startfile(split_dir)
+        except: pass
+
+    # 归档
+    archive_report(fname)
+    
+    # 尝试发送到飞书
+    print(f"{Color.CYAN}📤 正在推送报表到飞书...{Color.ENDC}")
+    send_bot_message(fname, msg_type="file")
+
+def generate_outsourcing_analysis_report(client, app_token):
+    """生成外协费用分析表"""
+    print(f"\n{Color.CYAN}📊 正在生成外协费用分析表...{Color.ENDC}")
+    
+    table_id = get_table_id_by_name(client, app_token, "加工费明细表")
+    if not table_id: return
+
+    # 选择年份 (分析通常按年或月)
+    cur_year = datetime.now().year
+    year_input = input(f"请输入查询年份 (YYYY) [{cur_year}]: ").strip()
+    if not year_input: year_input = str(cur_year)
+    
+    try:
+        year = int(year_input)
+        start_ts = int(datetime(year, 1, 1).timestamp() * 1000)
+        end_ts = int(datetime(year + 1, 1, 1).timestamp() * 1000)
+    except:
+        print("❌ 年份格式错误")
+        return
+
+    # 拉取数据
+    filter_cmd = f'AND(CurrentValue.[日期]>={start_ts}, CurrentValue.[日期]<{end_ts}, CurrentValue.[类型]="支出-外协加工")'
+    records = get_all_records(client, app_token, table_id, filter_info=filter_cmd)
+    
+    if not records:
+        print(f"📭 {year}年 无外协加工记录")
+        return
+
+    # 聚合 1: 按供应商汇总
+    supplier_stats = {}
+    # 聚合 2: 按工艺(品名)汇总
+    process_stats = {}
+    # 聚合 3: 月度趋势
+    monthly_stats = {}
+    
+    total_cost = 0.0
+    
+    for r in records:
+        f = r.fields
+        amt = float(f.get("总金额", 0))
+        supplier = f.get("往来单位", "未知供应商")
+        process = f.get("品名", "未知工艺") # 假设品名即工艺，如"喷砂"
+        
+        ts = f.get("日期", 0)
+        month_str = datetime.fromtimestamp(ts/1000).strftime("%Y-%m")
+        
+        total_cost += amt
+        
+        supplier_stats[supplier] = supplier_stats.get(supplier, 0) + amt
+        process_stats[process] = process_stats.get(process, 0) + amt
+        monthly_stats[month_str] = monthly_stats.get(month_str, 0) + amt
+
+    # 打印概览
+    print(f"\n💰 {year}年 外协总费用: {total_cost:,.2f} 元")
+    
+    print(f"\n🏆 Top 5 外协供应商:")
+    sorted_supp = sorted(supplier_stats.items(), key=lambda x: x[1], reverse=True)[:5]
+    for k, v in sorted_supp:
+        print(f"   - {k}: {v:,.2f} ({v/total_cost*100:.1f}%)")
+        
+    print(f"\n🔨 工艺分布:")
+    sorted_proc = sorted(process_stats.items(), key=lambda x: x[1], reverse=True)
+    for k, v in sorted_proc:
+        print(f"   - {k}: {v:,.2f}")
+
+    # 导出详细 Excel
+    with pd.ExcelWriter(f"外协费用分析_{year}.xlsx", engine='openpyxl') as writer:
+        from openpyxl.chart import BarChart, Reference, PieChart, LineChart
+        
+        # Sheet 1: 供应商汇总
+        s_df = pd.DataFrame(list(supplier_stats.items()), columns=["供应商", "总金额"])
+        s_df.sort_values("总金额", ascending=False, inplace=True)
+        s_df.to_excel(writer, sheet_name="供应商排行", index=False)
+        
+        # Sheet 1 Chart
+        ws1 = writer.sheets["供应商排行"]
+        chart1 = BarChart()
+        chart1.title = "供应商费用排行"
+        chart1.y_axis.title = "金额 (元)"
+        chart1.x_axis.title = "供应商"
+        data1 = Reference(ws1, min_col=2, min_row=1, max_row=len(s_df)+1)
+        cats1 = Reference(ws1, min_col=1, min_row=2, max_row=len(s_df)+1)
+        chart1.add_data(data1, titles_from_data=True)
+        chart1.set_categories(cats1)
+        ws1.add_chart(chart1, "D2")
+        
+        # Sheet 2: 工艺汇总
+        p_df = pd.DataFrame(list(process_stats.items()), columns=["工艺类型", "总金额"])
+        p_df.sort_values("总金额", ascending=False, inplace=True)
+        p_df.to_excel(writer, sheet_name="工艺分布", index=False)
+        
+        # Sheet 2 Chart
+        ws2 = writer.sheets["工艺分布"]
+        chart2 = PieChart()
+        chart2.title = "外协工艺费用分布"
+        data2 = Reference(ws2, min_col=2, min_row=1, max_row=len(p_df)+1)
+        cats2 = Reference(ws2, min_col=1, min_row=2, max_row=len(p_df)+1)
+        chart2.add_data(data2, titles_from_data=True)
+        chart2.set_categories(cats2)
+        ws2.add_chart(chart2, "D2")
+        
+        # Sheet 3: 月度趋势
+        m_df = pd.DataFrame(list(monthly_stats.items()), columns=["月份", "总金额"])
+        m_df.sort_values("月份", inplace=True)
+        m_df.to_excel(writer, sheet_name="月度趋势", index=False)
+        
+        # Sheet 3 Chart
+        ws3 = writer.sheets["月度趋势"]
+        chart3 = LineChart()
+        chart3.title = "月度费用趋势"
+        chart3.y_axis.title = "金额"
+        chart3.x_axis.title = "月份"
+        data3 = Reference(ws3, min_col=2, min_row=1, max_row=len(m_df)+1)
+        cats3 = Reference(ws3, min_col=1, min_row=2, max_row=len(m_df)+1)
+        chart3.add_data(data3, titles_from_data=True)
+        chart3.set_categories(cats3)
+        ws3.add_chart(chart3, "D2")
+        
+        # Sheet 4: 原始明细
+        raw_data = []
+        for r in records:
+            f = r.fields
+            raw_data.append({
+                "日期": datetime.fromtimestamp(f.get("日期")/1000).strftime("%Y-%m-%d"),
+                "供应商": f.get("往来单位"),
+                "工艺": f.get("品名"),
+                "规格": f.get("规格"),
+                "数量": f.get("数量"),
+                "单位": f.get("单位"),
+                "单价": f.get("单价"),
+                "总金额": f.get("总金额"),
+                "备注": f.get("备注")
+            })
+        pd.DataFrame(raw_data).to_excel(writer, sheet_name="原始明细", index=False)
+        
+        # 统一美化所有Sheet
+        for sheet_name in writer.sheets:
+            apply_excel_styles(writer.sheets[sheet_name])
+
+    print(f"✅ 详细分析表已生成: 外协费用分析_{year}.xlsx")
+    try: os.startfile(f"外协费用分析_{year}.xlsx")
+    except: pass
+    
+    # 归档
+    archive_report(f"外协费用分析_{year}.xlsx")
+
+    # 尝试发送到飞书
+    print(f"{Color.CYAN}📤 正在推送报表到飞书...{Color.ENDC}")
+    send_bot_message(f"外协费用分析_{year}.xlsx", msg_type="file")
+
+def manage_settlement(client, app_token):
+    """结算状态管理 (Mark as Paid)"""
+    print(f"\n{Color.CYAN}💰 结算管理 (AR/AP){Color.ENDC}")
+    table_id = get_table_id_by_name(client, app_token, "加工费明细表")
+    if not table_id:
+        print("❌ 未找到加工费明细表")
+        return
+
+    # 1. 统计未结算金额
+    print("🔄 正在统计未结算金额...")
+    
+    # Filter: Status != "已结算"
+    records = get_all_records(client, app_token, table_id)
+    if not records:
+        print("📭 暂无记录")
+        return
+        
+    unpaid_map = {} # Cust -> Amount
+    unpaid_records = []
+    
+    for r in records:
+        f = r.fields
+        status = f.get("结算状态", "未结算")
+        if status == "已结算": continue
+        
+        cust = f.get("往来单位", "未知")
+        amt = float(f.get("总金额", 0))
+        # Filter out 0 amount
+        if amt == 0: continue
+        
+        unpaid_map[cust] = unpaid_map.get(cust, 0) + amt
+        unpaid_records.append(r)
+        
+    if not unpaid_map:
+        print("✅ 所有账单均已结算！")
+        return
+        
+    # Show Top 10
+    sorted_cust = sorted(unpaid_map.items(), key=lambda x: x[1], reverse=True)
+    
+    print("\n📊 欠款排行榜 (Top 10):")
+    for i, (c, amt) in enumerate(sorted_cust[:10]):
+        print(f"   {i+1}. {c}: {Color.FAIL}{amt:,.2f} 元{Color.ENDC}")
+        
+    print(f"\n   >> 总未结算金额: {sum(unpaid_map.values()):,.2f} 元")
+    
+    # Actions
+    print("\n操作选项:")
+    print("1. 按客户批量结算 (Mark Customer as Paid)")
+    print("2. 按月份批量结算 (Mark Month as Paid)")
+    print("0. 返回")
+    
+    op = input("👉 请选择: ").strip()
+    
+    if op == '1':
+        target = input("请输入客户名 (关键词): ").strip()
+        if not target: return
+        
+        # Filter
+        matches = [c for c in unpaid_map.keys() if target in c]
+        if not matches:
+            print("❌ 未找到匹配客户")
+            return
+            
+        if len(matches) > 1:
+            print(f"🔍 匹配到多个客户: {matches}")
+            target = input("👉 请输入完整客户名确认: ").strip()
+            if target not in matches: return
+        else:
+            target = matches[0]
+            
+        # Confirm
+        total = unpaid_map[target]
+        print(f"\n准备将 {Color.BOLD}{target}{Color.ENDC} 的 {len([r for r in unpaid_records if r.fields.get('往来单位')==target])} 笔记录标记为已结算。")
+        print(f"涉及金额: {total:,.2f} 元")
+        
+        if input("❓ 确认执行? (y/n): ").strip().lower() == 'y':
+            # Batch Update
+            batch_recs = []
+            for r in unpaid_records:
+                if r.fields.get("往来单位") == target:
+                    batch_recs.append(AppTableRecord.builder().record_id(r.record_id).fields({"结算状态": "已结算"}).build())
+            
+            # Execute Batch
+            # Split into 100
+            count = 0
+            for i in range(0, len(batch_recs), 100):
+                batch = batch_recs[i:i+100]
+                req = BatchUpdateAppTableRecordRequest.builder() \
+                    .app_token(app_token) \
+                    .table_id(table_id) \
+                    .request_body(BatchUpdateAppTableRecordRequestBody.builder().records(batch).build()) \
+                    .build()
+                resp = client.bitable.v1.app_table_record.batch_update(req)
+                if resp.success():
+                    count += len(batch)
+            print(f"✅ 成功结算 {count} 笔记录")
+
+    elif op == '2':
+        month_str = input("请输入月份 (YYYY-MM): ").strip()
+        try:
+            target_dt = datetime.strptime(month_str, "%Y-%m")
+            # Filter
+            batch_recs = []
+            total_amt = 0
+            for r in unpaid_records:
+                ts = r.fields.get("日期", 0)
+                rdt = datetime.fromtimestamp(ts/1000)
+                if rdt.year == target_dt.year and rdt.month == target_dt.month:
+                    batch_recs.append(AppTableRecord.builder().record_id(r.record_id).fields({"结算状态": "已结算"}).build())
+                    total_amt += float(r.fields.get("总金额", 0))
+            
+            if not batch_recs:
+                print("❌ 该月份无未结算记录")
+                return
+                
+            print(f"\n准备将 {month_str} 的 {len(batch_recs)} 笔记录标记为已结算。")
+            print(f"涉及金额: {total_amt:,.2f} 元")
+            
+            if input("❓ 确认执行? (y/n): ").strip().lower() == 'y':
+                 # Execute Batch
+                count = 0
+                for i in range(0, len(batch_recs), 100):
+                    batch = batch_recs[i:i+100]
+                    req = BatchUpdateAppTableRecordRequest.builder() \
+                        .app_token(app_token) \
+                        .table_id(table_id) \
+                        .request_body(BatchUpdateAppTableRecordRequestBody.builder().records(batch).build()) \
+                        .build()
+                    resp = client.bitable.v1.app_table_record.batch_update(req)
+                    if resp.success():
+                        count += len(batch)
+                print(f"✅ 成功结算 {count} 笔记录")
+                
+        except:
+            print("❌ 日期格式错误")
+
+def import_processing_records_from_excel(client, app_token):
+    """批量导入加工费记录 (从 Excel)"""
+    table_id = get_table_id_by_name(client, app_token, "加工费明细表")
+    if not table_id: 
+        print("❌ 未找到加工费明细表")
+        return
+
+    print(f"\n{Color.CYAN}📥 批量导入加工费记录{Color.ENDC}")
+    print("💡 请准备 Excel 文件，包含以下列 (表头名称必须包含关键词):")
+    print("   - 日期 (默认当天)")
+    print("   - 客户/供应商 (关键词: 客户, 单位, 往来)")
+    print("   - 品名 (关键词: 品名, 产品, 工艺)")
+    print("   - 规格 (关键词: 规格, 尺寸)")
+    print("   - 数量 (关键词: 数量, 件数, 重量)")
+    print("   - 单价 (关键词: 单价, 价格)")
+    print("   - 类型 (关键词: 类型 -> 收入/支出, 可选)")
+    
+    file_path = select_file_interactively("*.xlsx", "请选择加工单 Excel")
+    if not file_path: return
+
+    try:
+        df = read_excel_smart(file_path) # Use existing smart reader
+        if df.empty:
+            print("❌ 文件为空或无法读取")
+            return
+            
+        print(f"📄 读取到 {len(df)} 条数据，准备导入...")
+        
+        # 字段映射
+        records = []
+        success_count = 0
+        
+        # 预加载别名
+        aliases = {}
+        if os.path.exists(FILE_PARTNER_ALIASES):
+            try:
+                with open(FILE_PARTNER_ALIASES, "r", encoding="utf-8") as f:
+                    aliases = json.load(f)
+            except: pass
+
+        # 预加载价目表 (用于自动填充单价)
+        price_map = {}
+        try:
+            pt_id = create_processing_price_table(client, app_token)
+            if pt_id:
+                p_recs = get_all_records(client, app_token, pt_id)
+                for r in p_recs:
+                    pk = (r.fields.get('品名', '').strip(), r.fields.get('规格', '').strip())
+                    price_map[pk] = float(r.fields.get('单价', 0))
+        except: pass
+
+        for idx, row in df.iterrows():
+            # 智能提取字段
+            date_val = None
+            for col in df.columns:
+                if "日期" in str(col) or "时间" in str(col):
+                    try:
+                        date_val = pd.to_datetime(row[col])
+                        break
+                    except: pass
+            if not date_val: date_val = datetime.now()
+            
+            # 客户
+            partner = ""
+            for col in df.columns:
+                if any(k in str(col) for k in ["客户", "单位", "往来", "供应商"]):
+                    partner = str(row[col]).strip()
+                    break
+            # 应用别名
+            partner = aliases.get(partner, partner)
+            
+            # 品名
+            product = ""
+            for col in df.columns:
+                if any(k in str(col) for k in ["品名", "产品", "工艺", "名称"]):
+                    product = str(row[col]).strip()
+                    break
+                    
+            # 规格
+            spec = "-"
+            for col in df.columns:
+                if "规格" in str(col) or "尺寸" in str(col):
+                    spec = str(row[col]).strip()
+                    break
+            
+            # 数量
+            qty = 0.0
+            for col in df.columns:
+                if any(k in str(col) for k in ["数量", "件数", "重量"]):
+                    try: qty = float(row[col])
+                    except: pass
+                    break
+            
+            # 单价 (如果Excel里没有，尝试从价目表获取)
+            price = 0.0
+            found_price = False
+            for col in df.columns:
+                if "单价" in str(col) or "价格" in str(col):
+                    try: 
+                        val = float(row[col])
+                        if val > 0:
+                            price = val
+                            found_price = True
+                    except: pass
+                    break
+            
+            # 自动补全单价与异常检测
+            std_price = 0.0
+            price_remark = ""
+            
+            # 1. 尝试获取标准价
+            std_price = price_map.get((product, spec), 0.0)
+            if std_price == 0: std_price = price_map.get((product, ""), 0.0)
+            
+            # 2. 补全单价
+            if not found_price:
+                price = std_price
+                if price > 0: price_remark = " (自动匹配单价)"
+            
+            # 3. 异常检测 (如果有输入单价且与标准价偏差大)
+            elif std_price > 0:
+                diff_pct = abs(price - std_price) / std_price
+                if diff_pct > 0.2: # 偏差超过 20%
+                    price_remark = f" (⚠️ 价格异常: {price} vs 标准{std_price})"
+
+            # 计价方式与单位自动推断 (新增)
+            pricing_mode = "按件/只/个" # 默认
+            unit = "件"
+            
+            # 尝试从Excel列读取单位
+            for col in df.columns:
+                 if "单位" in str(col):
+                     val = str(row[col]).strip()
+                     if val: unit = val
+                     break
+            
+            # 根据单位推断计价方式
+            if unit in ['kg', '公斤', '吨', 'g']:
+                pricing_mode = "按重量"
+            elif unit in ['m', '米', 'cm']:
+                pricing_mode = "按米长"
+            elif unit in ['m2', 'm²', '平方', '平米']:
+                pricing_mode = "按平方"
+            
+            # 类型 (默认收入)
+            record_type = "收入-加工服务"
+            for col in df.columns:
+                if "类型" in str(col):
+                    val = str(row[col]).strip()
+                    if "支出" in val or "外协" in val:
+                        record_type = "支出-外协加工"
+                    break
+            
+            if not partner or not product:
+                continue # Skip invalid
+                
+            fields = {
+                "日期": int(date_val.timestamp() * 1000),
+                "往来单位": partner,
+                "品名": product,
+                "规格": spec,
+                "类型": record_type,
+                "计价方式": pricing_mode, # New
+                "单位": unit, # New
+                "数量": qty,
+                "单价": price,
+                "总金额": round(qty * price, 2),
+                "结算状态": "未结算", # 默认为未结算
+                "开票状态": "未开票",
+                "备注": "批量导入" + price_remark
+            }
+            records.append(AppTableRecord.builder().fields(fields).build())
+            
+        # 预览前5条 (包含异常提示)
+        if records:
+            print(f"\n{Color.CYAN}👀 导入预览 (前5条):{Color.ENDC}")
+            for i, r in enumerate(records[:5]):
+                f = r.fields
+                d_str = datetime.fromtimestamp(f["日期"]/1000).strftime("%Y-%m-%d")
+                
+                # 高亮异常备注
+                remark = f['备注']
+                if "⚠️" in remark:
+                    remark = f"{Color.FAIL}{remark}{Color.ENDC}"
+                elif "自动" in remark:
+                    remark = f"{Color.OKGREEN}{remark}{Color.ENDC}"
+                    
+                print(f"   {i+1}. {d_str} | {f['往来单位']} | {f['品名']} | {f['单价']} | {remark}")
+            
+            # 统计异常数量
+            abnormal_count = sum(1 for r in records if "⚠️" in r.fields.get("备注", ""))
+            if abnormal_count > 0:
+                print(f"\n{Color.WARNING}⚠️ 检测到 {abnormal_count} 条记录价格异常 (偏差 > 20%){Color.ENDC}")
+            
+            if input(f"\n❓ 确认导入共 {len(records)} 条数据? (y/n): ").strip().lower() != 'y':
+                print("❌ 已取消导入")
+                return
+
+        # 批量写入
+        if records:
+            batch_size = 100
+            for i in range(0, len(records), batch_size):
+                batch = records[i:i+batch_size]
+                req = BatchCreateAppTableRecordRequest.builder() \
+                    .app_token(app_token) \
+                    .table_id(table_id) \
+                    .request_body(BatchCreateAppTableRecordRequestBody.builder().records(batch).build()) \
+                    .build()
+                resp = client.bitable.v1.app_table_record.batch_create(req)
+                if resp.success():
+                    success_count += len(batch)
+                    print(f"✅ 已导入 {success_count}/{len(records)} 条")
+                else:
+                    print(f"❌ 导入失败: {resp.msg}")
+                    
+            # 导入后，询问是否学习新价格
+            learn_prices = input("🎓 是否将导入的新品名/价格自动学习到【价目表】? (y/n) [n]: ").strip().lower() == 'y'
+            if learn_prices:
+                learn_new_prices(client, app_token, records)
+        else:
+            print("⚠️ 未解析到有效数据")
+
     except Exception as e:
-        print(f"⚠️ 检查表结构失败: {e}")
+        print(f"❌ 导入异常: {e}")
+
+def learn_new_prices(client, app_token, records):
+    """自动学习新价格"""
+    pt_id = create_processing_price_table(client, app_token)
+    if not pt_id: return
+    
+    # 获取现有价格
+    existing_map = {} # (name, spec) -> price
+    p_recs = get_all_records(client, app_token, pt_id)
+    if p_recs:
+        for r in p_recs:
+            k = (r.fields.get('品名', '').strip(), r.fields.get('规格', '').strip())
+            existing_map[k] = float(r.fields.get('单价', 0))
+            
+    # 分析新记录
+    new_prices = {} # (name, spec) -> price
+    for r in records:
+        f = r.fields
+        name = f.get('品名', '').strip()
+        spec = f.get('规格', '').strip()
+        price = float(f.get('单价', 0))
+        
+        if not name or price <= 0: continue
+        
+        k = (name, spec)
+        if k not in existing_map:
+            # 简单的策略：直接取最新的价格
+            new_prices[k] = price
+            
+    if not new_prices:
+        print("✅ 没有发现新品名或规格")
+        return
+        
+    print(f"🔍 发现 {len(new_prices)} 个新价格组合，正在学习...")
+    
+    # 批量添加
+    batch_recs = []
+    for (name, spec), price in new_prices.items():
+        fields = {
+            "品名": name,
+            "规格": spec,
+            "单位": "件", # 默认
+            "单价": price,
+            "备注": f"自动学习 ({datetime.now().strftime('%Y-%m-%d')})"
+        }
+        batch_recs.append(AppTableRecord.builder().fields(fields).build())
+        
+    # Execute Batch
+    count = 0
+    for i in range(0, len(batch_recs), 100):
+        batch = batch_recs[i:i+100]
+        req = BatchCreateAppTableRecordRequest.builder() \
+            .app_token(app_token) \
+            .table_id(pt_id) \
+            .request_body(BatchCreateAppTableRecordRequestBody.builder().records(batch).build()) \
+            .build()
+        resp = client.bitable.v1.app_table_record.batch_create(req)
+        if resp.success():
+            count += len(batch)
+            
+    print(f"✅ 已自动添加 {count} 条新价格记录到价目表")
+
+def generate_delivery_note(client, app_token):
+    """生成送货单 (Delivery Note)"""
+    print(f"\n{Color.CYAN}🚚 生成送货单 (Delivery Note){Color.ENDC}")
+    print("--------------------------------")
+    print("功能：选择未打印的加工单，生成送货单供司机送货和客户签收。")
+    
+    table_id = get_table_id_by_name(client, app_token, "加工费明细表")
+    if not table_id: return
+    
+    # 1. 选择客户
+    # 获取最近 30 天有过记录的客户供选择
+    print("⏳ 正在获取最近客户列表...")
+    now = datetime.now()
+    start_ts = int((now - timedelta(days=30)).timestamp() * 1000)
+    filter_cmd = f'AND(CurrentValue.[日期]>={start_ts}, CurrentValue.[类型]="收入-加工服务")'
+    
+    # 只取部分字段提高速度
+    recs = get_all_records(client, app_token, table_id, filter_info=filter_cmd)
+    
+    partners = set()
+    for r in recs:
+        p = r.fields.get("往来单位", "").strip()
+        if p: partners.add(p)
+        
+    sorted_partners = sorted(list(partners))
+    
+    if not sorted_partners:
+        print("❌ 最近无加工记录")
+        return
+        
+    print("\n📋 最近往来单位:")
+    for i, p in enumerate(sorted_partners):
+        print(f"  {i+1}. {p}")
+        
+    p_choice = input("\n👉 请选择客户序号 (或输入名称): ").strip()
+    target_partner = ""
+    if p_choice.isdigit() and 1 <= int(p_choice) <= len(sorted_partners):
+        target_partner = sorted_partners[int(p_choice)-1]
+    else:
+        target_partner = p_choice
+        
+    if not target_partner: return
+    
+    # 2. 拉取该客户未打印送货单的记录
+    days_str = input("查询最近多少天记录 (默认 30): ").strip()
+    days = 30
+    if days_str.isdigit(): days = int(days_str)
+    
+    print(f"\n🔍 正在查询 【{target_partner}】 最近 {days} 天的加工记录...")
+    
+    start_ts = int((now - timedelta(days=days)).timestamp() * 1000)
+    filter_p = f'AND(CurrentValue.[往来单位]="{target_partner}", CurrentValue.[日期]>={start_ts}, CurrentValue.[类型]="收入-加工服务")'
+    p_recs = get_all_records(client, app_token, table_id, filter_info=filter_p)
+    
+    if not p_recs:
+        print("📭 无近期记录")
+        return
+        
+    # 按日期倒序
+    p_recs.sort(key=lambda x: x.fields.get("日期", 0), reverse=True)
+    
+    selected_recs = []
+    
+    while True:
+        print(f"\n📋 可选记录 (共 {len(p_recs)} 条):")
+        print(f"{'序号':<4} | {'日期':<10} | {'品名/规格':<20} | {'数量':<8} | {'金额':<10} | {'备注'}")
+        print("-" * 80)
+        
+        for i, r in enumerate(p_recs):
+            f = r.fields
+            d_str = datetime.fromtimestamp(f.get("日期", 0)/1000).strftime("%m-%d")
+            desc = f"{f.get('品名','')} {f.get('规格','')}"
+            qty = f"{f.get('数量',0)}{f.get('单位','')}"
+            amt = f"{f.get('总金额',0):.2f}"
+            rem = f.get("备注", "")
+            
+            # Check mark
+            mark = "[ ]"
+            if r in selected_recs: mark = "[x]"
+            
+            print(f"{i+1:<4} {mark} | {d_str:<10} | {desc:<20} | {qty:<8} | {amt:<10} | {rem}")
+            
+        print("-" * 80)
+        print("操作: 输入序号选择/取消 (如 '1 3 5')，输入 'a' 全选，输入 'ok' 生成")
+        
+        op = input("👉 请输入: ").strip().lower()
+        
+        if op == 'ok':
+            if not selected_recs:
+                print("❌ 未选择任何记录")
+                continue
+            break
+        elif op == 'a':
+            if len(selected_recs) == len(p_recs):
+                selected_recs = [] # 全取消
+            else:
+                selected_recs = list(p_recs) # 全选
+        else:
+            # Parse numbers
+            try:
+                idxs = [int(x) for x in op.split()]
+                for idx in idxs:
+                    if 1 <= idx <= len(p_recs):
+                        target = p_recs[idx-1]
+                        if target in selected_recs:
+                            selected_recs.remove(target)
+                        else:
+                            selected_recs.append(target)
+            except:
+                pass
+
+    # 补充送货信息
+    driver_info = input("🚚 送货司机/车牌号 (选填): ").strip()
+    contact_info = input("📞 联系人/电话 (选填): ").strip()
+
+    # 3. 生成送货单 HTML
+    print("\n📄 正在生成送货单...")
+    delivery_no = f"DN{datetime.now().strftime('%Y%m%d%H%M')}"
+    
+    total_qty = 0
+    total_amt = 0.0
+    items_html = ""
+    
+    # 统计不同单位的数量
+    unit_totals = {}
+    
+    # Sort selected by date
+    selected_recs.sort(key=lambda x: x.fields.get("日期", 0))
+    
+    for idx, r in enumerate(selected_recs):
+        f = r.fields
+        d_str = datetime.fromtimestamp(f.get("日期", 0)/1000).strftime("%Y-%m-%d")
+        q = float(f.get("数量", 0))
+        u = f.get("单位", "")
+        a = float(f.get("总金额", 0))
+        
+        total_qty += q
+        total_amt += a
+        
+        if u not in unit_totals: unit_totals[u] = 0
+        unit_totals[u] += q
+        
+        bg = "#f9f9f9" if idx % 2 == 0 else "#fff"
+        
+        items_html += f"""
+        <tr style="background-color:{bg}">
+            <td>{idx+1}</td>
+            <td>{f.get('品名','')}</td>
+            <td>{f.get('规格','')}</td>
+            <td style="text-align:right">{q}</td>
+            <td style="text-align:center">{u}</td>
+            <td style="text-align:right">{a:.2f}</td>
+            <td>{f.get('备注','')}</td>
+        </tr>
+        """
+        
+    # 生成合计字符串
+    total_desc_parts = []
+    for u, q in unit_totals.items():
+        total_desc_parts.append(f"{q:.2f} {u}")
+    total_desc = " + ".join(total_desc_parts)
+        
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>送货单 {delivery_no}</title>
+        <style>
+            body {{ font-family: 'SimHei', 'Microsoft YaHei', sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }}
+            .header {{ text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px; }}
+            .title {{ font-size: 24px; font-weight: bold; letter-spacing: 5px; }}
+            .sub-title {{ margin-top: 5px; font-size: 14px; }}
+            .company-name {{ font-size: 18px; margin-bottom: 5px; font-weight: bold; }}
+            .info-row {{ display: flex; justify-content: space-between; margin-bottom: 15px; font-size: 14px; }}
+            table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; border: 1px solid #000; }}
+            th, td {{ border: 1px solid #000; padding: 8px; font-size: 14px; }}
+            th {{ background-color: #eee; text-align: center; }}
+            .footer {{ margin-top: 40px; display: flex; justify-content: space-between; font-size: 14px; }}
+            .sign {{ border-top: 1px solid #000; width: 150px; display: inline-block; margin-left: 10px; }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div class="company-name">五金氧化加工中心</div>
+            <div class="title">送 货 单</div>
+            <div class="sub-title">Delivery Note</div>
+        </div>
+        
+        <div class="info-row">
+            <div style="flex: 1">客户名称: <b>{target_partner}</b></div>
+            <div style="flex: 1">单号: {delivery_no}</div>
+        </div>
+        <div class="info-row">
+            <div style="flex: 1">送货日期: {datetime.now().strftime('%Y-%m-%d')}</div>
+            <div style="flex: 1">司机/车牌: {driver_info}</div>
+        </div>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th width="5%">序号</th>
+                    <th width="25%">品名</th>
+                    <th width="20%">规格</th>
+                    <th width="10%">数量</th>
+                    <th width="10%">单位</th>
+                    <th width="15%">金额</th>
+                    <th width="15%">备注</th>
+                </tr>
+            </thead>
+            <tbody>
+                {items_html}
+                <tr style="font-weight:bold; background-color:#eee">
+                    <td colspan="3" style="text-align:center">合计</td>
+                    <td colspan="2" style="text-align:center">{total_desc}</td>
+                    <td style="text-align:right">{total_amt:.2f}</td>
+                    <td></td>
+                </tr>
+            </tbody>
+        </table>
+        
+        <div class="footer">
+            <div>
+                送货人签字: <span class="sign"></span>
+            </div>
+            <div>
+                客户签收: <span class="sign"></span>
+            </div>
+        </div>
+        
+        <div style="margin-top: 20px; font-size: 12px; color: #666; text-align: center;">
+            * 请核对数量及规格，如有异议请当面提出。白联:存根 红联:客户 黄联:回单
+            <br>{f"联系方式: {contact_info}" if contact_info else ""}
+        </div>
+    </body>
+    </html>
+    """
+    
+    save_dir = os.path.join(DATA_ROOT, "送货单")
+    if not os.path.exists(save_dir): os.makedirs(save_dir)
+    
+    fname = os.path.join(save_dir, f"送货单_{target_partner}_{delivery_no}.html")
+    with open(fname, "w", encoding="utf-8") as f:
+        f.write(html)
+        
+    print(f"✅ 送货单已生成: {Color.UNDERLINE}{fname}{Color.ENDC}")
+    try: os.startfile(fname)
+    except: pass
+    
+    # 4. 可选：回写备注 (标记已送货)
+    if input("👉 是否在备注中标记 '已出单'? (y/n) [y]: ").strip().lower() != 'n':
+        print("⏳ 正在更新记录...")
+        batch_updates = []
+        for r in selected_recs:
+            old_rem = r.fields.get("备注", "")
+            if "已出单" not in old_rem:
+                new_rem = f"{old_rem} [已出单{delivery_no}]".strip()
+                batch_updates.append(AppTableRecord.builder().record_id(r.record_id).fields({"备注": new_rem}).build())
+        
+        if batch_updates:
+            # Batch update logic
+             for i in range(0, len(batch_updates), 100):
+                 req = BatchUpdateAppTableRecordRequest.builder().app_token(app_token).table_id(table_id).request_body(BatchUpdateAppTableRecordRequestBody.builder().records(batch_updates[i:i+100]).build()).build()
+                 client.bitable.v1.app_table_record.batch_update(req)
+             print("✅ 已标记完成")
 
 def manage_processing_fee_flow(client, app_token):
     """加工费管理 (Menu 26)"""
+    # 概览数据
     print(f"\n{Color.CYAN}🔧 加工费管理{Color.ENDC}")
+    
+    # 尝试加载本月数据概览
+    try:
+        table_id = get_table_id_by_name(client, app_token, "加工费明细表")
+        if table_id:
+            now = datetime.now()
+            start_ts = int(datetime(now.year, now.month, 1).timestamp() * 1000)
+            filter_cmd = f'AND(CurrentValue.[日期]>={start_ts})'
+            recs = get_all_records(client, app_token, table_id, filter_info=filter_cmd)
+            
+            income = 0.0
+            expense = 0.0
+            unpaid = 0.0
+            if recs:
+                for r in recs:
+                    f = r.fields
+                    amt = float(f.get("总金额", 0))
+                    if "收入" in f.get("类型", ""): income += amt
+                    else: expense += amt
+                    
+                    if f.get("结算状态") != "已结算":
+                        unpaid += amt
+            
+            print(f"{Color.BOLD}📊 本月概览 ({now.month}月):{Color.ENDC}")
+            print(f"   💰 收入: {Color.OKGREEN}{income:,.2f}{Color.ENDC} | 💸 支出: {Color.FAIL}{expense:,.2f}{Color.ENDC} | 🧾 待结算: {Color.WARNING}{unpaid:,.2f}{Color.ENDC}")
+    except: pass
+
     print("-----------------------------------")
-    print("1. 登记加工费")
+    print("1. 批量导入加工单 (Excel)")
     print("2. 导出加工费明细 (Excel)")
     print("3. 维护价目表 (Price List)")
+    print(f"{Color.OKGREEN}4. 生成客户加工费月报{Color.ENDC}")
+    print(f"{Color.OKGREEN}5. 外协费用分析表{Color.ENDC}")
+    print(f"{Color.OKGREEN}6. 结算管理 (AR/AP) [新]{Color.ENDC}")
+    print(f"{Color.OKBLUE}8. 同步到总账 (月末汇总) [新]{Color.ENDC}")
+    print(f"{Color.OKBLUE}9. 开票管理 (Mark as Invoiced) [新]{Color.ENDC}")
+    print(f"{Color.OKGREEN}10. 批量生成客户对账单 (明细版) [新]{Color.ENDC}")
+    print(f"{Color.OKBLUE}11. 客户收款登记 (按实际发生) [新]{Color.ENDC}")
+    print(f"{Color.OKBLUE}12. 供应商付款登记 (按实际发生) [新]{Color.ENDC}")
+    print(f"{Color.CYAN}13. 生成送货单 (Delivery Note) [新]{Color.ENDC}")
+    print("7. 登记加工费 (手动)")
     print("0. 返回")
     
-    choice = input("\n👉 请选择 (0-3): ").strip()
+    choice = input("\n👉 请选择 (0-13): ").strip()
     
     if choice == '0': return
     
+    if choice == '13':
+        generate_delivery_note(client, app_token)
+        return
+    
+    if choice == '1':
+        import_processing_records_from_excel(client, app_token)
+        return
+
     if choice == '3':
         manage_price_list(client, app_token)
+        return
+        
+    if choice == '4':
+        generate_customer_processing_report(client, app_token)
+        return
+
+    if choice == '5':
+        generate_outsourcing_analysis_report(client, app_token)
+        return
+
+    if choice == '6':
+        manage_settlement(client, app_token)
+        return
+
+    if choice == '8':
+        sync_processing_fee_to_ledger(client, app_token)
+        return
+        
+    if choice == '9':
+        manage_invoice_status(client, app_token)
+        return
+        
+    if choice == '10':
+        batch_generate_customer_statements(client, app_token)
+        return
+        
+    if choice == '11':
+        manage_processing_payment(client, app_token)
+        return
+        
+    if choice == '12':
+        manage_supplier_payment(client, app_token)
         return
 
     table_id = create_processing_fee_table(client, app_token) # 确保表存在
@@ -8329,6 +10151,8 @@ def manage_processing_fee_flow(client, app_token):
                 "单位": f.get("单位", ""),
                 "单价": f.get("单价", 0),
                 "总金额": f.get("总金额", 0),
+                "结算状态": f.get("结算状态", "未结算"),
+                "开票状态": f.get("开票状态", "未开票"),
                 "备注": f.get("备注", "")
             })
         
@@ -8340,7 +10164,7 @@ def manage_processing_fee_flow(client, app_token):
         except: pass
         return
 
-    if choice == '1':
+    if choice == '7':
         # 登记逻辑
         # 预加载价目表以支持智能学习
         print("🔄 正在加载价目表以支持智能学习...")
@@ -8358,6 +10182,82 @@ def manage_processing_fee_flow(client, app_token):
         last_partner = ""
         last_type_choice = "1"
         
+        # [New] 构建历史单价缓存 (Smart Price History) - 优化版 (使用文件缓存)
+        print("⏳ 正在加载历史单价缓存...")
+        history_price_map = {} # (partner, name, spec) -> {price, unit, date}
+        
+        cache_file = os.path.join(DATA_ROOT, "cache", "price_history.json")
+        last_cache_ts = 0
+        
+        # 1. Load from file
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    cached_data = json.load(f)
+                    # Convert list keys back to tuple if needed, but JSON keys are strings
+                    # We store as list of dicts or dict with string keys
+                    # Let's store as list: [{"key": [p,n,s], "val": {...}}]
+                    for item in cached_data:
+                        k = tuple(item["key"])
+                        history_price_map[k] = item["val"]
+                    
+                    # Get max timestamp
+                    for v in history_price_map.values():
+                        if v['date'] > last_cache_ts: last_cache_ts = v['date']
+            except: pass
+            
+        # 2. Fetch incremental updates
+        # Filter: Date > last_cache_ts
+        filter_cmd = None
+        if last_cache_ts > 0:
+            filter_cmd = f'CurrentValue.[日期]>{last_cache_ts}'
+            
+        # Only fetch necessary fields to speed up
+        # Unfortunately get_all_records fetches all fields by default unless optimized client used
+        # But filter helps.
+        new_recs = get_all_records(client, app_token, table_id, filter_info=filter_cmd)
+        
+        if new_recs:
+            print(f"📥 同步了 {len(new_recs)} 条新记录")
+            updated = False
+            for r in new_recs:
+                f = r.fields
+                p = f.get("往来单位", "").strip()
+                n = f.get("品名", "").strip()
+                s = f.get("规格", "").strip()
+                pr = float(f.get("单价", 0))
+                u = f.get("单位", "")
+                d = f.get("日期", 0)
+                
+                if p and n and pr > 0:
+                    key = (p, n, s)
+                    # Update if newer
+                    if key not in history_price_map or d > history_price_map[key]['date']:
+                        history_price_map[key] = {
+                            'price': pr,
+                            'unit': u,
+                            'date': d,
+                            'd_str': datetime.fromtimestamp(d/1000).strftime("%Y-%m-%d") if d else ""
+                        }
+                        updated = True
+            
+            # 3. Save back to cache if updated
+            if updated:
+                try:
+                    if not os.path.exists(os.path.dirname(cache_file)):
+                        os.makedirs(os.path.dirname(cache_file))
+                    
+                    # Convert to serializable format
+                    to_save = []
+                    for k, v in history_price_map.items():
+                        to_save.append({"key": list(k), "val": v})
+                        
+                    with open(cache_file, "w", encoding="utf-8") as f:
+                        json.dump(to_save, f)
+                except: pass
+        
+        print(f"✅ 历史单价准备就绪 (共 {len(history_price_map)} 条条目)")
+
         # 批次累计变量
         batch_total_amount = 0.0
         batch_count = 0
@@ -8481,6 +10381,17 @@ def manage_processing_fee_flow(client, app_token):
                 
                 base_unit = unit
                 price = float(f.get('单价', 0))
+                
+                # 优先使用历史单价 (如果存在)
+                hist_key = (partner, product_name, product_spec)
+                if hist_key in history_price_map:
+                    hist = history_price_map[hist_key]
+                    print(f"💡 发现历史成交价: {Color.OKGREEN}{hist['price']}元/{hist['unit']}{Color.ENDC} ({hist['d_str']})")
+                    # 如果历史单位和当前推断单位一致，使用历史价格
+                    if hist['unit'] == unit:
+                        price = hist['price']
+                        print(f"   已自动采用历史价格")
+                
                 calc_remark = f"[价目] {product_name} {product_spec}"
                 
                 try:
@@ -8504,14 +10415,14 @@ def manage_processing_fee_flow(client, app_token):
                 
                 # 计价方式
                 print("计价方式:")
-                print("1. 按件/个 (Quantity)")
+                print("1. 按件/只/个 (Quantity)")
                 print("2. 按米长 (Length)")
                 print("3. 按重量 (Weight)")
                 print("4. 按平方 (Area)")
                 
                 m_choice = input("👉 请选择 (1-4): ").strip()
-                modes = {'1': '按件/个', '2': '按米长', '3': '按重量', '4': '按平方'}
-                mode_name = modes.get(m_choice, '按件/个')
+                modes = {'1': '按件/只/个', '2': '按米长', '3': '按重量', '4': '按平方'}
+                mode_name = modes.get(m_choice, '按件/只/个')
                 
                 units = {'1': '件', '2': '米', '3': 'kg', '4': 'm²'}
                 base_unit = units.get(m_choice, '单位')
@@ -8529,119 +10440,73 @@ def manage_processing_fee_flow(client, app_token):
                     if q_choice == 'B':
                         try:
                             l_val = float(eval(input("   请输入总长度 (米) [支持算式]: ").strip(), {"__builtins__": None}, {}))
-                            g_val = float(input("   请输入米重 (g/m): ").strip())
-                            qty_val = l_val * g_val / 1000.0
-                            print(f"   ✅ 理论重量: {l_val}m * {g_val}g/m = {Color.OKGREEN}{qty_val:.3f} kg{Color.ENDC}")
-                            qty_str = str(qty_val)
-                        except Exception as e:
-                            print(f"   ❌ 计算错误: {e}")
-                            
+                            w_val = float(input("   请输入米重 (kg/m): ").strip())
+                            qty_val = round(l_val * w_val, 3)
+                            print(f"   ⚖️ 计算重量: {l_val}m * {w_val}kg/m = {qty_val}kg")
+                            calc_remark += f" [理论重: {l_val}m*{w_val}]"
+                        except:
+                             print("❌ 计算错误")
+                             continue
+                    else:
+                         try: qty_val = float(eval(input(f"数量 ({base_unit}) [支持算式]: ").strip(), {"__builtins__": None}, {}))
+                         except: continue
+
+                elif m_choice == '2': # 按米长
+                     try: qty_val = float(eval(input(f"数量 ({base_unit}) [支持算式]: ").strip(), {"__builtins__": None}, {}))
+                     except: continue
+                
                 elif m_choice == '4': # 按平方
                     print(f"\n{Color.CYAN}📐 面积计算助手:{Color.ENDC}")
                     print("   A. 直接输入面积 (m²)")
-                    print("   B. 通过【总长 x 周长】计算")
+                    print("   B. 通过【长 x 宽 x 数量】计算")
                     q_choice = input("   👉 请选择 (A/B) [默认A]: ").strip().upper()
                     
                     if q_choice == 'B':
-                        try:
-                            l_val = float(eval(input("   请输入总长度 (米) [支持算式]: ").strip(), {"__builtins__": None}, {}))
-                            p_val = float(input("   请输入周长/展开宽度 (mm): ").strip())
-                            qty_val = l_val * (p_val / 1000.0)
-                            print(f"   ✅ 计算面积: {l_val}m * {p_val}mm = {Color.OKGREEN}{qty_val:.3f} m²{Color.ENDC}")
-                            qty_str = str(qty_val)
-                        except Exception as e:
-                            print(f"   ❌ 计算错误: {e}")
-
-                if qty_val == 0.0:
-                    try:
-                        qty_input = input(f"数量 ({base_unit}) [支持算式]: ").strip()
-                        if not qty_input and qty_str: # 如果上面计算了，用户直接回车
-                            qty_input = qty_str
-                            
-                        if '*' in qty_input or '+' in qty_input or '/' in qty_input:
-                            try:
-                                qty = float(eval(qty_input, {"__builtins__": None}, {}))
-                                print(f"   🧮 计算结果: {qty}")
-                            except:
-                                print("❌ 算式无效")
-                                continue
-                        else:
-                            qty = float(qty_input)
-                    except:
-                        print("❌ 数量无效")
-                        continue
+                         try:
+                             l = float(input("   长 (mm): "))
+                             w = float(input("   宽 (mm): "))
+                             n = float(input("   数量 (件): "))
+                             area = (l * w * n) / 1000000.0 # mm^2 to m^2
+                             qty_val = round(area, 3)
+                             print(f"   📐 计算面积: {qty_val} m²")
+                             calc_remark += f" [尺寸: {l}x{w}mm * {n}件]"
+                         except: continue
+                    else:
+                         try: qty_val = float(eval(input(f"数量 ({base_unit}) [支持算式]: ").strip(), {"__builtins__": None}, {}))
+                         except: continue
                 else:
-                    qty = qty_val
+                    # 默认按件
+                    try: qty_val = float(eval(input(f"数量 ({base_unit}) [支持算式]: ").strip(), {"__builtins__": None}, {}))
+                    except: continue
 
+                qty = qty_val
                 
-                # 单价计算器/转换器
-                if m_choice in ['2', '3']:
-                    print(f"\n{Color.CYAN}🧮 单价助手: {Color.ENDC}")
-                    
-                    if m_choice == '2':
-                         print("   A. 已知【公斤价】转【米价】(需输入米重)")
-                    elif m_choice == '3':
-                         print("   A. 已知【米价】转【公斤价】(需输入米重)")
-                         
-                    print("   B. 通过【规格/周长】按比例折算")
-                    print("   C. 跳过")
-                    
-                    helper_choice = input("   👉 请选择 (A/B/C) [默认C]: ").strip().upper()
-                    
-                    if helper_choice == 'A':
-                        try:
-                            gram_weight = float(input("   请输入米重/线密度 (克/米, g/m): ").strip())
-                            
-                            if m_choice == '2': # 按米计价
-                                kg_price = float(input("   请输入公斤价 (元/kg): ").strip())
-                                price = kg_price * (gram_weight / 1000)
-                                print(f"   ✅ 计算结果: {kg_price}元/kg * ({gram_weight}g/1000) = {price:.4f} 元/米")
-                                calc_remark = f"[米重折算] {gram_weight}g/m, 基价{kg_price}元/kg"
-                                
-                            elif m_choice == '3': # 按重量计价
-                                meter_price = float(input("   请输入米价 (元/米): ").strip())
-                                if gram_weight > 0:
-                                    price = meter_price / (gram_weight / 1000)
-                                    print(f"   ✅ 计算结果: {meter_price}元/米 / ({gram_weight}g/1000) = {price:.4f} 元/kg")
-                                    calc_remark = f"[米重折算] {gram_weight}g/m, 基价{meter_price}元/米"
-                                
-                            if input(f"   👉 是否使用计算出的单价 {price:.4f}? (y/n): ").strip().lower() != 'y':
-                                price = 0.0 # 重置
-                                calc_remark = ""
-                                
-                        except Exception as e:
-                            print(f"   ❌ 计算出错: {e}")
-                    
-                    elif helper_choice == 'B':
-                        try:
-                            base_width = float(input("   请输入基准规格/周长 [默认1.0]: ").strip() or 1.0)
-                            base_price = float(input(f"   请输入基准单价 (元/{base_unit}): ").strip())
-                            actual_width = float(input("   请输入实际规格/周长: ").strip())
-                            
-                            if base_width > 0:
-                                price = base_price * (actual_width / base_width)
-                                print(f"   ✅ 计算结果: {base_price}元 * ({actual_width}/{base_width}) = {price:.4f} 元/{base_unit}")
-                                calc_remark = f"[规格折算] 基准{base_width}@{base_price}元 -> {actual_width}"
-                                
-                            if input(f"   👉 是否使用计算出的单价 {price:.4f}? (y/n): ").strip().lower() != 'y':
-                                price = 0.0
-                                calc_remark = ""
-                        except Exception as e:
-                            print(f"   ❌ 计算出错: {e}")
-            
-            # 如果没有计算或未采用计算结果
-            if price == 0.0:
+                # 单价
+                # 尝试从历史记录获取默认单价
+                def_price = 0.0
+                hist_key = (partner, product_name, product_spec)
+                if hist_key in history_price_map:
+                    hist = history_price_map[hist_key]
+                    print(f"💡 发现历史成交价: {Color.OKGREEN}{hist['price']}元/{hist['unit']}{Color.ENDC} ({hist['d_str']})")
+                    if hist['unit'] == base_unit:
+                        def_price = hist['price']
+                
                 try:
-                    price = float(input(f"单价 (元/{base_unit}): ").strip())
+                    p_in = input(f"单价 (元/{base_unit}) [默认 {def_price}]: ").strip()
+                    if not p_in:
+                        price = def_price
+                    else:
+                        price = float(p_in)
                 except:
                     print("❌ 单价无效")
                     continue
             
             total = round(qty * price, 2)
+            print(f"🧮 自动计算总额: {qty} * {price} = {total}")
             
             # 重新获取 mode_name 如果是从价目表选择的 (因为 mode_name 之前可能没设置)
-            modes = {'1': '按件/个', '2': '按米长', '3': '按重量', '4': '按平方'}
-            mode_name = modes.get(m_choice, '按件/个')
+            modes = {'1': '按件/只/个', '2': '按米长', '3': '按重量', '4': '按平方'}
+            mode_name = modes.get(m_choice, '按件/只/个')
 
             print(f"💰 总金额: {total:,.2f} 元")
             
@@ -8731,6 +10596,490 @@ def manage_processing_fee_flow(client, app_token):
 
 
 # 发票管理流程 (新)
+def debt_collection_assistant(client, app_token):
+    """应收账款催收助手 (Debt Collection Assistant)"""
+    print(f"\n{Color.FAIL}📢 应收账款催收助手 (Debt Collection){Color.ENDC}")
+    print("--------------------------------")
+    print("功能: 扫描所有客户的欠款情况，进行账龄分析 (0-30/30-60/60-90/>90天)，并生成催款话术。")
+    
+    table_id = get_table_id_by_name(client, app_token, "日常台账表")
+    if not table_id: return
+    
+    print("⏳ 正在计算全量客户余额 (可能需要一点时间)...")
+    
+    # 1. Calculate All Balances
+    recs = get_all_records(client, app_token, table_id)
+    
+    cust_receipts = {} # Customer -> Total Receipt
+    last_pay_date = {} # Customer -> Timestamp
+    
+    # 2. Ledger Receipts (Payment)
+    for r in recs:
+        t = r.fields.get("业务类型", "")
+        if t == "收款":
+            p = r.fields.get("往来单位费用", "").strip()
+            amt = float(r.fields.get("实际收付金额", 0))
+            d = r.fields.get("记账日期", 0)
+            if p:
+                if p not in cust_receipts: cust_receipts[p] = 0.0
+                cust_receipts[p] += amt
+                
+                if p not in last_pay_date or d > last_pay_date[p]:
+                    last_pay_date[p] = d
+            
+    # 3. Processing Fees (Debt)
+    pf_table_id = get_table_id_by_name(client, app_token, "加工费明细表")
+    if not pf_table_id: return
+    
+    print("⏳ 正在拉取加工费记录并分析账龄...")
+    pf_recs = get_all_records(client, app_token, pf_table_id)
+    
+    cust_debts = {} # Customer -> Total Fee
+    last_biz_date = {} # Customer -> Timestamp
+    partner_records = {} # Customer -> List of records
+    
+    all_partners = set()
+    
+    for r in pf_recs:
+        t = r.fields.get("类型", "")
+        if t == "收入-加工服务":
+            p = r.fields.get("往来单位", "").strip()
+            amt = float(r.fields.get("总金额", 0))
+            d = r.fields.get("日期", 0)
+            if p:
+                if p not in cust_debts: cust_debts[p] = 0.0
+                cust_debts[p] += amt
+                all_partners.add(p)
+                
+                if p not in last_biz_date or d > last_biz_date[p]:
+                    last_biz_date[p] = d
+                    
+                if p not in partner_records: partner_records[p] = []
+                partner_records[p].append({
+                    "amt": amt,
+                    "date": d
+                })
+
+    # 4. Calculate Aging
+    final_list = []
+    now_ts = int(datetime.now().timestamp() * 1000)
+    
+    print(f"\n📋 欠款客户清单 (按欠款金额排序):")
+    # Header with Aging
+    print(f"{'排名':<4} | {'客户名称':<10} | {'欠款余额':<10} | {'0-30天':<8} | {'30-60天':<8} | {'60-90天':<8} | {'>90天':<8}")
+    print("-" * 90)
+    
+    for p in all_partners:
+        debt = cust_debts.get(p, 0)
+        paid = cust_receipts.get(p, 0)
+        balance = debt - paid
+        
+        if balance > 10: # Ignore small change
+            # Aging Logic
+            aging = {"0-30": 0.0, "30-60": 0.0, "60-90": 0.0, "90+": 0.0}
+            
+            # Sort records Newest -> Oldest
+            p_recs = partner_records.get(p, [])
+            p_recs.sort(key=lambda x: x["date"], reverse=True)
+            
+            remaining_bal = balance
+            
+            for r in p_recs:
+                if remaining_bal <= 0.01: break
+                
+                amt = r["amt"]
+                # allocate
+                this_amt = min(remaining_bal, amt)
+                remaining_bal -= this_amt
+                
+                # check age
+                r_date = r["date"]
+                days_diff = (now_ts - r_date) / (1000 * 3600 * 24)
+                
+                if days_diff <= 30: aging["0-30"] += this_amt
+                elif days_diff <= 60: aging["30-60"] += this_amt
+                elif days_diff <= 90: aging["60-90"] += this_amt
+                else: aging["90+"] += this_amt
+            
+            # Handle edge case: if balance remains (maybe from opening balance not in records)
+            if remaining_bal > 0.01:
+                aging["90+"] += remaining_bal # Assume very old
+            
+            l_biz = last_biz_date.get(p, 0)
+            l_pay = last_pay_date.get(p, 0)
+            
+            final_list.append({
+                "name": p,
+                "balance": balance,
+                "aging": aging,
+                "last_pay": datetime.fromtimestamp(l_pay/1000).strftime("%Y-%m-%d") if l_pay else "-"
+            })
+            
+    final_list.sort(key=lambda x: x["balance"], reverse=True)
+    
+    for i, item in enumerate(final_list):
+        a = item["aging"]
+        print(f"{i+1:<4} | {item['name']:<10} | {Color.FAIL}{item['balance']:<10,.0f}{Color.ENDC} | "
+              f"{a['0-30']:<8,.0f} | {a['30-60']:<8,.0f} | {a['60-90']:<8,.0f} | {Color.FAIL}{a['90+']:<8,.0f}{Color.ENDC}")
+        
+    print("-" * 90)
+    print(f"💰 总欠款金额: {sum(x['balance'] for x in final_list):,.2f}")
+    
+    # 5. Generate Reminder
+    while True:
+        print(f"\n{Color.OKBLUE}功能操作:{Color.ENDC}")
+        print(" - 输入序号 (如 1): 生成微信催款话术")
+        print(" - 输入 h+序号 (如 h1): 生成HTML正式对账单 (发给客户)")
+        print(" - 输入 0: 返回")
+        
+        idx_str = input("👉 请选择: ").strip().lower()
+        if idx_str == '0': break
+        
+        is_html = False
+        if idx_str.startswith('h'):
+            is_html = True
+            idx_str = idx_str[1:]
+        
+        try:
+            idx = int(idx_str) - 1
+            if 0 <= idx < len(final_list):
+                target = final_list[idx]
+                name = target["name"]
+                bal = target["balance"]
+                l_pay = target["last_pay"]
+                ag = target["aging"]
+                
+                if is_html:
+                    # Generate HTML Statement
+                    recs = partner_records.get(name, [])
+                    recs.sort(key=lambda x: x["date"], reverse=True)
+                    
+                    html = f"""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta charset="utf-8">
+                        <title>{name} - 对账单</title>
+                        <style>
+                            body {{ font-family: 'Segoe UI', sans-serif; padding: 40px; max-width: 800px; margin: 0 auto; background: #fff; }}
+                            .header {{ text-align: center; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 30px; }}
+                            .info {{ display: flex; justify-content: space-between; margin-bottom: 20px; }}
+                            table {{ width: 100%; border-collapse: collapse; margin-bottom: 30px; }}
+                            th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
+                            th {{ background-color: #f8f9fa; }}
+                            .total {{ text-align: right; font-size: 20px; font-weight: bold; color: #c0392b; }}
+                            .footer {{ margin-top: 50px; text-align: center; color: #7f8c8d; font-size: 14px; }}
+                            @media print {{ body {{ padding: 0; }} }}
+                        </style>
+                    </head>
+                    <body>
+                        <div class="header">
+                            <h1>对 账 单 (Statement)</h1>
+                            <p>日期: {datetime.now().strftime('%Y-%m-%d')}</p>
+                        </div>
+                        <div class="info">
+                            <div><strong>客户名称:</strong> {name}</div>
+                            <div><strong>截止日期:</strong> {datetime.now().strftime('%Y-%m-%d')}</div>
+                        </div>
+                        
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>日期</th>
+                                    <th>摘要/业务</th>
+                                    <th style="text-align:right">金额 (元)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                    """
+                    
+                    # Show recent 20 records
+                    for r in recs[:20]:
+                        d_str = datetime.fromtimestamp(r["date"]/1000).strftime("%Y-%m-%d")
+                        html += f"""
+                                <tr>
+                                    <td>{d_str}</td>
+                                    <td>加工费</td>
+                                    <td style="text-align:right">{r['amt']:,.2f}</td>
+                                </tr>
+                        """
+                        
+                    html += f"""
+                            </tbody>
+                        </table>
+                        
+                        <div class="total">
+                            当前欠款余额: ¥ {bal:,.2f}
+                        </div>
+                        
+                        <div style="margin-top: 20px; border: 1px dashed #ccc; padding: 15px; background: #fffcf5;">
+                            <strong>账龄分析:</strong><br>
+                            0-30天: {ag['0-30']:,.2f} | 30-60天: {ag['30-60']:,.2f} | 60-90天: {ag['60-90']:,.2f} | >90天: {ag['90+']:,.2f}
+                        </div>
+
+                        <div class="footer">
+                            <p>请核对上述账单，如有疑问请及时联系。</p>
+                            <p>谢谢您的支持！</p>
+                        </div>
+                    </body>
+                    </html>
+                    """
+                    
+                    save_path = os.path.join(DATA_ROOT, f"对账单_{name}_{datetime.now().strftime('%Y%m%d')}.html")
+                    with open(save_path, "w", encoding="utf-8") as f:
+                        f.write(html)
+                    print(f"✅ 对账单已生成: {Color.UNDERLINE}{save_path}{Color.ENDC}")
+                    try: os.startfile(save_path)
+                    except: pass
+                
+                else:
+                    print(f"\n📱 {name} 催款微信模板:")
+                    print("--------------------------------")
+                    print(f"{name}老板您好，")
+                    print(f"打扰了，这边核对了一下账单，截止到今天，贵司还有 {bal:,.2f} 元加工费未结。")
+                    
+                    # Add aging detail if long overdue
+                    long_overdue = ag["60-90"] + ag["90+"]
+                    if long_overdue > 0:
+                        print(f"其中 {long_overdue:,.0f} 元已超过2个月，请重点关注一下。")
+                    
+                    if l_pay != "-":
+                        print(f"(上次回款日期: {l_pay})")
+                    print(f"麻烦您抽空安排一下，谢谢支持！🙏")
+                    print("--------------------------------")
+                    print("💡 提示: 选中上方文字 -> 右键复制 -> 发送微信")
+            else:
+                print("❌ 序号无效")
+        except:
+            print("❌ 输入无效")
+
+def generate_monthly_visual_report(client, app_token):
+    """生成月度经营分析图表报告 (Visual Report)"""
+    print(f"\n{Color.OKBLUE}📊 生成月度经营分析报告 (Visual){Color.ENDC}")
+    
+    month_str = input("👉 请输入月份 (YYYY-MM) [默认本月]: ").strip()
+    if not month_str: month_str = datetime.now().strftime("%Y-%m")
+    
+    try:
+        start_dt = datetime.strptime(month_str, "%Y-%m")
+        if start_dt.month == 12:
+            end_dt = datetime(start_dt.year + 1, 1, 1)
+        else:
+            end_dt = datetime(start_dt.year, start_dt.month + 1, 1)
+        
+        start_ts = int(start_dt.timestamp() * 1000)
+        end_ts = int(end_dt.timestamp() * 1000)
+    except:
+        print("❌ 日期格式错误")
+        return
+        
+    # Fetch Data
+    # 1. Ledger (Income/Expense/Cost)
+    l_id = get_table_id_by_name(client, app_token, "日常台账表")
+    if not l_id: return
+    
+    print("⏳ 正在分析财务数据...")
+    filter_l = f'AND(CurrentValue.[记账日期]>={start_ts}, CurrentValue.[记账日期]<{end_ts})'
+    l_recs = get_all_records(client, app_token, l_id, filter_info=filter_l)
+    
+    total_inc = 0.0
+    total_exp = 0.0
+    exp_cats = {} # Category -> Amount
+    
+    # Energy Cost Analysis
+    energy_cost = 0.0
+    outsourced_cost = 0.0
+    
+    for r in l_recs:
+        t = r.fields.get("业务类型", "")
+        amt = float(r.fields.get("实际收付金额", 0))
+        cat = r.fields.get("费用归类", "其他")
+        
+        if t == "收款":
+            total_inc += amt
+        elif t in ["付款", "费用"]:
+            total_exp += amt
+            if cat not in exp_cats: exp_cats[cat] = 0.0
+            exp_cats[cat] += amt
+            
+            # Identify Energy Costs
+            if "电" in cat or "水" in cat or "气" in cat:
+                energy_cost += amt
+            
+            # Identify Outsourced Costs
+            if "外协" in cat:
+                outsourced_cost += amt
+            
+    # 2. Production (Processing Fee)
+    pf_id = get_table_id_by_name(client, app_token, "加工费明细表")
+    print("⏳ 正在分析生产数据...")
+    filter_p = f'AND(CurrentValue.[日期]>={start_ts}, CurrentValue.[日期]<{end_ts}, CurrentValue.[类型]="收入-加工服务")'
+    p_recs = get_all_records(client, app_token, pf_id, filter_info=filter_p)
+    
+    prod_qty = 0.0
+    cust_sales = {} # Customer -> Amount
+    cust_qtys = {} # Customer -> Quantity
+    
+    for r in p_recs:
+        q = float(r.fields.get("数量", 0))
+        amt = float(r.fields.get("总金额", 0))
+        cust = r.fields.get("往来单位", "散客")
+        
+        prod_qty += q 
+        if cust not in cust_sales: 
+            cust_sales[cust] = 0.0
+            cust_qtys[cust] = 0.0
+            
+        cust_sales[cust] += amt
+        cust_qtys[cust] += q
+    
+    # Calculate Financial Ratios
+    cost_rate = (total_exp / total_inc * 100) if total_inc > 0 else 0
+    energy_rate = (energy_cost / total_inc * 100) if total_inc > 0 else 0
+    outsourced_rate = (outsourced_cost / total_inc * 100) if total_inc > 0 else 0
+    
+    # Keep Unit Cost for reference
+    unit_cost = total_exp / prod_qty if prod_qty > 0 else 0
+        
+    # Sort Data
+    top_cust = sorted(cust_sales.items(), key=lambda x: x[1], reverse=True)[:5]
+    top_exp = sorted(exp_cats.items(), key=lambda x: x[1], reverse=True)[:5]
+    
+    # Customer Value Analysis (Avg Price per Unit)
+    cust_value = []
+    for c, s_amt in cust_sales.items():
+        qty = cust_qtys.get(c, 0)
+        avg_p = s_amt / qty if qty > 0 else 0
+        cust_value.append((c, avg_p, s_amt))
+    
+    # Sort by Avg Price (find high value customers)
+    cust_value.sort(key=lambda x: x[1], reverse=True)
+    top_value_cust = cust_value[:5] # Highest price per unit
+    
+    # Generate HTML with Chart.js
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>月度经营分析报告 {month_str}</title>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <style>
+            body {{ font-family: 'Segoe UI', sans-serif; background: #f4f6f9; padding: 20px; max-width: 1000px; margin: 0 auto; }}
+            .card {{ background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); margin-bottom: 20px; }}
+            .row {{ display: flex; gap: 20px; flex-wrap: wrap; }}
+            .col {{ flex: 1; min-width: 300px; }}
+            h2 {{ color: #2c3e50; border-left: 5px solid #3498db; padding-left: 10px; }}
+            .kpi-box {{ display: flex; justify-content: space-around; text-align: center; }}
+            .kpi {{ padding: 10px; }}
+            .kpi-val {{ font-size: 24px; font-weight: bold; }}
+            .green {{ color: #27ae60; }} .red {{ color: #c0392b; }} .blue {{ color: #2980b9; }}
+            table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
+            th, td {{ padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }}
+            th {{ background-color: #f8f9fa; color: #7f8c8d; font-size: 12px; }}
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h1 style="text-align:center">📊 {month_str} 月度经营分析报告</h1>
+            <div class="kpi-box">
+                <div class="kpi">
+                    <div style="color:#7f8c8d">总收入 (Cash)</div>
+                    <div class="kpi-val green">¥ {total_inc:,.0f}</div>
+                </div>
+                <div class="kpi">
+                    <div style="color:#7f8c8d">总支出 (Cash)</div>
+                    <div class="kpi-val red">¥ {total_exp:,.0f}</div>
+                </div>
+                <div class="kpi">
+                    <div style="color:#7f8c8d">净现金流</div>
+                    <div class="kpi-val blue">¥ {total_inc - total_exp:+,.0f}</div>
+                </div>
+                <div class="kpi">
+                    <div style="color:#7f8c8d">产值 (Production)</div>
+                    <div class="kpi-val" style="color:#e67e22">¥ {sum(cust_sales.values()):,.0f}</div>
+                </div>
+            </div>
+             <div style="text-align:center; margin-top: 15px; font-size: 14px; color: #7f8c8d; border-top: 1px solid #eee; padding-top: 10px;">
+                🏭 本月总产量: {prod_qty:,.0f} | 📉 综合成本率: {cost_rate:.1f}% (能耗{energy_rate:.1f}%/外协{outsourced_rate:.1f}%) | 💰 单位成本: ¥ {unit_cost:.2f}
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col card">
+                <h2>🏆 客户产值贡献 TOP5</h2>
+                <canvas id="custChart"></canvas>
+            </div>
+            <div class="col card">
+                <h2>💸 支出构成 TOP5</h2>
+                <canvas id="expChart"></canvas>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>💎 客户单价价值分析 (TOP 5 High Value)</h2>
+            <p style="color: #7f8c8d; font-size: 12px;">* 单价 = 总加工费 / 总数量 (反映客户利润空间)</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>客户名称</th>
+                        <th>平均单价 (元/单位)</th>
+                        <th>总产值贡献</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {''.join([f"<tr><td>{c}</td><td>¥ {p:.2f}</td><td>¥ {v:,.0f}</td></tr>" for c, p, v in top_value_cust])}
+                </tbody>
+            </table>
+        </div>
+        
+        <script>
+            // Customer Chart
+            new Chart(document.getElementById('custChart'), {{
+                type: 'bar',
+                data: {{
+                    labels: {json.dumps([x[0] for x in top_cust], ensure_ascii=False)},
+                    datasets: [{{
+                        label: '加工费产值',
+                        data: {json.dumps([x[1] for x in top_cust])},
+                        backgroundColor: 'rgba(52, 152, 219, 0.6)',
+                        borderColor: 'rgba(52, 152, 219, 1)',
+                        borderWidth: 1
+                    }}]
+                }},
+                options: {{ indexAxis: 'y' }}
+            }});
+            
+            // Expense Chart
+            new Chart(document.getElementById('expChart'), {{
+                type: 'doughnut',
+                data: {{
+                    labels: {json.dumps([x[0] for x in top_exp], ensure_ascii=False)},
+                    datasets: [{{
+                        data: {json.dumps([x[1] for x in top_exp])},
+                        backgroundColor: [
+                            '#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#9b59b6', '#95a5a6'
+                        ]
+                    }}]
+                }}
+            }});
+        </script>
+        
+        <div style="text-align:center; color:#999; margin-top:20px;">
+            Generated by CWZS System
+        </div>
+    </body>
+    </html>
+    """
+    
+    save_path = os.path.join(DATA_ROOT, f"月度分析_{month_str}.html")
+    with open(save_path, "w", encoding="utf-8") as f:
+        f.write(html)
+        
+    print(f"✅ 报告已生成: {Color.UNDERLINE}{save_path}{Color.ENDC}")
+    try: os.startfile(save_path)
+    except: pass
+
 def manage_invoice_flow(client, app_token):
     """发票管理：录入销项/进项，查看统计"""
     while True:
@@ -8740,9 +11089,10 @@ def manage_invoice_flow(client, app_token):
         print("2. [进项] 登记收到发票 (供应商)")
         print("3. 查看最近发票记录 (20条)")
         print("4. 发票统计 (本月/本年)")
+        print("5. 🛡️ 税控额度与税负分析 (Risk Monitor) [新]")
         print("0. 返回主菜单")
         
-        choice = input(f"{Color.OKBLUE}请选择功能 (0-4): {Color.ENDC}").strip()
+        choice = input(f"{Color.OKBLUE}请选择功能 (0-5): {Color.ENDC}").strip()
         
         if choice == '0': break
         
@@ -8922,6 +11272,91 @@ def manage_invoice_flow(client, app_token):
             print(f"累计历史: 进项税 {input_tax:,.2f} | 销项税 {output_tax:,.2f}")
             input("\n按回车继续...")
 
+        elif choice == '5':
+            # Tax Quota & Burden Analysis
+            print(f"\n{Color.HEADER}🛡️ 税控额度与税负分析{Color.ENDC}")
+            print("--------------------------------")
+            records = get_all_records(client, app_token, table_id)
+            
+            # Determine Quarter
+            now = datetime.now()
+            q_start_month = (now.month - 1) // 3 * 3 + 1
+            q_start = datetime(now.year, q_start_month, 1)
+            if q_start_month + 3 > 12:
+                q_end = datetime(now.year + 1, 1, 1)
+            else:
+                q_end = datetime(now.year, q_start_month + 3, 1)
+            
+            q_start_ts = int(q_start.timestamp() * 1000)
+            q_end_ts = int(q_end.timestamp() * 1000)
+            
+            # Calc Quarter Sales (No Tax)
+            q_sales_no_tax = 0.0
+            q_sales_total = 0.0
+            
+            # Calc Year Totals for Burden
+            y_start_ts = int(datetime(now.year, 1, 1).timestamp() * 1000)
+            y_out_tax = 0.0
+            y_in_tax = 0.0
+            y_sales_no_tax = 0.0
+            
+            for r in records:
+                f = r.fields
+                ts = f.get("开票日期", 0)
+                itype = f.get("类型", "")
+                amt = float(f.get("不含税金额", 0))
+                tax = float(f.get("税额", 0))
+                total = float(f.get("价税合计", 0))
+                
+                if "销项" in itype:
+                    if ts >= q_start_ts and ts < q_end_ts:
+                        q_sales_no_tax += amt
+                        q_sales_total += total
+                    
+                    if ts >= y_start_ts:
+                        y_out_tax += tax
+                        y_sales_no_tax += amt
+                        
+                elif "进项" in itype:
+                    if ts >= y_start_ts:
+                        y_in_tax += tax
+            
+            # 1. Quota Monitor (Small Taxpayer)
+            print(f"\n📊 本季度 ({q_start.strftime('%Y-%m')}) 销售概况:")
+            print(f"   不含税销售额: {q_sales_no_tax:,.2f}")
+            print(f"   价税合计:     {q_sales_total:,.2f}")
+            
+            limit = 300000 # Default for small taxpayer exemption
+            pct = (q_sales_total / limit) * 100 if limit > 0 else 0
+            
+            bar_len = 30
+            filled = int(bar_len * pct / 100)
+            filled = min(filled, bar_len)
+            bar = "█" * filled + "░" * (bar_len - filled)
+            
+            color = Color.OKGREEN
+            if pct > 80: color = Color.WARNING
+            if pct > 100: color = Color.FAIL
+            
+            print(f"\n📉 小规模免税额度监控 (默认30万/季):")
+            print(f"   进度: {color}[{bar}] {pct:.1f}%{Color.ENDC}")
+            if pct > 90:
+                print(f"   {Color.FAIL}⚠️ 警告: 即将或已经超过免税额度!{Color.ENDC}")
+            else:
+                print(f"   ✅ 额度充足 (剩余: {limit - q_sales_total:,.2f})")
+                
+            # 2. Burden Rate (General Taxpayer)
+            print(f"\n⚖️  税负率估算 (本年度):")
+            net_tax = y_out_tax - y_in_tax
+            burden = (net_tax / y_sales_no_tax * 100) if y_sales_no_tax > 0 else 0
+            
+            print(f"   销项税: {y_out_tax:,.2f}")
+            print(f"   进项税: {y_in_tax:,.2f}")
+            print(f"   应纳税: {net_tax:,.2f}")
+            print(f"   税负率: {burden:.2f}% (应纳税/不含税销售)")
+            
+            input("\n按回车继续...")
+
 # 菜单：设置
 def settings_menu():
     """系统设置菜单"""
@@ -8952,6 +11387,9 @@ def settings_menu():
                 ZHIPU_API_KEY = key
                 update_env_key("ZHIPU_API_KEY", key)
                 print("✅ Key 已更新")
+        elif choice == '14':
+            backup_system_data(client, APP_TOKEN)
+            
         else:
             print("❌ 无效选项")
 
@@ -9666,6 +12104,253 @@ def generate_annual_report(client, app_token, year=None):
     os.startfile(filename) # 自动打开
     return True
 
+def backup_system_data(client, app_token):
+    """全量数据备份"""
+    print(f"\n{Color.CYAN}💾 正在进行全量数据备份...{Color.ENDC}")
+    
+    backup_dir = os.path.join(DATA_ROOT, "备份", datetime.now().strftime("%Y%m%d_%H%M%S"))
+    if not os.path.exists(backup_dir): os.makedirs(backup_dir)
+    
+    tables = [
+        "日常台账表", "加工费明细表", "薪酬管理表", 
+        "发票管理表", "固定资产表", "往来单位表", "加工费价目表"
+    ]
+    
+    success_count = 0
+    for t_name in tables:
+        t_id = get_table_id_by_name(client, app_token, t_name)
+        if t_id:
+            records = get_all_records(client, app_token, t_id)
+            if records:
+                data = [r.fields for r in records]
+                # Save as JSON
+                with open(os.path.join(backup_dir, f"{t_name}.json"), "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                # Save as Excel (optional, but good for user)
+                try:
+                    df = pd.DataFrame(data)
+                    df.to_excel(os.path.join(backup_dir, f"{t_name}.xlsx"), index=False)
+                except: pass
+                
+                print(f"   ✓ {t_name}: {len(records)} 条")
+                success_count += 1
+            else:
+                print(f"   - {t_name}: 无数据")
+    
+    print(f"✅ 备份完成！路径: {backup_dir}")
+    return backup_dir
+
+def reset_system_data(client, app_token):
+    """系统初始化/重置 (数据清空)"""
+    print(f"\n{Color.FAIL}🛑 危险操作：系统数据重置{Color.ENDC}")
+    print("此操作将清空所有业务数据，仅保留表结构。通常用于：")
+    print("1. 试用模拟数据后，准备正式启用")
+    print("2. 重新开始记账")
+    print("注意：操作不可逆！请确保已备份重要数据。")
+    
+    # 强制备份
+    print(f"\n{Color.CYAN}🛡️ 为了安全起见，系统将自动执行一次全量备份...{Color.ENDC}")
+    backup_system_data(client, app_token)
+    
+    confirm = input(f"\n👉 请输入 {Color.BOLD}RESET{Color.ENDC} 确认清空所有数据: ").strip()
+    if confirm != "RESET":
+        print("❌ 操作已取消")
+        return
+        
+    tables = [
+        "日常台账表",
+        "加工费明细表",
+        "薪酬管理表",
+        "固定资产表",
+        "发票管理表",
+        "加工费价目表", # Optional: maybe keep this?
+        "往来单位表"   # Optional: maybe keep this?
+    ]
+    
+    print("\n请选择要清空的范围:")
+    print("1. 仅清空业务流水 (保留价目表、客户信息)")
+    print("2. 彻底清空所有数据 (包括价目表、客户信息)")
+    scope = input("👉 请选择 (1/2): ").strip()
+    
+    if scope == '1':
+        target_tables = ["日常台账表", "加工费明细表", "薪酬管理表", "发票管理表"]
+    elif scope == '2':
+        target_tables = tables
+    else:
+        return
+        
+    print("⏳ 正在清空数据...")
+    for t_name in target_tables:
+        t_id = get_table_id_by_name(client, app_token, t_name)
+        if t_id:
+            # Get all records
+            recs = get_all_records(client, app_token, t_id)
+            if recs:
+                print(f"   🗑️ 正在清空 {t_name} ({len(recs)} 条)...")
+                # Batch delete
+                batch_ids = [r.record_id for r in recs]
+                for i in range(0, len(batch_ids), 100):
+                    batch = batch_ids[i:i+100]
+                    client.bitable.v1.app_table_record.batch_delete(
+                        BatchDeleteAppTableRecordRequest.builder()
+                        .app_token(app_token).table_id(t_id)
+                        .request_body(BatchDeleteAppTableRecordRequestBody.builder().records(batch).build())
+                        .build()
+                    )
+            else:
+                print(f"   ✓ {t_name} 已为空")
+                
+    print(f"\n{Color.OKGREEN}✅ 系统重置完成！您可以开始新的记账了。{Color.ENDC}")
+
+def daily_closing_wizard(client, app_token):
+    """每日结单向导 (End of Day)"""
+    print(f"\n{Color.HEADER}🌙 每日结单向导 (End of Day){Color.ENDC}")
+    print("-----------------------------------")
+    print("本向导将协助您完成今日的财务收尾工作，确保数据不遗漏。")
+    
+    # 1. 检查加工费
+    print(f"\n{Color.BOLD}1. 加工费核对{Color.ENDC}")
+    if input("👉 今天是否有新的【加工单】需要录入? (y/n) [n]: ").strip().lower() == 'y':
+        print("   -> 跳转至批量导入/手动录入...")
+        manage_processing_fee_flow(client, app_token)
+        
+    # 2. 检查收款
+    print(f"\n{Color.BOLD}2. 收款核对{Color.ENDC}")
+    if input("👉 今天是否收到客户的【货款】? (y/n) [n]: ").strip().lower() == 'y':
+        manage_processing_payment(client, app_token)
+        
+    # 3. 检查付款
+    print(f"\n{Color.BOLD}3. 付款核对{Color.ENDC}")
+    if input("👉 今天是否支付了【供应商货款】或【外协费】? (y/n) [n]: ").strip().lower() == 'y':
+        manage_supplier_payment(client, app_token)
+        
+    # 4. 日常费用
+    print(f"\n{Color.BOLD}4. 日常费用{Color.ENDC}")
+    if input("👉 今天是否有【打车/餐饮/买菜】等零星支出? (y/n) [n]: ").strip().lower() == 'y':
+        quick_entry(client, app_token)
+        
+    # 4.5 财务体检
+    print(f"\n{Color.BOLD}4.5 财务体检 (自动扫描异常){Color.ENDC}")
+    financial_health_check(client, app_token)
+        
+    # 5. 今日汇总
+    print(f"\n{Color.BOLD}5. 今日经营快报{Color.ENDC}")
+    now = datetime.now()
+    today_start = int(datetime(now.year, now.month, now.day).timestamp() * 1000)
+    today_end = int((datetime(now.year, now.month, now.day) + timedelta(days=1)).timestamp() * 1000)
+    
+    income = 0.0
+    expense = 0.0
+    
+    # Ledger
+    t_ledger = get_table_id_by_name(client, app_token, "日常台账表")
+    if t_ledger:
+        filter_cmd = f'AND(CurrentValue.[记账日期]>={today_start}, CurrentValue.[记账日期]<{today_end})'
+        recs = get_all_records(client, app_token, t_ledger, filter_info=filter_cmd)
+        if recs:
+            for r in recs:
+                t = r.fields.get("业务类型", "")
+                amt = float(r.fields.get("实际收付金额", 0))
+                if t == "收款": income += amt
+                elif t in ["付款", "费用"]: expense += amt
+                
+    print(f"   📅 日期: {now.strftime('%Y-%m-%d')}")
+    print(f"   💰 今日实收: {Color.OKGREEN}{income:,.2f}{Color.ENDC}")
+    print(f"   💸 今日实付: {Color.FAIL}{expense:,.2f}{Color.ENDC}")
+    print(f"   📈 今日净流: {income - expense:,.2f}")
+    
+    # 5.5 生成日报
+    generate_daily_html_report(client, app_token)
+    
+    # 6. 自动备份
+    print(f"\n{Color.BOLD}6. 数据归档{Color.ENDC}")
+    print("⏳ 正在执行每日自动备份...")
+    backup_system_data(client, app_token)
+    
+    print(f"\n{Color.OKGREEN}✅ 今日结单完成！辛苦了！{Color.ENDC}")
+    input("按回车键返回主菜单...")
+
+def clean_partner_names(client, app_token):
+    """客户/供应商名称清洗"""
+    print(f"\n{Color.CYAN}🧹 客户/供应商名称清洗{Color.ENDC}")
+    print("功能：合并重复的客户名称 (如 '张三' 和 '张三门窗' 合并为 '张三门窗')")
+    
+    # 1. 收集所有名称
+    print("⏳ 正在扫描所有记录...")
+    names = {} # Name -> Count
+    
+    # Scan Processing Fee
+    t_pf = get_table_id_by_name(client, app_token, "加工费明细表")
+    if t_pf:
+        recs = get_all_records(client, app_token, t_pf)
+        if recs:
+            for r in recs:
+                n = r.fields.get("往来单位", "").strip()
+                if n: names[n] = names.get(n, 0) + 1
+                
+    # Scan Ledger
+    t_lg = get_table_id_by_name(client, app_token, "日常台账表")
+    if t_lg:
+        recs = get_all_records(client, app_token, t_lg)
+        if recs:
+            for r in recs:
+                n = r.fields.get("往来单位费用", "").strip()
+                if n: names[n] = names.get(n, 0) + 1
+                
+    sorted_names = sorted(names.items(), key=lambda x: x[1], reverse=True)
+    
+    print(f"\n📊 发现 {len(sorted_names)} 个独立往来单位:")
+    for i, (n, c) in enumerate(sorted_names[:20]):
+        print(f"   {i+1}. {n} ({c}次)")
+    if len(sorted_names) > 20: print("   ...")
+    
+    print("\n操作选项:")
+    print("1. 手动合并名称 (Merge A into B)")
+    print("0. 返回")
+    
+    op = input("👉 请选择: ").strip()
+    
+    if op == '1':
+        old_name = input("请输入【错误/旧】名称 (将被替换): ").strip()
+        if old_name not in names:
+            print("❌ 名称不存在")
+            return
+            
+        new_name = input("请输入【正确/新】名称 (目标名称): ").strip()
+        if not new_name: return
+        
+        print(f"\n⚠️  即将把所有 '{old_name}' 修改为 '{new_name}'")
+        if input("❓ 确认执行? (y/n): ").strip().lower() == 'y':
+            count = 0
+            # Update PF
+            if t_pf:
+                pf_recs = get_all_records(client, app_token, t_pf, filter_info=f'CurrentValue.[往来单位]="{old_name}"')
+                if pf_recs:
+                    batch = []
+                    for r in pf_recs:
+                        batch.append(AppTableRecord.builder().record_id(r.record_id).fields({"往来单位": new_name}).build())
+                    
+                    # Batch Update
+                    for i in range(0, len(batch), 100):
+                        req = BatchUpdateAppTableRecordRequest.builder().app_token(app_token).table_id(t_pf).request_body(BatchUpdateAppTableRecordRequestBody.builder().records(batch[i:i+100]).build()).build()
+                        client.bitable.v1.app_table_record.batch_update(req)
+                    count += len(pf_recs)
+                    
+            # Update Ledger
+            if t_lg:
+                lg_recs = get_all_records(client, app_token, t_lg, filter_info=f'CurrentValue.[往来单位费用]="{old_name}"')
+                if lg_recs:
+                    batch = []
+                    for r in lg_recs:
+                        batch.append(AppTableRecord.builder().record_id(r.record_id).fields({"往来单位费用": new_name}).build())
+                        
+                    for i in range(0, len(batch), 100):
+                        req = BatchUpdateAppTableRecordRequest.builder().app_token(app_token).table_id(t_lg).request_body(BatchUpdateAppTableRecordRequestBody.builder().records(batch[i:i+100]).build()).build()
+                        client.bitable.v1.app_table_record.batch_update(req)
+                    count += len(lg_recs)
+            
+            print(f"✅ 已合并 {count} 条记录！")
+
 # 全局台账缓存 (用于快速查账)
 GLOBAL_LEDGER_CACHE = None
 
@@ -10069,6 +12754,776 @@ def settings_menu():
     elif choice == "0":
         return
 
+def manage_invoice_status(client, app_token):
+    """开票状态管理 (Mark as Invoiced)"""
+    print(f"\n{Color.CYAN}🧾 开票管理 (Invoice Status){Color.ENDC}")
+    table_id = get_table_id_by_name(client, app_token, "加工费明细表")
+    if not table_id:
+        print("❌ 未找到加工费明细表")
+        return
+
+    # 1. 统计未开票金额
+    print("🔄 正在统计未开票金额...")
+    
+    # Filter: Status != "已开票"
+    records = get_all_records(client, app_token, table_id)
+    if not records:
+        print("📭 暂无记录")
+        return
+        
+    uninvoiced_map = {} # Cust -> Amount
+    uninvoiced_records = []
+    
+    for r in records:
+        f = r.fields
+        status = f.get("开票状态", "未开票")
+        if status == "已开票": continue
+        
+        # 仅收入才需要开票
+        t = f.get("类型", "")
+        if "收入" not in t: continue
+        
+        cust = f.get("往来单位", "未知")
+        amt = float(f.get("总金额", 0))
+        # Filter out 0 amount
+        if amt == 0: continue
+        
+        uninvoiced_map[cust] = uninvoiced_map.get(cust, 0) + amt
+        uninvoiced_records.append(r)
+        
+    if not uninvoiced_map:
+        print("✅ 所有收入均已开票！")
+        return
+        
+    # Show Top 10
+    sorted_cust = sorted(uninvoiced_map.items(), key=lambda x: x[1], reverse=True)
+    
+    print("\n📊 待开票排行榜 (Top 10):")
+    for i, (c, amt) in enumerate(sorted_cust[:10]):
+        print(f"   {i+1}. {c}: {Color.WARNING}{amt:,.2f} 元{Color.ENDC}")
+        
+    print(f"\n   >> 总待开票金额: {sum(uninvoiced_map.values()):,.2f} 元")
+    
+    # Actions
+    print("\n操作选项:")
+    print("1. 按客户批量开票 (Mark Customer as Invoiced)")
+    print("2. 按月份批量开票 (Mark Month as Invoiced)")
+    print("0. 返回")
+    
+    op = input("👉 请选择: ").strip()
+    
+    if op == '1':
+        target = input("请输入客户名 (关键词): ").strip()
+        if not target: return
+        
+        # Filter
+        matches = [c for c in uninvoiced_map.keys() if target in c]
+        if not matches:
+            print("❌ 未找到匹配客户")
+            return
+            
+        if len(matches) > 1:
+            print(f"🔍 匹配到多个客户: {matches}")
+            target = input("👉 请输入完整客户名确认: ").strip()
+            if target not in matches: return
+        else:
+            target = matches[0]
+            
+        # Confirm
+        total = uninvoiced_map[target]
+        print(f"\n准备将 {Color.BOLD}{target}{Color.ENDC} 的 {len([r for r in uninvoiced_records if r.fields.get('往来单位')==target])} 笔记录标记为已开票。")
+        print(f"涉及金额: {total:,.2f} 元")
+        
+        if input("❓ 确认执行? (y/n): ").strip().lower() == 'y':
+            # Batch Update
+            batch_recs = []
+            for r in uninvoiced_records:
+                if r.fields.get("往来单位") == target:
+                    batch_recs.append(AppTableRecord.builder().record_id(r.record_id).fields({"开票状态": "已开票"}).build())
+            
+            # Execute Batch
+            count = 0
+            for i in range(0, len(batch_recs), 100):
+                batch = batch_recs[i:i+100]
+                req = BatchUpdateAppTableRecordRequest.builder() \
+                    .app_token(app_token) \
+                    .table_id(table_id) \
+                    .request_body(BatchUpdateAppTableRecordRequestBody.builder().records(batch).build()) \
+                    .build()
+                resp = client.bitable.v1.app_table_record.batch_update(req)
+                if resp.success():
+                    count += len(batch)
+            print(f"✅ 成功标记 {count} 笔记录为已开票")
+
+    elif op == '2':
+        month_str = input("请输入月份 (YYYY-MM): ").strip()
+        try:
+            target_dt = datetime.strptime(month_str, "%Y-%m")
+            # Filter
+            batch_recs = []
+            total_amt = 0
+            for r in uninvoiced_records:
+                ts = r.fields.get("日期", 0)
+                rdt = datetime.fromtimestamp(ts/1000)
+                if rdt.year == target_dt.year and rdt.month == target_dt.month:
+                    batch_recs.append(AppTableRecord.builder().record_id(r.record_id).fields({"开票状态": "已开票"}).build())
+                    total_amt += float(r.fields.get("总金额", 0))
+            
+            if not batch_recs:
+                print("❌ 该月份无待开票记录")
+                return
+                
+            print(f"\n准备将 {month_str} 的 {len(batch_recs)} 笔记录标记为已开票。")
+            print(f"涉及金额: {total_amt:,.2f} 元")
+            
+            if input("❓ 确认执行? (y/n): ").strip().lower() == 'y':
+                 # Execute Batch
+                count = 0
+                for i in range(0, len(batch_recs), 100):
+                    batch = batch_recs[i:i+100]
+                    req = BatchUpdateAppTableRecordRequest.builder() \
+                        .app_token(app_token) \
+                        .table_id(table_id) \
+                        .request_body(BatchUpdateAppTableRecordRequestBody.builder().records(batch).build()) \
+                        .build()
+                    resp = client.bitable.v1.app_table_record.batch_update(req)
+                    if resp.success():
+                        count += len(batch)
+                print(f"✅ 成功标记 {count} 笔记录为已开票")
+                
+        except:
+            print("❌ 日期格式错误")
+
+
+
+def generate_statement_html(cust_name, month_str, items, total_qty, total_amt, save_dir):
+    """生成对账单 HTML 版本"""
+    fname = os.path.join(save_dir, f"{str(cust_name).replace('/','_')}_{month_str}_对账单.html")
+    
+    rows = ""
+    for idx, it in enumerate(items):
+        bg = "#f9f9f9" if idx % 2 == 0 else "#fff"
+        rows += f"""
+        <tr style="background-color:{bg}">
+            <td>{it['日期']}</td>
+            <td>{it['品名']}</td>
+            <td>{it['规格']}</td>
+            <td style="text-align:right">{it['数量']}</td>
+            <td style="text-align:center">{it['单位']}</td>
+            <td style="text-align:right">{it['单价']:.2f}</td>
+            <td style="text-align:right;font-weight:bold">{it['金额']:.2f}</td>
+            <td style="color:#666;font-size:0.8em">{it['备注']}</td>
+        </tr>
+        """
+        
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>{cust_name} 对账单 {month_str}</title>
+        <style>
+            body {{ font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; max-width: 900px; margin: 0 auto; padding: 30px; color: #333; }}
+            .header {{ text-align: center; border-bottom: 3px solid #3498db; padding-bottom: 20px; margin-bottom: 30px; }}
+            .title {{ font-size: 28px; font-weight: bold; color: #2c3e50; }}
+            .subtitle {{ font-size: 16px; color: #7f8c8d; margin-top: 5px; }}
+            .info-box {{ display: flex; justify-content: space-between; margin-bottom: 30px; background: #f8f9fa; padding: 20px; border-radius: 8px; }}
+            .info-item {{ font-size: 14px; }}
+            .label {{ color: #7f8c8d; font-weight: 600; }}
+            
+            table {{ width: 100%; border-collapse: collapse; margin-bottom: 30px; }}
+            th {{ background: #3498db; color: white; padding: 12px 8px; text-align: left; font-size: 14px; }}
+            td {{ padding: 10px 8px; border-bottom: 1px solid #eee; font-size: 14px; }}
+            
+            .summary {{ display: flex; justify-content: flex-end; margin-top: 20px; }}
+            .total-box {{ background: #fff3cd; padding: 15px 30px; border-radius: 8px; border: 1px solid #ffeeba; }}
+            .total-line {{ font-size: 16px; margin: 5px 0; text-align: right; }}
+            .grand-total {{ font-size: 24px; font-weight: bold; color: #d35400; border-top: 1px solid #e0c49e; padding-top: 10px; margin-top: 5px; }}
+            
+            .footer {{ margin-top: 50px; border-top: 1px solid #eee; padding-top: 20px; display: flex; justify-content: space-between; font-size: 14px; color: #7f8c8d; }}
+            .sign-area {{ width: 200px; height: 80px; border-bottom: 1px solid #333; margin-top: 30px; }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div class="title">往来对账单 Statement of Account</div>
+            <div class="subtitle">月份 Period: {month_str}</div>
+        </div>
+        
+        <div class="info-box">
+            <div>
+                <div class="info-item"><span class="label">往来单位 (Partner):</span> {cust_name}</div>
+                <div class="info-item"><span class="label">打印日期 (Date):</span> {datetime.now().strftime('%Y-%m-%d')}</div>
+            </div>
+            <div style="text-align:right">
+                <div class="info-item"><span class="label">共计笔数:</span> {len(items)} 笔</div>
+            </div>
+        </div>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th width="12%">日期</th>
+                    <th width="20%">品名</th>
+                    <th width="15%">规格</th>
+                    <th width="10%" style="text-align:right">数量</th>
+                    <th width="8%" style="text-align:center">单位</th>
+                    <th width="10%" style="text-align:right">单价</th>
+                    <th width="12%" style="text-align:right">金额</th>
+                    <th width="13%">备注</th>
+                </tr>
+            </thead>
+            <tbody>
+                {rows}
+            </tbody>
+        </table>
+        
+        <div class="summary">
+            <div class="total-box">
+                <div class="total-line">数量合计: <b>{total_qty:,.2f}</b></div>
+                <div class="total-line grand-total">金额合计: ¥ {total_amt:,.2f}</div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <div style="text-align:center">
+                <div>我方制单 (Prepared By)</div>
+                <div class="sign-area"></div>
+            </div>
+            <div style="text-align:center">
+                <div>对方确认 (Confirmed By)</div>
+                <div class="sign-area"></div>
+                <div>请核对无误后签字盖章回传</div>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    with open(fname, "w", encoding="utf-8") as f:
+        f.write(html)
+    return fname
+
+def batch_generate_business_statements(client, app_token, pre_mode=None):
+    """批量生成对账单 (支持 客户加工费 / 供应商外协费)"""
+    print(f"\n{Color.HEADER}📑 批量生成业务对账单{Color.ENDC}")
+    print("--------------------------------")
+    
+    if pre_mode:
+        mode_choice = str(pre_mode)
+    else:
+        print("1. 客户对账单 (收入-加工服务) - 发给客户")
+        print("2. 供应商对账单 (支出-外协加工) - 发给外协厂")
+        print("0. 返回")
+        mode_choice = input("👉 请选择 (1/2): ").strip()
+        
+    if mode_choice == '0': return
+    
+    target_type = "收入-加工服务"
+    mode_name = "客户"
+    if mode_choice == '2':
+        target_type = "支出-外协加工"
+        mode_name = "供应商"
+        
+    table_id = get_table_id_by_name(client, app_token, "加工费明细表")
+    if not table_id: return
+
+    # 选择月份
+    now = datetime.now()
+    default_input = now.strftime("%Y-%m")
+    if now.day <= 10:
+        last_month_dt = now.replace(day=1) - timedelta(days=1)
+        default_input = last_month_dt.strftime("%Y-%m")
+        
+    user_input = input(f"请输入对账月份 (YYYY-MM) [{default_input}]: ").strip()
+    if not user_input: user_input = default_input
+    
+    try:
+        start_dt = datetime.strptime(user_input, "%Y-%m")
+        if start_dt.month == 12:
+            end_dt = datetime(start_dt.year + 1, 1, 1)
+        else:
+            end_dt = datetime(start_dt.year, start_dt.month + 1, 1)
+        
+        start_ts = int(start_dt.timestamp() * 1000)
+        end_ts = int(end_dt.timestamp() * 1000)
+    except:
+        print("❌ 日期格式错误")
+        return
+
+    # 加载别名
+    aliases = {}
+    if os.path.exists(FILE_PARTNER_ALIASES):
+        try:
+            with open(FILE_PARTNER_ALIASES, "r", encoding="utf-8") as f:
+                aliases = json.load(f)
+        except: pass
+
+    # 拉取数据
+    print(f"⏳ 正在拉取 {mode_name} 数据 ({user_input})...")
+    filter_cmd = f'AND(CurrentValue.[日期]>={start_ts}, CurrentValue.[日期]<{end_ts}, CurrentValue.[类型]="{target_type}")'
+    records = get_all_records(client, app_token, table_id, filter_info=filter_cmd)
+    
+    if not records:
+        print(f"📭 {user_input} 无{mode_name}记录")
+        return
+
+    # 分组数据
+    partner_data = {} # Partner -> List of dict
+    
+    for r in records:
+        f = r.fields
+        raw_p = f.get("往来单位", "未知单位")
+        p = aliases.get(raw_p, raw_p)
+        
+        ts = f.get("日期", 0)
+        d_str = datetime.fromtimestamp(ts/1000).strftime("%Y-%m-%d")
+        
+        item = {
+            "日期": d_str,
+            "品名": f.get("品名", ""),
+            "规格": f.get("规格", ""),
+            "数量": float(f.get("数量", 0)),
+            "单位": f.get("单位", "件"),
+            "单价": float(f.get("单价", 0)),
+            "金额": float(f.get("总金额", 0)),
+            "备注": f.get("备注", "")
+        }
+        if p not in partner_data: partner_data[p] = []
+        partner_data[p].append(item)
+        
+    # 生成文件
+    save_dir = os.path.join(DATA_ROOT, f"{mode_name}对账单", user_input)
+    if not os.path.exists(save_dir): os.makedirs(save_dir)
+    
+    print(f"📂 正在生成对账单 (共 {len(partner_data)} 家)...")
+    
+    for p_name, items in partner_data.items():
+        # 按日期排序
+        items.sort(key=lambda x: x["日期"])
+        
+        # 转 DataFrame
+        df = pd.DataFrame(items)
+        
+        # 添加合计行
+        total_qty = df["数量"].sum()
+        total_amt = df["金额"].sum()
+        
+        total_row = pd.DataFrame([{
+            "日期": "合计",
+            "品名": f"{len(items)} 笔",
+            "规格": "",
+            "数量": total_qty,
+            "单位": "",
+            "单价": "",
+            "金额": total_amt,
+            "备注": ""
+        }])
+        df = pd.concat([df, total_row], ignore_index=True)
+        
+        safe_name = str(p_name).replace("/", "_").replace("\\", "_")
+        
+        # 1. Excel
+        fname_xlsx = os.path.join(save_dir, f"{safe_name}_{user_input}_对账单.xlsx")
+        try:
+            with pd.ExcelWriter(fname_xlsx, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name="对账单")
+                ws = writer.sheets["对账单"]
+                apply_excel_styles(ws)
+                # 调整列宽
+                ws.column_dimensions['A'].width = 12
+                ws.column_dimensions['B'].width = 15
+                ws.column_dimensions['C'].width = 15
+                ws.column_dimensions['G'].width = 12
+                ws.column_dimensions['H'].width = 20
+        except Exception as e:
+            print(f"❌ 生成 Excel 失败: {e}")
+
+        # 2. HTML (Visual)
+        try:
+            generate_statement_html(p_name, user_input, items, total_qty, total_amt, save_dir)
+        except Exception as e:
+            print(f"❌ 生成 HTML 失败: {e}")
+            
+    print(f"✅ 全部生成完毕！文件保存在: {Color.UNDERLINE}{save_dir}{Color.ENDC}")
+    try: os.startfile(save_dir)
+    except: pass
+
+def reconciliation_hub(client, app_token):
+    """往来对账中心 (Reconciliation Hub)"""
+    while True:
+        print(f"\n{Color.HEADER}🤝 往来对账中心 (Reconciliation Center){Color.ENDC}")
+        print("-----------------------------------------------")
+        print("  1. 📤 批量生成客户对账单 (加工费收入) [Excel/HTML]")
+        print("  2. 📤 批量生成供应商对账单 (外协费支出) [Excel/HTML]")
+        print("  3. 📊 生成往来单位余额表 (应收应付总览)")
+        print("  4. 📥 外部账单智能比对 (Excel vs 系统台账)")
+        print("  5. 💰 资金账户对账 (余额核对)")
+        print("  0. 返回主菜单")
+        
+        choice = input(f"\n👉 请选择: ").strip()
+        
+        if choice == '0': break
+        elif choice == '1':
+            batch_generate_business_statements(client, app_token, pre_mode=1)
+        elif choice == '2':
+            batch_generate_business_statements(client, app_token, pre_mode=2)
+        elif choice == '3':
+            generate_business_statement(client, app_token)
+        elif choice == '4':
+            reconcile_partner_flow(client, app_token)
+        elif choice == '5':
+            reconcile_bank_account(client, app_token)
+
+def batch_generate_customer_statements(client, app_token):
+    # Deprecated wrapper, redirect to new function
+    batch_generate_business_statements(client, app_token)
+
+def manage_supplier_payment(client, app_token):
+    """供应商付款登记 (按实际发生)"""
+    print(f"\n{Color.CYAN}💸 供应商付款登记 (按实际发生){Color.ENDC}")
+    print("说明: 记录付给供应商的实际款项（预付/尾款），并自动同步到【日常台账】。")
+    
+    # 1. 输入信息
+    date_str = input(f"付款日期 (YYYY-MM-DD) [默认今天]: ").strip()
+    if not date_str: date_str = datetime.now().strftime("%Y-%m-%d")
+    
+    partner = input("供应商名称: ").strip()
+    if not partner: return
+    
+    amount = float(input("付款金额 (元): ").strip())
+    
+    bank_map = {'1': 'G银行基本户(有票)', '2': 'N银行/微信(无票)'}
+    print("付款账户:")
+    print("1. G银行基本户(有票)")
+    print("2. N银行/微信(无票)")
+    b_choice = input("👉 请选择 (1/2): ").strip()
+    bank = bank_map.get(b_choice, 'G银行基本户(有票)')
+    
+    remark = input("备注 (如 '1月材料款'): ").strip()
+    
+    # 2. 写入日常台账 (作为总的付款记录)
+    ledger_id = get_table_id_by_name(client, app_token, "日常台账表")
+    if not ledger_id:
+        print("❌ 未找到日常台账表")
+        return
+        
+    fields = {
+        "记账日期": int(pd.to_datetime(date_str).timestamp() * 1000),
+        "业务类型": "付款", # 付款
+        "费用归类": "外协加工费", # 默认归类，后续可能需要细化
+        "往来单位费用": partner,
+        "实际收付金额": amount,
+        "账面金额": amount,
+        "交易银行": bank,
+        "是否有票": "有票" if "有票" in bank else "无票",
+        "是否现金": "否" if "有票" in bank else "是",
+        "备注": f"{remark} (付款登记)"
+    }
+    
+    # 询问费用归类
+    print("费用归类:")
+    print("1. 原材料-三酸/片碱/色粉")
+    print("2. 辅料-挂具/除油剂")
+    print("3. 外协加工费")
+    print("4. 房租水电")
+    print("5. 其他")
+    c_choice = input("👉 请选择 (1-5) [默认3]: ").strip()
+    cats = {'1': '原材料-三酸/片碱/色粉', '2': '辅料-挂具/除油剂', '3': '外协加工费', '4': '房租水电', '5': '其他'}
+    fields["费用归类"] = cats.get(c_choice, '外协加工费')
+    
+    req = CreateAppTableRecordRequest.builder() \
+        .app_token(app_token) \
+        .table_id(ledger_id) \
+        .request_body(AppTableRecord.builder().fields(fields).build()) \
+        .build()
+        
+    resp = client.bitable.v1.app_table_record.create(req)
+    if resp.success():
+        print(f"✅ 付款已记录到台账！")
+        
+        # 3. 智能核销建议 (仅针对外协加工费)
+        if fields["费用归类"] == "外协加工费":
+            if input("👉 是否要自动核销该供应商的旧欠款(外协费)? (y/n) [y]: ").strip().lower() != 'n':
+                 # 查找该供应商未结算的记录 (在加工费明细表中，类型=支出-外协加工)
+                 pf_table_id = get_table_id_by_name(client, app_token, "加工费明细表")
+                 if pf_table_id:
+                     # 获取所有未结算
+                     filter_cmd = f'AND(CurrentValue.[往来单位]="{partner}", CurrentValue.[结算状态]!="已结算", CurrentValue.[类型]="支出-外协加工")'
+                     unpaid_recs = get_all_records(client, app_token, pf_table_id, filter_info=filter_cmd)
+                     
+                     if unpaid_recs:
+                         # 按日期排序 (FIFO)
+                         unpaid_recs.sort(key=lambda x: x.fields.get("日期", 0))
+                         
+                         to_settle = []
+                         remaining = amount
+                         
+                         for r in unpaid_recs:
+                             rec_amt = float(r.fields.get("总金额", 0))
+                             if remaining >= rec_amt:
+                                 to_settle.append(r)
+                                 remaining -= rec_amt
+                             else:
+                                 break 
+                                 
+                         if to_settle:
+                             print(f"💡 系统建议核销最早的 {len(to_settle)} 笔未结算外协记录 (共 {amount - remaining:,.2f} 元)")
+                             if input("❓ 确认核销? (y/n): ").strip().lower() == 'y':
+                                 batch_recs = []
+                                 for r in to_settle:
+                                     batch_recs.append(AppTableRecord.builder().record_id(r.record_id).fields({"结算状态": "已结算"}).build())
+                                 
+                                 # Execute Batch
+                                 for i in range(0, len(batch_recs), 100):
+                                     batch = batch_recs[i:i+100]
+                                     req_b = BatchUpdateAppTableRecordRequest.builder() \
+                                         .app_token(app_token) \
+                                         .table_id(pf_table_id) \
+                                         .request_body(BatchUpdateAppTableRecordRequestBody.builder().records(batch).build()) \
+                                         .build()
+                                     client.bitable.v1.app_table_record.batch_update(req_b)
+                                 print(f"✅ 已自动核销 {len(to_settle)} 笔记录")
+                         else:
+                             print("⚠️ 付款金额不足以核销最早的一笔记录，暂不执行核销。")
+                     else:
+                         print("🎉 该供应商没有未结算的外协记录。")
+    else:
+        print(f"❌ 记录失败: {resp.msg}")
+
+def manage_processing_payment(client, app_token):
+    """客户收款登记 (按实际发生)"""
+    print(f"\n{Color.CYAN}💰 客户收款登记 (按实际发生){Color.ENDC}")
+    print("说明: 记录客户的实际付款（预收/尾款），并自动同步到【日常台账】。")
+    
+    # 1. 输入信息
+    date_str = input(f"收款日期 (YYYY-MM-DD) [默认今天]: ").strip()
+    if not date_str: date_str = datetime.now().strftime("%Y-%m-%d")
+    
+    partner = input("客户名称: ").strip()
+    if not partner: return
+    
+    amount = float(input("收款金额 (元): ").strip())
+    
+    bank_map = {'1': 'G银行基本户(有票)', '2': 'N银行/微信(无票)'}
+    print("收款账户:")
+    print("1. G银行基本户(有票)")
+    print("2. N银行/微信(无票)")
+    b_choice = input("👉 请选择 (1/2): ").strip()
+    bank = bank_map.get(b_choice, 'G银行基本户(有票)')
+    
+    remark = input("备注 (如 '1月货款'): ").strip()
+    
+    # 2. 写入日常台账 (作为总的收款记录)
+    ledger_id = get_table_id_by_name(client, app_token, "日常台账表")
+    if not ledger_id:
+        print("❌ 未找到日常台账表")
+        return
+        
+    fields = {
+        "记账日期": int(pd.to_datetime(date_str).timestamp() * 1000),
+        "业务类型": "收款",
+        "费用归类": "加工服务收入", # 或者 "预收账款"
+        "往来单位费用": partner,
+        "实际收付金额": amount,
+        "账面金额": amount,
+        "交易银行": bank,
+        "是否有票": "有票" if "有票" in bank else "无票",
+        "是否现金": "否" if "有票" in bank else "是",
+        "备注": f"{remark} (加工费收款)"
+    }
+    
+    req = CreateAppTableRecordRequest.builder() \
+        .app_token(app_token) \
+        .table_id(ledger_id) \
+        .request_body(AppTableRecord.builder().fields(fields).build()) \
+        .build()
+        
+    resp = client.bitable.v1.app_table_record.create(req)
+    if resp.success():
+        print(f"✅ 收款已记录到台账！")
+        
+        # 3. 智能核销建议
+        # 询问是否要核销旧账单
+        if input("👉 是否要自动核销该客户的旧欠款? (y/n) [y]: ").strip().lower() != 'n':
+             # 查找该客户未结算的记录
+             pf_table_id = get_table_id_by_name(client, app_token, "加工费明细表")
+             if pf_table_id:
+                 # 获取所有未结算
+                 filter_cmd = f'AND(CurrentValue.[往来单位]="{partner}", CurrentValue.[结算状态]!="已结算", CurrentValue.[类型]="收入-加工服务")'
+                 unpaid_recs = get_all_records(client, app_token, pf_table_id, filter_info=filter_cmd)
+                 
+                 if unpaid_recs:
+                     # 按日期排序 (FIFO)
+                     unpaid_recs.sort(key=lambda x: x.fields.get("日期", 0))
+                     
+                     to_settle = []
+                     remaining = amount
+                     
+                     for r in unpaid_recs:
+                         rec_amt = float(r.fields.get("总金额", 0))
+                         if remaining >= rec_amt:
+                             to_settle.append(r)
+                             remaining -= rec_amt
+                         else:
+                             break # 钱不够了，剩下的部分不核销（或者部分核销？为了简单，暂时只核销全额匹配的）
+                             
+                     if to_settle:
+                         print(f"💡 系统建议核销最早的 {len(to_settle)} 笔未结算记录 (共 {amount - remaining:,.2f} 元)")
+                         if input("❓ 确认核销? (y/n): ").strip().lower() == 'y':
+                             batch_recs = []
+                             for r in to_settle:
+                                 batch_recs.append(AppTableRecord.builder().record_id(r.record_id).fields({"结算状态": "已结算"}).build())
+                             
+                             # Execute Batch
+                             for i in range(0, len(batch_recs), 100):
+                                 batch = batch_recs[i:i+100]
+                                 req_b = BatchUpdateAppTableRecordRequest.builder() \
+                                     .app_token(app_token) \
+                                     .table_id(pf_table_id) \
+                                     .request_body(BatchUpdateAppTableRecordRequestBody.builder().records(batch).build()) \
+                                     .build()
+                                 client.bitable.v1.app_table_record.batch_update(req_b)
+                             print(f"✅ 已自动核销 {len(to_settle)} 笔记录")
+                     else:
+                         print("⚠️ 收款金额不足以核销最早的一笔记录，暂不执行核销。")
+                 else:
+                     print("🎉 该客户没有未结算记录。")
+    else:
+        print(f"❌ 记录失败: {resp.msg}")
+
+def generate_anodizing_demo_data(client, app_token):
+    """生成氧化厂模拟数据 (小白专用)"""
+    print(f"\n{Color.HEADER}🏭 正在生成氧化厂模拟数据...{Color.ENDC}")
+    print("场景: 小型氧化加工厂，包含加工费收入、原材料采购、水电房租等。")
+    
+    # 1. 填充价目表 (Price List)
+    pt_id = create_processing_price_table(client, app_token)
+    if pt_id:
+        print("1. 正在生成价目表...")
+        prices = [
+            {"品名": "铝型材-6063", "规格": "喷砂氧化", "单位": "kg", "单价": 4.5, "备注": "常规料"},
+            {"品名": "散热器", "规格": "拉丝黑", "单位": "件", "单价": 2.5, "备注": "精密件"},
+            {"品名": "铝板", "规格": "本色氧化", "单位": "m²", "单价": 35.0, "备注": "大板"},
+            {"品名": "装饰条", "规格": "抛光金", "单位": "米", "单价": 1.8, "备注": "高光"}
+        ]
+        batch = []
+        for p in prices:
+            batch.append(AppTableRecord.builder().fields(p).build())
+        client.bitable.v1.app_table_record.batch_create(BatchCreateAppTableRecordRequest.builder().app_token(app_token).table_id(pt_id).request_body(BatchCreateAppTableRecordRequestBody.builder().records(batch).build()).build())
+
+    # 2. 填充加工费记录 (Processing Fees)
+    pf_id = create_processing_fee_table(client, app_token)
+    if pf_id:
+        print("2. 正在生成加工单...")
+        now = datetime.now()
+        records = []
+        # A. 铝型材 (按kg)
+        records.append({
+            "日期": int((now - timedelta(days=5)).timestamp() * 1000),
+            "往来单位": "张三门窗厂",
+            "品名": "铝型材-6063",
+            "规格": "喷砂氧化",
+            "类型": "收入-加工服务",
+            "计价方式": "按重量",
+            "数量": 500.0,
+            "单位": "kg",
+            "单价": 4.5,
+            "总金额": 2250.0,
+            "结算状态": "未结算",
+            "开票状态": "未开票",
+            "备注": "送货单号: SH20260201"
+        })
+        # B. 散热器 (按件)
+        records.append({
+            "日期": int((now - timedelta(days=3)).timestamp() * 1000),
+            "往来单位": "李四电子",
+            "品名": "散热器",
+            "规格": "拉丝黑",
+            "类型": "收入-加工服务",
+            "计价方式": "按件/只/个",
+            "数量": 1000.0,
+            "单位": "件",
+            "单价": 2.5,
+            "总金额": 2500.0,
+            "结算状态": "已结算",
+            "开票状态": "已开票",
+            "备注": "加急"
+        })
+        # C. 装饰条 (按米)
+        records.append({
+            "日期": int((now - timedelta(days=1)).timestamp() * 1000),
+            "往来单位": "王五装饰",
+            "品名": "装饰条",
+            "规格": "抛光金",
+            "类型": "收入-加工服务",
+            "计价方式": "按米长",
+            "数量": 2000.0,
+            "单位": "米",
+            "单价": 1.8,
+            "总金额": 3600.0,
+            "结算状态": "未结算",
+            "开票状态": "未开票",
+            "备注": ""
+        })
+        
+        batch = []
+        for r in records:
+            batch.append(AppTableRecord.builder().fields(r).build())
+        client.bitable.v1.app_table_record.batch_create(BatchCreateAppTableRecordRequest.builder().app_token(app_token).table_id(pf_id).request_body(BatchCreateAppTableRecordRequestBody.builder().records(batch).build()).build())
+
+    # 3. 填充日常台账 (Ledger)
+    lg_id = create_ledger_table(client, app_token)
+    if lg_id:
+        print("3. 正在生成日常支出与收款...")
+        recs = []
+        # 支出：原材料
+        recs.append({
+            "记账日期": int((now - timedelta(days=10)).timestamp() * 1000),
+            "业务类型": "费用",
+            "费用归类": "原材料-三酸/片碱/色粉",
+            "往来单位费用": "化工原料行",
+            "实际收付金额": 5000.0,
+            "账面金额": 5000.0,
+            "交易银行": "G银行基本户(有票)",
+            "是否有票": "有票",
+            "是否现金": "否",
+            "备注": "采购硫酸、硝酸"
+        })
+        # 支出：外协
+        recs.append({
+            "记账日期": int((now - timedelta(days=8)).timestamp() * 1000),
+            "业务类型": "费用",
+            "费用归类": "外协加工费",
+            "往来单位费用": "老王抛光厂",
+            "实际收付金额": 1200.0,
+            "账面金额": 1200.0,
+            "交易银行": "N银行/微信(无票)",
+            "是否有票": "无票",
+            "是否现金": "是",
+            "备注": "支付抛光费"
+        })
+        # 收入：收款 (对应李四电子)
+        recs.append({
+            "记账日期": int((now - timedelta(days=2)).timestamp() * 1000),
+            "业务类型": "收款",
+            "费用归类": "加工服务收入",
+            "往来单位费用": "李四电子",
+            "实际收付金额": 2500.0,
+            "账面金额": 2500.0,
+            "交易银行": "G银行基本户(有票)",
+            "是否有票": "有票",
+            "是否现金": "否",
+            "备注": "收2月加工费"
+        })
+        
+        batch = []
+        for r in recs:
+            batch.append(AppTableRecord.builder().fields(r).build())
+        client.bitable.v1.app_table_record.batch_create(BatchCreateAppTableRecordRequest.builder().app_token(app_token).table_id(lg_id).request_body(BatchCreateAppTableRecordRequestBody.builder().records(batch).build()).build())
+        
+    print(f"{Color.OKGREEN}✅ 模拟数据生成完毕！请进入各个菜单查看效果。{Color.ENDC}")
+
 def update_env(key, value):
     # 读取现有内容
     lines = []
@@ -10131,6 +13586,10 @@ def main():
     parser.add_argument("--salary", action="store_true", help="[新] 薪酬管理")
     parser.add_argument("--invoice", action="store_true", help="[新] 发票管理")
     parser.add_argument("--processing-fee", action="store_true", help="[新] 加工费管理")
+    parser.add_argument("--generate-demo", action="store_true", help="[新] 生成氧化厂模拟数据 (小白专用)")
+    parser.add_argument("--reset-system", action="store_true", help="[新] 系统初始化/重置 (数据清空)")
+    parser.add_argument("--backup", action="store_true", help="[新] 全量数据备份")
+    
     args = parser.parse_args()
 
     # 如果没有参数，默认进入交互式菜单
@@ -10238,7 +13697,7 @@ def main():
         learn_category_rules(client, APP_TOKEN)
 
     if args.partner_statement:
-        generate_partner_statement(client, APP_TOKEN)
+        generate_business_statement(client, APP_TOKEN)
 
     if args.manage_aliases:
         manage_partners_flow(client, APP_TOKEN)
@@ -10260,6 +13719,24 @@ def main():
 
     if args.processing_fee:
         manage_processing_fee_flow(client, APP_TOKEN)
+
+    if args.generate_demo:
+        generate_anodizing_demo_data(client, APP_TOKEN)
+
+    if args.reset_system:
+        reset_system_data(client, APP_TOKEN)
+        return
+
+    if args.backup:
+        backup_system_data(client, APP_TOKEN)
+        return
+
+    # 4. 交互式菜单
+    if args.menu:
+        # 启动时显示看板
+        show_ascii_dashboard(client, APP_TOKEN)
+        interactive_menu()
+        return
 
 def check_for_updates():
     """检查 Git 更新 (仅在有 .git 目录时生效)"""

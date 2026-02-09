@@ -116,7 +116,7 @@ def run_simulation():
     input_queue.append("y") 
     input_queue.append("2026-01-01") 
     input_queue.append("2026-12-31") 
-    CW.generate_partner_statement(client, CW.APP_TOKEN)
+    CW.generate_business_statement(client, CW.APP_TOKEN)
     
     # Step 5.5: Bank Reconciliation (Added)
     print("\n--- Step 5.5: Running Bank Reconciliation ---")
