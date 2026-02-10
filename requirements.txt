@@ -5,3 +5,5 @@ python-dotenv
 openpyxl
 zhipuai
 Pillow
+hypothesis
+pytest
