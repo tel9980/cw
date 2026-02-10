@@ -1,0 +1,31 @@
+{
+  "storage": {
+    "data_dir": "data",
+    "report_output_dir": "reports",
+    "backup_dir": "backups"
+  },
+  "reminder": {
+    "tax_reminder_days": [10, 7, 5, 3, 1, 0],
+    "payable_reminder_days": [7, 3, 1, 0],
+    "receivable_overdue_days": [30, 60, 90],
+    "cashflow_warning_days": 30,
+    "check_interval_minutes": 60,
+    "enable_desktop_notification": true,
+    "enable_wechat_notification": false
+  },
+  "wechat": {
+    "enabled": false,
+    "webhook_url": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY_HERE"
+  },
+  "report": {
+    "default_date_range_days": 30,
+    "include_charts": true,
+    "chart_style": "default"
+  },
+  "import": {
+    "batch_size": 100,
+    "enable_preview": true,
+    "enable_validation": true,
+    "skip_errors": false
+  }
+}
