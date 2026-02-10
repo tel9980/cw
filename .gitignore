@@ -1,57 +1,68 @@
-# Python virtual environment
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
 .venv/
 venv/
 ENV/
+env/
 
-# System configuration
-.env
-
-# Temporary files
-~$*.xlsx
-*.log
-*.tmp
-__pycache__/
-*.pyc
-
-# User data folders (local data that should not be public)
-财务数据/
-待处理单据/
-2_已处理归档/
-3_财务报表/
-日结报告/
-财务数据备份/
-backup/
-
-# Generated Reports & Exports
-日结报告_*.txt
-标准凭证导出_*.xlsx
-飞书台账全量备份_*.xlsx
-利润表_*.xlsx
-往来对账单_*.xlsx
-待补录流水_*.xlsx
-往来对账单/
-查询报告/
-台账异常记录_*.xlsx
-未匹配流水_*.xlsx
-
-# Cache & Temp
-dashboard_cache.json
-test_result.txt
-
-# Logs
-sim_log.txt
-
-# Test artifacts
-verify_v9_4.py
-run_daily_task.bat
-
-# IDE settings
+# IDE
 .vscode/
 .idea/
 *.swp
+*.swo
+*~
 
-# Build artifacts
-dist/
-build/
-*.spec
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
 
+# 小会计运行时生成的文件
+data/
+reports/
+logs/
+backups/
+config.json
+*.log
+
+# 临时文件
+*.tmp
+*.bak
+*.backup
+.DS_Store
+Thumbs.db
+
+# Excel临时文件
+~$*.xlsx
+~$*.xls
+
+# 保留示例数据
+!small_accountant_v16/examples/data/
+!small_accountant_v16/examples/*.xlsx
+
+# 保留配置示例
+!small_accountant_v16/config_example.json
+!**/config_example.json
