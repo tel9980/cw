@@ -106,6 +106,22 @@ def index():
         LIMIT 5
     """).fetchall()
 
+    # 最近收入
+    recent_incomes = conn.execute("""
+        SELECT customer_name, amount, bank_type, income_date
+        FROM incomes
+        ORDER BY income_date DESC
+        LIMIT 5
+    """).fetchall()
+
+    # 最近支出
+    recent_expenses = conn.execute("""
+        SELECT expense_type, supplier_name, amount, bank_type, expense_date
+        FROM expenses
+        ORDER BY expense_date DESC
+        LIMIT 5
+    """).fetchall()
+
     conn.close()
 
     return render_template(
@@ -119,6 +135,8 @@ def index():
         month_expense=month_expense,
         month_profit=month_income - month_expense,
         recent_orders=recent_orders,
+        recent_incomes=recent_incomes,
+        recent_expenses=recent_expenses,
     )
 
 
@@ -308,6 +326,174 @@ def new_expense():
     return render_template("expense_form.html", expense_types=expense_types)
 
 
+@app.route("/order/edit/<order_id>", methods=["GET", "POST"])
+def edit_order(order_id):
+    """编辑订单"""
+    conn = get_db()
+
+    if request.method == "POST":
+        quantity = Decimal(request.form["quantity"])
+        unit_price = Decimal(request.form["unit_price"])
+        total_amount = quantity * unit_price
+
+        conn.execute(
+            """
+            UPDATE processing_orders SET
+            customer_name = ?, item_description = ?, quantity = ?,
+            pricing_unit = ?, unit_price = ?, total_amount = ?,
+            processes = ?, status = ?, updated_at = ?
+            WHERE id = ?
+        """,
+            (
+                request.form["customer_name"],
+                request.form["item_description"],
+                quantity,
+                request.form["pricing_unit"],
+                unit_price,
+                total_amount,
+                request.form.get("processes", "氧化"),
+                request.form.get("status", "待加工"),
+                datetime.now().isoformat(),
+                order_id,
+            ),
+        )
+
+        conn.commit()
+        conn.close()
+        return redirect(url_for("orders"))
+
+    # GET请求
+    order = conn.execute(
+        "SELECT * FROM processing_orders WHERE id = ?", (order_id,)
+    ).fetchone()
+
+    if not order:
+        conn.close()
+        return redirect(url_for("orders"))
+
+    customers = conn.execute("SELECT name FROM customers ORDER BY name").fetchall()
+    conn.close()
+
+    return render_template(
+        "order_form.html", customers=customers, order=order, edit_mode=True
+    )
+
+
+@app.route("/order/delete/<order_id>")
+def delete_order(order_id):
+    """删除订单"""
+    conn = get_db()
+    conn.execute("DELETE FROM processing_orders WHERE id = ?", (order_id,))
+    conn.commit()
+    conn.close()
+    return redirect(url_for("orders"))
+
+
+@app.route("/income/edit/<income_id>", methods=["GET", "POST"])
+def edit_income(income_id):
+    """编辑收入"""
+    conn = get_db()
+
+    if request.method == "POST":
+        conn.execute(
+            """
+            UPDATE incomes SET
+            customer_name = ?, amount = ?, bank_type = ?,
+            income_date = ?, notes = ?, updated_at = ?
+            WHERE id = ?
+        """,
+            (
+                request.form["customer_name"],
+                Decimal(request.form["amount"]),
+                request.form["bank_type"],
+                request.form.get("income_date", date.today().isoformat()),
+                request.form.get("notes", ""),
+                datetime.now().isoformat(),
+                income_id,
+            ),
+        )
+
+        conn.commit()
+        conn.close()
+        return redirect(url_for("index"))
+
+    # GET请求
+    income = conn.execute("SELECT * FROM incomes WHERE id = ?", (income_id,)).fetchone()
+
+    if not income:
+        conn.close()
+        return redirect(url_for("index"))
+
+    customers = conn.execute("SELECT name FROM customers ORDER BY name").fetchall()
+    conn.close()
+
+    return render_template(
+        "income_form.html", customers=customers, income=income, edit_mode=True
+    )
+
+
+@app.route("/expense/edit/<expense_id>", methods=["GET", "POST"])
+def edit_expense(expense_id):
+    """编辑支出"""
+    conn = get_db()
+
+    if request.method == "POST":
+        conn.execute(
+            """
+            UPDATE expenses SET
+            expense_type = ?, supplier_name = ?, amount = ?, bank_type = ?,
+            expense_date = ?, description = ?, updated_at = ?
+            WHERE id = ?
+        """,
+            (
+                request.form["expense_type"],
+                request.form.get("supplier_name", ""),
+                Decimal(request.form["amount"]),
+                request.form["bank_type"],
+                request.form.get("expense_date", date.today().isoformat()),
+                request.form.get("description", ""),
+                datetime.now().isoformat(),
+                expense_id,
+            ),
+        )
+
+        conn.commit()
+        conn.close()
+        return redirect(url_for("index"))
+
+    # GET请求
+    expense = conn.execute(
+        "SELECT * FROM expenses WHERE id = ?", (expense_id,)
+    ).fetchone()
+
+    if not expense:
+        conn.close()
+        return redirect(url_for("index"))
+
+    expense_types = [
+        "房租",
+        "水电费",
+        "三酸",
+        "片碱",
+        "亚钠",
+        "色粉",
+        "除油剂",
+        "挂具",
+        "外发加工费",
+        "日常费用",
+        "工资",
+        "其他",
+    ]
+    conn.close()
+
+    return render_template(
+        "expense_form.html",
+        expense_types=expense_types,
+        expense=expense,
+        edit_mode=True,
+    )
+
+
 @app.route("/customers")
 def customers():
     """客户列表"""
@@ -326,7 +512,84 @@ def customers():
 @app.route("/reports")
 def reports():
     """报表中心"""
-    return render_template("reports.html")
+    conn = get_db()
+
+    # 总收入/支出
+    total_income = conn.execute("SELECT SUM(amount) FROM incomes").fetchone()[0] or 0
+    total_expense = conn.execute("SELECT SUM(amount) FROM expenses").fetchone()[0] or 0
+
+    # 订单总数
+    order_count = (
+        conn.execute("SELECT COUNT(*) FROM processing_orders").fetchone()[0] or 0
+    )
+
+    # 月度统计
+    monthly_stats = conn.execute("""
+        SELECT 
+            strftime('%Y-%m', income_date) as month,
+            COALESCE(SUM(i.amount), 0) as income,
+            0 as expense
+        FROM incomes i
+        GROUP BY month
+        UNION ALL
+        SELECT 
+            strftime('%Y-%m', expense_date) as month,
+            0 as income,
+            COALESCE(SUM(e.amount), 0) as expense
+        FROM expenses e
+        GROUP BY month
+        ORDER BY month
+    """).fetchall()
+
+    # 聚合月度数据
+    monthly_data = {}
+    for row in monthly_stats:
+        month = row["month"]
+        if month not in monthly_data:
+            monthly_data[month] = {"income": 0, "expense": 0}
+        monthly_data[month]["income"] += row["income"]
+        monthly_data[month]["expense"] += row["expense"]
+
+    monthly_stats = [
+        {
+            "month": k,
+            "income": v["income"],
+            "expense": v["expense"],
+            "profit": v["income"] - v["expense"],
+        }
+        for k, v in monthly_data.items()
+    ]
+    monthly_stats = sorted(monthly_stats, key=lambda x: x["month"], reverse=True)[:12]
+
+    # 客户排名
+    top_customers = conn.execute("""
+        SELECT c.name, COUNT(o.id) as order_count, COALESCE(SUM(o.total_amount), 0) as total
+        FROM customers c
+        LEFT JOIN processing_orders o ON c.id = o.customer_id
+        GROUP BY c.id
+        ORDER BY total DESC
+        LIMIT 10
+    """).fetchall()
+
+    # 支出分类
+    expense_by_type = conn.execute("""
+        SELECT expense_type, SUM(amount) as total
+        FROM expenses
+        GROUP BY expense_type
+        ORDER BY total DESC
+    """).fetchall()
+
+    conn.close()
+
+    return render_template(
+        "reports.html",
+        total_income=total_income,
+        total_expense=total_expense,
+        order_count=order_count,
+        monthly_stats=monthly_stats,
+        top_customers=top_customers,
+        expense_by_type=expense_by_type,
+    )
 
 
 @app.route("/api/search")
