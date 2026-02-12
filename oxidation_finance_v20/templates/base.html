@@ -3,57 +3,79 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}氧化加工厂财务系统{% endblock %}</title>
+    <title>{% block title %}氧化加工厂财务系统 V2.0{% endblock %}</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; }
         .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-        .header { background: #1890ff; color: white; padding: 20px; margin-bottom: 20px; }
-        .header h1 { font-size: 24px; }
-        .nav { background: white; padding: 10px 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .nav a { color: #333; text-decoration: none; margin-right: 20px; padding: 5px 10px; }
-        .nav a:hover { color: #1890ff; }
-        .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .card h2 { font-size: 18px; margin-bottom: 15px; color: #333; }
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
-        .stat-item { background: #f8f9fa; padding: 15px; border-radius: 6px; text-align: center; }
-        .stat-value { font-size: 24px; font-weight: bold; color: #1890ff; }
-        .stat-label { font-size: 14px; color: #666; margin-top: 5px; }
-        .btn { display: inline-block; padding: 10px 20px; background: #1890ff; color: white; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; }
-        .btn:hover { background: #40a9ff; }
-        .btn-success { background: #52c41a; }
-        .btn-warning { background: #faad14; }
+        .header { background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%); color: white; padding: 20px 30px; margin-bottom: 20px; border-radius: 0 0 10px 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .header h1 { font-size: 24px; font-weight: 600; }
+        .header p { font-size: 14px; opacity: 0.9; margin-top: 5px; }
+        .nav { background: white; padding: 12px 30px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .nav a { color: #333; text-decoration: none; padding: 8px 16px; border-radius: 6px; transition: all 0.3s; font-weight: 500; }
+        .nav a:hover { background: #1890ff; color: white; }
+        .nav .active { background: #1890ff; color: white; }
+        .card { background: white; padding: 24px; margin-bottom: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .card h2 { font-size: 18px; margin-bottom: 16px; color: #333; padding-bottom: 12px; border-bottom: 2px solid #f0f0f0; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
+        .stat-item { background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%); padding: 20px; border-radius: 10px; text-align: center; transition: transform 0.2s; }
+        .stat-item:hover { transform: translateY(-2px); }
+        .stat-value { font-size: 28px; font-weight: bold; background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .stat-label { font-size: 14px; color: #666; margin-top: 8px; }
+        .btn { display: inline-flex; align-items: center; gap: 6px; padding: 10px 20px; background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%); color: white; text-decoration: none; border-radius: 6px; border: none; cursor: pointer; font-weight: 500; transition: all 0.3s; }
+        .btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(24,144,255,0.4); }
+        .btn-success { background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%); }
+        .btn-success:hover { box-shadow: 0 4px 12px rgba(82,196,26,0.4); }
+        .btn-warning { background: linear-gradient(135deg, #faad14 0%, #d48806 100%); }
+        .btn-warning:hover { box-shadow: 0 4px 12px rgba(250,173,20,0.4); }
         table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
-        th { background: #fafafa; font-weight: 600; }
-        tr:hover { background: #f5f5f5; }
-        .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; margin-bottom: 5px; font-weight: 500; }
-        .form-group input, .form-group select { width: 100%; padding: 10px; border: 1px solid #d9d9d9; border-radius: 4px; }
-        .status-badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+        th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #f0f0f0; }
+        th { background: #fafafa; font-weight: 600; color: #333; }
+        tr:hover { background: #f8f9fa; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; margin-bottom: 6px; font-weight: 500; color: #333; }
+        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 10px 12px; border: 1px solid #d9d9d9; border-radius: 6px; font-size: 14px; transition: border-color 0.3s; }
+        .form-group input:focus, .form-group select:focus { border-color: #1890ff; outline: none; box-shadow: 0 0 0 3px rgba(24,144,255,0.1); }
+        .status-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; }
         .status-待加工 { background: #fff7e6; color: #fa8c16; }
         .status-加工中 { background: #e6f7ff; color: #1890ff; }
         .status-已完工 { background: #f6ffed; color: #52c41a; }
         .status-已交付 { background: #f9f0ff; color: #722ed1; }
-        .quick-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 20px; }
+        .status-已收款 { background: #f0f5ff; color: #2f54eb; }
+        .quick-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; padding-top: 20px; border-top: 1px solid #f0f0f0; }
+        .action-btn { padding: 6px 12px; font-size: 12px; border-radius: 4px; }
+        .btn-edit { background: #1890ff; color: white; }
+        .btn-delete { background: #ff4d4f; color: white; }
+        .footer { text-align: center; padding: 20px; color: #999; font-size: 12px; margin-top: 30px; }
+        .footer a { color: #1890ff; text-decoration: none; }
+        .alert { padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; }
+        .alert-info { background: #e6f7ff; color: #1890ff; border: 1px solid #91d5ff; }
+        .empty-state { text-align: center; padding: 60px 20px; color: #999; }
+        .empty-state h3 { margin-bottom: 10px; color: #666; }
+        .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+        @media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
     <div class="header">
         <div class="container">
-            <h1>氧化加工厂财务系统 V2.0</h1>
-        </div>
-    </div>
-    <div class="nav">
-        <div class="container">
-            <a href="/">首页</a>
-            <a href="/orders">订单</a>
-            <a href="/customers">客户</a>
-            <a href="/reports">报表</a>
+            <h1>🏭 氧化加工厂财务系统 V2.0</h1>
+            <p>专为氧化加工企业设计的财务管理解决方案</p>
         </div>
     </div>
     <div class="container">
+        <div class="nav">
+            <a href="/" class="{% if request.path == '/' %}active{% endif %}">📊 首页</a>
+            <a href="/orders" class="{% if '/order' in request.path %}active{% endif %}">📝 订单</a>
+            <a href="/customers" class="{% if '/customer' in request.path %}active{% endif %}">👥 客户</a>
+            <a href="/reports" class="{% if '/report' in request.path %}active{% endif %}">📈 报表</a>
+            <span style="flex: 1;"></span>
+            <a href="http://localhost:5000" target="_blank">🔗 新窗口</a>
+        </div>
         {% block content %}{% endblock %}
+        <div class="footer">
+            <p>氧化加工厂财务系统 V2.0 | 默认管理员: admin / admin123</p>
+        </div>
     </div>
 </body>
 </html>
