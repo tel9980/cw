@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}客户管理 - 氧化加工厂财务系统{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>客户列表</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>客户名称</th>
+                <th>联系人</th>
+                <th>电话</th>
+                <th>订单数</th>
+                <th>累计金额</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for customer in customers %}
+            <tr>
+                <td>{{ customer.name }}</td>
+                <td>{{ customer.contact or '-' }}</td>
+                <td>{{ customer.phone or '-' }}</td>
+                <td>{{ customer.order_count }}</td>
+                <td>{{ "%.2f"|format(customer.total_amount or 0) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="stats-grid">
+    <div class="stat-item">
+        <div class="stat-value">{{ "%.2f"|format(today_income) }}</div>
+        <div class="stat-label">今日收入</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value">{{ "%.2f"|format(today_expense) }}</div>
+        <div class="stat-label">今日支出</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value">{{ "%.2f"|format(today_profit) }}</div>
+        <div class="stat-label">今日利润</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value">{{ pending_orders }}</div>
+        <div class="stat-label">待加工订单</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value">{{ unpaid_orders }}</div>
+        <div class="stat-label">未收款订单</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value">{{ "%.2f"|format(month_profit) }}</div>
+        <div class="stat-label">本月利润</div>
+    </div>
+</div>
+
+<div class="quick-actions">
+    <a href="/order/new" class="btn">+ 新建订单</a>
+    <a href="/income/new" class="btn btn-success">+ 录入收入</a>
+    <a href="/expense/new" class="btn btn-warning">+ 录入支出</a>
+</div>
+
+<div class="card">
+    <h2>最近订单</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>订单号</th>
+                <th>客户</th>
+                <th>金额</th>
+                <th>状态</th>
+                <th>日期</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for order in recent_orders %}
+            <tr>
+                <td>{{ order.order_no }}</td>
+                <td>{{ order.customer_name }}</td>
+                <td>{{ "%.2f"|format(order.total_amount) }}</td>
+                <td><span class="status-badge status-{{ order.status }}">{{ order.status }}</span></td>
+                <td>{{ order.order_date }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

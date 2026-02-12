@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}新建订单 - 氧化加工厂财务系统{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>新建订单</h2>
+    <form method="POST">
+        <div class="form-group">
+            <label>客户名称</label>
+            <input type="text" name="customer_name" list="customers" placeholder="输入或选择客户" required>
+            <datalist id="customers">
+                {% for customer in customers %}
+                <option value="{{ customer.name }}">
+                {% endfor %}
+            </datalist>
+        </div>
+        <div class="form-group">
+            <label>物品描述</label>
+            <input type="text" name="item_description" placeholder="如：铝型材6063氧化" required>
+        </div>
+        <div class="form-group">
+            <label>计价单位</label>
+            <select name="pricing_unit">
+                <option value="件">件</option>
+                <option value="条">条</option>
+                <option value="只">只</option>
+                <option value="个">个</option>
+                <option value="米" selected>米</option>
+                <option value="公斤">公斤</option>
+                <option value="平方米">平方米</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>数量</label>
+            <input type="number" name="quantity" step="0.01" required>
+        </div>
+        <div class="form-group">
+            <label>单价</label>
+            <input type="number" name="unit_price" step="0.01" required>
+        </div>
+        <div class="form-group">
+            <label>加工工序</label>
+            <input type="text" name="processes" value="氧化" placeholder="如：喷砂,氧化">
+        </div>
+        <button type="submit" class="btn">保存订单</button>
+        <a href="/orders" class="btn" style="background: #999;">取消</a>
+    </form>
+</div>
+{% endblock %}

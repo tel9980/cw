@@ -1,0 +1,15 @@
+# 氧化加工厂财务管理系统 V2.0 依赖包
+
+# 测试框架
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# 属性测试框架
+hypothesis>=6.82.0
+
+# 数据处理
+pandas>=2.0.0
+openpyxl>=3.1.2
+
+# 日期时间处理
+python-dateutil>=2.8.2

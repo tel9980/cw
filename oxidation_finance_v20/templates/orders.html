@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}订单管理 - 氧化加工厂财务系统{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>订单列表</h2>
+    <div style="margin-bottom: 20px;">
+        <a href="/orders" class="btn {% if not current_status %}btn-primary{% endif %}">全部</a>
+        {% for status in statuses %}
+        <a href="/orders?status={{ status.status }}" class="btn {% if current_status == status.status %}btn-primary{% endif %}">{{ status.status }}</a>
+        {% endfor %}
+        <a href="/order/new" class="btn" style="float: right;">+ 新建订单</a>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>订单号</th>
+                <th>客户</th>
+                <th>物品</th>
+                <th>金额</th>
+                <th>状态</th>
+                <th>日期</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for order in orders %}
+            <tr>
+                <td>{{ order.order_no }}</td>
+                <td>{{ order.customer_name }}</td>
+                <td>{{ order.item_description }}</td>
+                <td>{{ "%.2f"|format(order.total_amount) }}</td>
+                <td><span class="status-badge status-{{ order.status }}">{{ order.status }}</span></td>
+                <td>{{ order.order_date }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
