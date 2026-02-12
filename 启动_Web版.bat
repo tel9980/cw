@@ -1,5 +1,9 @@
 @echo off
+REM 设置UTF-8编码
 chcp 65001 >nul
+set PYTHONIOENCODING=utf-8
+set PYTHONUTF8=1
+
 echo.
 echo ================================================================
 echo    氧化加工厂财务系统 V2.0 - Web版启动器
@@ -9,7 +13,7 @@ echo.
 REM 检查Python
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo [错误] 未找到Python，请先安装Python 3.8+
+    echo [ERROR] Please install Python 3.8+ first
     pause
     exit /b 1
 )
@@ -17,21 +21,22 @@ if errorlevel 1 (
 REM 检查Flask
 python -c "import flask" >nul 2>&1
 if errorlevel 1 (
-    echo [提示] 正在安装Flask...
+    echo [INFO] Installing Flask...
     pip install flask
 )
 
 echo.
-echo 正在启动Web服务...
+echo Starting Web Service...
 echo.
-echo 启动后请打开浏览器访问: http://localhost:5000
+echo Please open browser: http://localhost:5000
 echo.
-echo 按 Ctrl+C 停止服务
+echo Press Ctrl+C to stop
 echo.
 echo ================================================================
 echo.
 
-REM 获取脚本所在目录
-set "SCRIPT_DIR=%~dp0"
-cd /d "%SCRIPT_DIR%oxidation_finance_v20"
+REM 切换到程序目录并启动
+cd /d "%~dp0oxidation_finance_v20"
 python web_app.py
+
+pause
