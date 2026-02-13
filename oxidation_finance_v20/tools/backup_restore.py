@@ -232,8 +232,25 @@ class BackupManager:
 
             # 检查数据
             total_records = 0
+            # 允许的表名列表（白名单）
+            allowed_tables = {
+                "customers",
+                "suppliers",
+                "processing_orders",
+                "incomes",
+                "expenses",
+                "bank_accounts",
+                "bank_transactions",
+                "outsourced_processing",
+                "audit_logs",
+                "accounting_periods",
+            }
             for table in table_list:
-                count = cursor.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                if table not in allowed_tables:
+                    continue
+                count = cursor.execute(
+                    "SELECT COUNT(*) FROM {}".format(table)
+                ).fetchone()[0]
                 total_records += count
 
             print(f"[OK] 备份验证通过")

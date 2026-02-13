@@ -165,6 +165,14 @@ class SetupWizard:
             conn = sqlite3.connect(str(self.db_file))
             cursor = conn.cursor()
 
+            # 允许的表名列表（白名单）
+            allowed_tables = {
+                "customers",
+                "suppliers",
+                "processing_orders",
+                "incomes",
+                "expenses",
+            }
             tables = [
                 "customers",
                 "suppliers",
@@ -174,10 +182,12 @@ class SetupWizard:
             ]
             total = 0
             for table in tables:
+                if table not in allowed_tables:
+                    continue
                 try:
-                    count = cursor.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[
-                        0
-                    ]
+                    count = cursor.execute(
+                        "SELECT COUNT(*) FROM {}".format(table)
+                    ).fetchone()[0]
                     print(f"  [INFO] {table}: {count}条记录")
                     total += count
                 except:
@@ -271,6 +281,20 @@ class SetupWizard:
             conn = sqlite3.connect(str(self.db_file))
             cursor = conn.cursor()
 
+            # 允许的表名列表（白名单）
+            allowed_tables = {
+                "customers",
+                "suppliers",
+                "processing_orders",
+                "incomes",
+                "expenses",
+                "bank_accounts",
+                "bank_transactions",
+                "outsourced_processing",
+                "audit_logs",
+                "accounting_periods",
+            }
+
             # 检查表
             tables = cursor.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
@@ -284,10 +308,12 @@ class SetupWizard:
             print("\n  数据统计:")
             total_records = 0
             for table in table_list:
+                if table not in allowed_tables:
+                    continue
                 try:
-                    count = cursor.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[
-                        0
-                    ]
+                    count = cursor.execute(
+                        "SELECT COUNT(*) FROM {}".format(table)
+                    ).fetchone()[0]
                     print(f"     {table}: {count}条")
                     total_records += count
                 except:
