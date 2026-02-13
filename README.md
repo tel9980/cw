@@ -194,44 +194,89 @@ python web_app.py  # 启动Web服务
 
 ## 🚀 5分钟快速上手
 
-### 1. 安装系统
+### 1. 安装依赖
 
 ```bash
-# 克隆项目
-git clone https://github.com/tel9980/cw.git
-cd cw
+# 克隆项目后进入主目录
+cd oxidation_finance_v20
 
-# 进入V1.6目录
-cd small_accountant_v16
-
-# 安装（Windows）
-install.bat
-
-# 安装（Linux/Mac）
-chmod +x install.sh
-./install.sh
+# 安装Python依赖包
+pip install -r requirements.txt
 ```
 
-### 2. 启动系统
+### 2. 导入示例数据（首次运行必需）
 
 ```bash
-# Windows
-start.bat
-
-# Linux/Mac
-./start.sh
+# 生成示例数据（客户、订单、收入、支出等）
+python examples/generate_comprehensive_demo.py
 ```
 
-### 3. 导入示例数据
+> 💡 **提示**: 此步骤会创建 `oxidation_finance_demo_ready.db` 数据库文件，请首次运行前务必执行。
+
+### 3. 启动系统
+
+**方式A：命令行快捷面板**（推荐日常使用）
 
 ```bash
-# 生成示例数据
-python examples/generate_sample_data.py
+python tools/quick_panel.py
+```
+该面板显示今日收入、支出、待办事项等概览信息，并提供快速操作菜单。
 
-# 然后在系统中导入Excel文件
+**方式B：Web界面**
+
+```bash
+python web_app.py
+# 浏览器访问: http://localhost:5000
+# 默认管理员账号: admin / admin123
 ```
 
-## 📊 主要功能
+---
+
+## 📦 版本对比
+
+| 特性 | V2.0 (主推) | V1.6 (归档) |
+|------|------------|-------------|
+| 架构 | 服务层 + 权限系统 | 单体结构 |
+| 数据存储 | SQLite | JSON文件 |
+| 支持数据量 | 无限制 | < 10,000条 |
+| Web界面 | ✅ 完整 | ❌ 无 |
+| 命令行工具 | ✅ 9个工具 | ✅ 基础CLI |
+| 审计日志 | ✅ 完整 | ❌ 无 |
+| 测试覆盖 | ✅ 426个测试 | ❌ 无 |
+| 当前状态 | ✅ 活跃开发 | ⚠️ 已归档 |
+
+> **强烈建议**: 新用户直接使用 V2.0（`oxidation_finance_v20/` 目录）。
+
+---
+
+## ⚡ 常用命令速查
+
+```bash
+# 进入V2.0目录
+cd oxidation_finance_v20
+
+# 生成演示数据（含6客户、45订单、147笔交易）
+python examples/generate_comprehensive_demo.py
+
+# 启动命令行面板（查看今日统计）
+python tools/quick_panel.py
+
+# 启动Web服务（浏览器管理界面）
+python web_app.py
+
+# 运行测试套件（验证系统完整性）
+pytest
+
+# 运行数据库测试
+pytest tests/test_database.py -v
+
+# 查看系统状态（测试环境）
+python quick_test.py
+```
+
+---
+
+## 📁 项目结构
 
 ### 1. 智能报表 📈
 

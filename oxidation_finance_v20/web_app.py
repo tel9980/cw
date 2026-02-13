@@ -22,6 +22,9 @@ from decimal import Decimal
 import sqlite3
 import json
 from functools import wraps
+from oxidation_finance_v20.database.db_manager import DatabaseManager
+from oxidation_finance_v20.reports import ReportManager
+from oxidation_finance_v20.utils.config import get_db_path
 
 # 尝试导入Flask
 try:
@@ -37,10 +40,13 @@ app.jinja_env.auto_reload = True
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
-# 数据库路径 - 使用当前目录下的文件
-DB_PATH = Path(__file__).resolve().parent / "oxidation_finance_demo_ready.db"
+# 数据库路径 - 使用统一配置路径获取（支持自定义环境变量 CWZS_DB_PATH）
+DB_PATH = Path(get_db_path())  # type: ignore
 if not DB_PATH.exists():
-    DB_PATH = Path(__file__).resolve().parent / "oxidation_finance_demo.db"
+    # 回退到旧的演示数据库路径，以确保开发环境可用
+    DB_PATH = Path(__file__).resolve().parent / "oxidation_finance_demo_ready.db"
+    if not DB_PATH.exists():
+        DB_PATH = Path(__file__).resolve().parent / "oxidation_finance_demo.db"
 
 
 def get_db():
@@ -48,6 +54,153 @@ def get_db():
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     return conn
+
+
+# ---------------------- 简易报表 API ----------------------
+@app.route("/api/reports/summary")
+def api_reports_summary():
+    """简易报表摘要 API（聚合性数据，便于前端展示或对接）"""
+    conn = get_db()
+    today = date.today().isoformat()
+    total_income = conn.execute("SELECT SUM(amount) FROM incomes").fetchone()[0] or 0
+    total_expense = conn.execute("SELECT SUM(amount) FROM expenses").fetchone()[0] or 0
+    order_count = (
+        conn.execute("SELECT COUNT(*) FROM processing_orders").fetchone()[0] or 0
+    )
+
+    # 本月汇总利润
+    month_start = date.today().replace(day=1).isoformat()
+    month_income = (
+        conn.execute(
+            "SELECT SUM(amount) FROM incomes WHERE income_date >= ?", (month_start,)
+        ).fetchone()[0]
+        or 0
+    )
+    month_expense = (
+        conn.execute(
+            "SELECT SUM(amount) FROM expenses WHERE expense_date >= ?", (month_start,)
+        ).fetchone()[0]
+        or 0
+    )
+    month_profit = float(month_income - month_expense)
+
+    # 月度统计列表
+    monthly_rows = conn.execute("""
+        SELECT strftime('%Y-%m', income_date) AS month, SUM(amount) AS income
+        FROM incomes
+        GROUP BY month
+        ORDER BY month DESC
+    """).fetchall()
+    exp_rows = conn.execute("""
+        SELECT strftime('%Y-%m', expense_date) AS month, SUM(amount) AS expense
+        FROM expenses
+        GROUP BY month
+        ORDER BY month DESC
+    """).fetchall()
+    data = {}
+    for r in monthly_rows:
+        data[str(r["month"])] = float(r["income"])
+    for er in exp_rows:
+        key = str(er["month"])
+        data[key] = data.get(key, 0.0) - float(er["expense"])
+    monthly_stats_list = [{"month": k, "profit": float(v)} for k, v in data.items()]
+    monthly_stats_list = sorted(
+        monthly_stats_list, key=lambda x: x["month"], reverse=True
+    )[:12]
+
+    # 顾客排名
+    top_customers = conn.execute("""
+        SELECT c.name, COUNT(o.id) AS order_count, COALESCE(SUM(o.total_amount), 0) AS total
+        FROM customers c
+        LEFT JOIN processing_orders o ON c.id = o.customer_id
+        GROUP BY c.id
+        ORDER BY total DESC
+        LIMIT 10
+    """).fetchall()
+    top_customers_list = [
+        {
+            "name": t["name"],
+            "order_count": int(t["order_count"]),
+            "total": float(t["total"]),
+        }
+        for t in top_customers
+    ]
+
+    # 支出类型聚合
+    expense_by_type = conn.execute("""
+        SELECT expense_type, SUM(amount) AS total
+        FROM expenses
+        GROUP BY expense_type
+        ORDER BY total DESC
+    """).fetchall()
+    expense_by_type_list = [
+        {"expense_type": e["expense_type"], "total": float(e["total"])}
+        for e in expense_by_type
+    ]
+
+    conn.close()
+    return jsonify(
+        {
+            "summary": {
+                "total_income": float(total_income),
+                "total_expense": float(total_expense),
+                "order_count": int(order_count),
+                "profit": float(total_income - total_expense),
+            },
+            "monthly": monthly_stats_list,
+            "top_customers": top_customers_list,
+            "expense_by_type": expense_by_type_list,
+            "today": today,
+            "month_profit": month_profit,
+        }
+    )
+
+
+@app.route("/api/reports/monthly")
+def api_reports_monthly():
+    """分月报表数据（月度利润等）"""
+    try:
+        with DatabaseManager(str(DB_PATH)) as db:
+            rm = ReportManager(db)
+            data = rm.get_monthly_stats()
+        return jsonify({"monthly": data})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/reports/top-customers")
+def api_reports_top_customers():
+    """前10客户贡献报表"""
+    try:
+        with DatabaseManager(str(DB_PATH)) as db:
+            rm = ReportManager(db)
+            data = rm.get_top_customers()
+        return jsonify({"top_customers": data})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/reports/expense-by-type")
+def api_reports_expense_by_type():
+    """支出类型聚合报表"""
+    try:
+        with DatabaseManager(str(DB_PATH)) as db:
+            rm = ReportManager(db)
+            data = rm.get_expense_by_type()
+        return jsonify({"expense_by_type": data})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/reports/dashboard")
+def reports_dashboard():
+    """简易看板：聚合报表的前端视图入口"""
+    with DatabaseManager(str(DB_PATH)) as db:
+        rm = ReportManager(db)
+        data = rm.generate_all_reports()
+    return render_template(
+        "reports_dashboard.html", data=data, today=date.today().isoformat()
+    )
 
 
 # ========== 页面路由 ==========
@@ -735,6 +888,7 @@ def create_templates():
             <a href="/orders">订单</a>
             <a href="/customers">客户</a>
             <a href="/reports">报表</a>
+            <a href="/reports/dashboard">看板</a>
         </div>
     </div>
     <div class="container">
@@ -1053,6 +1207,47 @@ def create_templates():
     (template_dir / "expense_form.html").write_text(expense_form_html, encoding="utf-8")
     (template_dir / "customers.html").write_text(customers_html, encoding="utf-8")
     (template_dir / "reports.html").write_text(reports_html, encoding="utf-8")
+    # 新增看板模板
+    dashboard_html = """{% extends "base.html" %}
+
+{% block title %}报表看板 - 氧化加工厂财务系统{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h2>报表看板</h2>
+  <h3>汇总</h3>
+  <table>
+    <tr><th>总收入</th><td>{{ data.summary.total_income }}</td></tr>
+    <tr><th>总支出</th><td>{{ data.summary.total_expense }}</td></tr>
+    <tr><th>订单数量</th><td>{{ data.summary.order_count }}</td></tr>
+    <tr><th>利润</th><td>{{ data.summary.profit }}</td></tr>
+  </table>
+  <h3>月度利润</h3>
+  <table>
+    <tr><th>月份</th><th>利润</th></tr>
+    {% for m in data.monthly %}
+    <tr><td>{{ m.month }}</td><td>{{ m.profit }}</td></tr>
+    {% endfor %}
+  </table>
+  <h3>Top 客户</h3>
+  <table>
+    <tr><th>名称</th><th>订单数</th><th>总额</th></tr>
+    {% for c in data.top_customers %}
+    <tr><td>{{ c.name }}</td><td>{{ c.order_count }}</td><td>{{ c.total }}</td></tr>
+    {% endfor %}
+  </table>
+  <h3>支出类型</h3>
+  <table>
+    <tr><th>类型</th><th>总额</th></tr>
+    {% for e in data.expense_by_type %}
+    <tr><td>{{ e.expense_type }}</td><td>{{ e.total }}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}"""
+    (template_dir / "reports_dashboard.html").write_text(
+        dashboard_html, encoding="utf-8"
+    )
 
 
 # ========== 主程序 ==========

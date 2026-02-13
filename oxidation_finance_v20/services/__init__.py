@@ -9,6 +9,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from ..database.db_manager import DatabaseManager
+from ..reports import ReportManager
 
 
 class WebService:
@@ -22,6 +23,10 @@ class WebService:
             db_manager: 已连接的数据库管理器
         """
         self.db = db_manager
+
+    def get_report_manager(self) -> ReportManager:
+        """Provide a ReportManager bound to the current DB connection."""
+        return ReportManager(self.db)
 
     # ==================== 辅助方法 ====================
 
