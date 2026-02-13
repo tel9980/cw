@@ -6,7 +6,7 @@
 
 from decimal import Decimal
 from datetime import date
-from typing import List, Dict, Optional, Tuple
+from typing import Any, List, Dict, Optional, Tuple
 from ..models.business_models import (
     Income,
     Expense,
@@ -15,6 +15,8 @@ from ..models.business_models import (
     ExpenseType,
     BankAccount,
     BankTransaction,
+    OperationType,
+    EntityType,
 )
 from ..database.db_manager import DatabaseManager
 
@@ -111,6 +113,8 @@ class FinanceManager:
         # 更新每个订单的已收金额
         for order_id, allocated_amount in allocations.items():
             order = self.db.get_order(order_id)
+            if not order:
+                continue  # Skip if order no longer exists
             order.received_amount += allocated_amount
             self.db.save_order(order)
 
@@ -337,6 +341,8 @@ class FinanceManager:
         # 在实际应用中，可能需要一个单独的付款记录表
         for expense_id, allocated_amount in allocations.items():
             expense = self.db.get_expense(expense_id)
+            if not expense:
+                continue  # Skip if expense no longer exists
             payment_note = f"付款 {allocated_amount} 元 ({payment_date.isoformat()})"
             if expense.notes:
                 expense.notes += f"; {payment_note}"
@@ -1009,19 +1015,17 @@ class FinanceManager:
         match_info = f"匹配到{len(expense_allocations)}笔支出："
         for expense_id, allocated_amount in expense_allocations.items():
             expense = self.db.get_expense(expense_id)
-            match_info += f" {expense.expense_type.value}({expense_id[:8]}): {allocated_amount}元;"
-
-        income.notes = f"{income.notes}; {match_info}" if income.notes else match_info
-        self.db.save_income(income)
-
-        # 更新每个支出记录的匹配信息
-        for expense_id, allocated_amount in expense_allocations.items():
-            expense = self.db.get_expense(expense_id)
+            if not expense:
+                continue  # Skip if expense no longer exists
             match_note = f"匹配收入 {income_id[:8]}: {allocated_amount}元"
             expense.notes = (
                 f"{expense.notes}; {match_note}" if expense.notes else match_note
             )
             self.db.save_expense(expense)
+
+        # 更新收入记录的匹配信息
+        income.notes = f"{income.notes}; {match_info}" if income.notes else match_info
+        self.db.save_income(income)
 
         return True, f"成功匹配收入到{len(expense_allocations)}笔支出"
 
@@ -1067,6 +1071,8 @@ class FinanceManager:
         match_info = f"匹配到{len(income_allocations)}笔收入："
         for income_id, allocated_amount in income_allocations.items():
             income = self.db.get_income(income_id)
+            if not income:
+                continue  # Skip if income no longer exists
             match_info += (
                 f" {income.customer_name}({income_id[:8]}): {allocated_amount}元;"
             )
@@ -1079,6 +1085,8 @@ class FinanceManager:
         # 更新每个收入记录的匹配信息
         for income_id, allocated_amount in income_allocations.items():
             income = self.db.get_income(income_id)
+            if not income:
+                continue  # Skip if income no longer exists
             match_note = f"匹配支出 {expense_id[:8]}: {allocated_amount}元"
             income.notes = (
                 f"{income.notes}; {match_note}" if income.notes else match_note
@@ -1238,8 +1246,8 @@ class FinanceManager:
 
     def log_operation(
         self,
-        operation_type: str,
-        entity_type: str,
+        operation_type: str | OperationType,
+        entity_type: str | EntityType,
         entity_id: str,
         entity_name: str = "",
         operator: str = "系统",
@@ -1270,15 +1278,27 @@ class FinanceManager:
         from ..models.business_models import AuditLog, OperationType, EntityType
         from datetime import datetime
 
+        # 转换字符串为枚举（如果是字符串）
+        if isinstance(operation_type, str):
+            if operation_type in OperationType.__members__:
+                op_type: OperationType = OperationType[operation_type]
+            else:
+                raise ValueError(f"无效的操作类型: {operation_type}")
+        else:
+            op_type = operation_type
+
+        if isinstance(entity_type, str):
+            if entity_type in EntityType.__members__:
+                ent_type: EntityType = EntityType[entity_type]
+            else:
+                raise ValueError(f"无效的实体类型: {entity_type}")
+        else:
+            ent_type = entity_type
+
         # 创建审计日志
         audit_log = AuditLog(
-            operation_type=OperationType[operation_type]
-            if isinstance(operation_type, str)
-            and operation_type in OperationType.__members__
-            else operation_type,
-            entity_type=EntityType[entity_type]
-            if isinstance(entity_type, str) and entity_type in EntityType.__members__
-            else entity_type,
+            operation_type=op_type,
+            entity_type=ent_type,
             entity_id=entity_id,
             entity_name=entity_name,
             operator=operator,
@@ -1290,19 +1310,18 @@ class FinanceManager:
             notes=notes,
         )
 
-        # 保存到数据库
         self.db.save_audit_log(audit_log)
         return audit_log.id
 
     def get_audit_logs(
         self,
-        entity_type: Optional[str] = None,
-        entity_id: Optional[str] = None,
-        operator: Optional[str] = None,
-        start_time: Optional[date] = None,
-        end_time: Optional[date] = None,
+        entity_type: str | None = None,
+        entity_id: str | None = None,
+        operator: str | None = None,
+        start_time: date | None = None,
+        end_time: date | None = None,
         limit: int = 100,
-    ) -> List[Dict]:
+    ) -> list[dict[str, Any]]:
         """
         查询审计日志
 
@@ -1312,10 +1331,10 @@ class FinanceManager:
             operator: 操作人（可选）
             start_time: 开始时间（可选）
             end_time: 结束时间（可选）
-            limit: 返回记录数限制
+            limit: 返回数量限制
 
         Returns:
-            List[Dict]: 审计日志列表
+            list[dict[str, Any]]: 审计日志列表
         """
         logs = self.db.list_audit_logs(
             entity_type=entity_type,
@@ -1342,6 +1361,7 @@ class FinanceManager:
                 "operation_description": log.operation_description,
                 "old_value": log.old_value,
                 "new_value": log.new_value,
+                "ip_address": log.ip_address,
                 "notes": log.notes,
             }
             for log in logs
