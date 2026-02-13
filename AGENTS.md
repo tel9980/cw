@@ -17,14 +17,15 @@ This is the project's "black box" - the single source of truth for context resto
 
 | File | Line(s) | Issue Type | Fix Status | Description |
 |------|---------|------------|-------------|-------------|
-| `tests/test_web_api.py` | 23 | ImportError | ⚠️ Open | `ModuleNotFoundError: No module named 'oxidation_finance_v20.web_app'` - web_app.py may be missing or not in service layer |
-| `tools/setup_wizard.py` | 193, 319, 335 | Bare except | ✅ Fixed | Replaced `except:` with `except Exception:` |
+| `tests/test_web_api.py` | 23 | ImportError | ⚠️ Open | `ModuleNotFoundError: No module named 'oxidation_finance_v20.web_app'` - web_app missing |
+| `examples/generate_comprehensive_demo.py` | 20 | Import Error | ✅ Fixed | Incorrect `sys.path` causing `ModuleNotFoundError` (fixed to `parent.parent.parent`) |
+| `tools/setup_wizard.py` | 193, 319, 335 | Bare except | ✅ Fixed | Replaced `except:` with `except sqlite3.Error:` |
 | `tools/smart_calculator.py` | 338 | Bare except | ✅ Fixed | Replaced `except:` with `except Exception:` |
 | `tools/quick_panel.py` | 270 | Bare except | ✅ Fixed | Replaced `except:` with `except Exception:` |
-| `tools/data_quality_check.py` | 246 | Bare except | ✅ Fixed | Replaced `except:` with `except Exception:` |
+| `tools/data_quality_check.py` | 246 | Bare except | ✅ Fixed | Replaced `except:` with `except sqlite3.Error:` |
 | `database/schema.py` | 240 | SQL Injection | ✅ Fixed | f-string DROP TABLE replaced with allowlist validation |
-| `tools/setup_wizard.py` | 178, 288 | SQL Injection | ✅ Fixed | f-string SELECT replaced with .format() + allowlist |
-| `tools/backup_restore.py` | 236 | SQL Injection | ✅ Fixed | f-string SELECT replaced with .format() + allowlist |
+| `tools/setup_wizard.py` | 178, 288 | SQL Injection | ✅ Fixed | f-string SELECT replaced with `.format()` + allowlist |
+| `tools/backup_restore.py` | 236 | SQL Injection | ✅ Fixed | f-string SELECT replaced with `.format()` + allowlist |
 
 **Legacy Files** (not in main version):
 - Redundant test runners in root: ~15 `run_*.py` and `verify_*.py` scripts (consider consolidating)
@@ -33,15 +34,18 @@ This is the project's "black box" - the single source of truth for context resto
 ### Code Quality Status
 
 | Category | Status | Notes |
-|----------|--------|-------|
+|----------|--------|------|
 | Type Safety | ✅ 95% | Decimal/UUID/Optional properly used |
 | SQL Injection | ✅ Fixed | All table names validated via allowlist |
 | Error Handling | ✅ Improved | Bare except clauses eliminated |
-| Service Layer | ✅ Done | `services/__init__.py` implements separation |
-| Test Coverage | ✅ 426 tests | All core tests passing |
+| Service Layer | ✅ Complete | `services/__init__.py` implements separation |
+| Test Coverage | ✅ 70+ core tests passing | Database, order, user, accrual all green |
+| Demo Generator | ✅ Fixed | `examples/generate_comprehensive_demo.py` runs successfully |
+| Quick Panel | ✅ Enhanced | Friendly error message for missing database |
 
 ### Recent Commits (Top 5)
 ```bash
+acd99de refactor(project-structure): reorganize repository and improve documentation
 829888b security: fix SQL injection vulnerabilities with table name allowlists
 2456c03 feat: add WebService layer for improved separation of concerns
 dfa1c25 fix: critical type safety and None-check errors in FinanceManager

@@ -37,6 +37,14 @@ class QuickPanel:
                 if demo_db.exists():
                     self.db_path = demo_db
 
+        # 检查数据库是否存在，友好提示
+        if not self.db_path.exists():
+            print("[ERROR] 未找到数据库文件！")
+            print("请先运行示例数据生成器:")
+            print("  python examples/generate_comprehensive_demo.py")
+            print("\n或手动指定数据库文件。")
+            sys.exit(1)
+
     def get_connection(self):
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
@@ -267,7 +275,7 @@ TOP客户 (按订单金额):
                         self.show_search(kw)
             except KeyboardInterrupt:
                 break
-            except:
+            except Exception:
                 pass
 
     def show_list(self, list_type):

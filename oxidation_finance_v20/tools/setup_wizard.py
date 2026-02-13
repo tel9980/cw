@@ -190,7 +190,8 @@ class SetupWizard:
                     ).fetchone()[0]
                     print(f"  [INFO] {table}: {count}条记录")
                     total += count
-                except:
+                except sqlite3.Error:
+                    # 表可能不存在或查询失败，安静跳过
                     pass
 
             conn.close()
@@ -316,7 +317,8 @@ class SetupWizard:
                     ).fetchone()[0]
                     print(f"     {table}: {count}条")
                     total_records += count
-                except:
+                except sqlite3.Error:
+                    # 表可能不存在或查询失败，安静跳过
                     pass
 
             # 金额统计
@@ -332,7 +334,8 @@ class SetupWizard:
                 print(f"     总收入: ¥{income:,.2f}")
                 print(f"     总支出: ¥{expense:,.2f}")
                 print(f"     利润: ¥{income - expense:,.2f}")
-            except:
+            except sqlite3.Error:
+                # 金额统计可能因表不存在而失败，忽略
                 pass
 
             conn.close()

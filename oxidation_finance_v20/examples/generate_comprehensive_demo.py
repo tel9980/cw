@@ -16,8 +16,8 @@ from pathlib import Path
 # 设置UTF-8输出
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-# 添加模块路径
-sys.path.insert(0, str(Path(__file__).parent))
+# 添加项目根目录到模块搜索路径
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from oxidation_finance_v20.models.business_models import (
     Customer,

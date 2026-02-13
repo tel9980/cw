@@ -243,7 +243,7 @@ class DataQualityChecker:
                 count = conn.execute(sql).fetchone()[0]
                 print(f"  {name}: {count:,}")
                 total_records += count
-            except:
+            except sqlite3.Error:
                 print(f"  {name}: N/A")
 
         print(f"\n  总记录数: {total_records:,}")

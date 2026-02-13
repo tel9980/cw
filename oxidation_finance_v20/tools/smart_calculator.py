@@ -335,7 +335,7 @@ def interactive_calculator():
                     orders.append(
                         {"quantity": qty, "unit_price": price, "processes": ["氧化"]}
                     )
-                except:
+                except Exception:
                     print("  [错误] 输入无效")
 
             if orders:
