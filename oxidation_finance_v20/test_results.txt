@@ -1,0 +1,29 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.2, pytest-9.0.2, pluggy-1.6.0 -- C:\Python314\python.exe
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: E:\python\CWZS\oxidation_finance_v20
+configfile: pytest.ini
+plugins: anyio-4.12.1, hypothesis-6.151.6, cov-7.0.0
+collecting ... collected 450 items
+
+tests/test_accrual_accounting.py::TestAccrualIncome::test_record_income_with_occurrence_date FAILED [  0%]
+tests/test_accrual_accounting.py::TestAccrualIncome::test_record_advance_receipt FAILED [  0%]
+tests/test_accrual_accounting.py::TestAccrualIncome::test_record_delayed_receipt FAILED [  0%]
+tests/test_accrual_accounting.py::TestAccrualExpense::test_record_expense_with_occurrence_date FAILED [  0%]
+tests/test_accrual_accounting.py::TestAccrualExpense::test_record_advance_payment FAILED [  1%]
+tests/test_accrual_accounting.py::TestAccrualExpense::test_record_delayed_payment FAILED [  1%]
+tests/test_accrual_accounting.py::TestFlexibleMatching::test_match_income_to_multiple_expenses FAILED [  1%]
+tests/test_accrual_accounting.py::TestFlexibleMatching::test_match_expense_to_multiple_incomes FAILED [  1%]
+tests/test_accrual_accounting.py::TestFlexibleMatching::test_match_validation_amount_exceeds FAILED [  2%]
+tests/test_accrual_accounting.py::TestFlexibleMatching::test_match_validation_nonexistent_record FAILED [  2%]
+tests/test_accrual_accounting.py::TestPrepaymentAnalysis::test_analyze_advance_receipts_and_payments FAILED [  2%]
+tests/test_accrual_accounting.py::TestPrepaymentAnalysis::test_analyze_with_date_range FAILED [  2%]
+tests/test_accrual_accounting.py::TestAccrualPeriodSummary::test_period_summary_basic FAILED [  2%]
+tests/test_accrual_accounting.py::TestAccrualPeriodSummary::test_period_summary_excludes_outside_dates FAILED [  3%]
+tests/test_accrual_accounting.py::TestAccrualPeriodSummary::test_period_summary_by_expense_type FAILED [  3%]
+tests/test_accrual_accounting.py::TestAccrualPeriodSummary::test_period_summary_profit_margin FAILED [  3%]
+tests/test_accrual_accounting.py::TestEdgeCases::test_same_occurrence_and_payment_date FAILED [  3%]
+tests/test_accrual_accounting.py::TestEdgeCases::test_zero_amount_matching FAILED [  4%]
+tests/test_accrual_accounting.py::TestEdgeCases::test_empty_period_summary FAILED [  4%]
+tests/test_accrual_properties.py::TestProperty16_AccrualTimingAccuracy::test_income_uses_occurrence_date_not_entry_date 

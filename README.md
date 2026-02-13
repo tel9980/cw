@@ -12,6 +12,91 @@
 
 本项目使用本地 AI 中转站进行智能化开发辅助，支持多种 AI 模型接入。
 
+### 🤝 AI 协作开发规范
+
+本项目采用 **AI 辅助开发模式**，遵循以下工作流程：
+
+#### 1. 需求分析
+- AI 协助梳理业务需求
+- 生成任务清单和工作计划
+
+#### 2. 代码生成
+- AI 辅助编写核心逻辑
+- 遵循 `AGENTS.md` 中的编码规范
+- 所有代码必须通过类型检查
+
+#### 3. 测试验证
+- AI 辅助生成测试用例
+- 运行 `pytest` 确保 100% 测试通过
+- 使用 property-based tests 验证边缘情况
+
+#### 4. 代码审查
+- AI 执行自我审查（通过 oracle 代理）
+- 检查安全漏洞（SQL注入、类型错误）
+- 验证代码符合项目规范
+
+#### 5. 文档维护
+- AI 协助维护文档
+- 更新 `AGENTS.md` 记忆核心
+- 提交清晰规范的 commit message
+
+### 📋 提交规范
+
+使用 [Conventional Commits](https://www.conventionalcommits.org/) 格式：
+
+```
+type(scope): brief description
+
+Detailed explanation if needed (wrap at 72 chars)
+```
+
+**Types**:
+- `feat:` 新功能
+- `fix:`  bug修复
+- `docs:` 文档
+- `test:` 测试
+- `refactor:` 重构
+- `chore:` 维护
+
+**Example**:
+```
+feat(database): add customer credit limit validation
+
+- Add credit_limit field to Customer model
+- Implement validation in order creation
+- Add unit tests for credit checks
+
+Fixes #123
+```
+
+### ⚠️ 重要规则
+
+1. **始终先读 `AGENTS.md`** - 这是项目黑匣子
+2. **运行测试** - 任何更改后必须运行 `pytest`
+3. **更新记忆核心** - 重大变更后更新 `AGENTS.md`
+4. **不要删除历史** - 旧版本移动到 `deprecated_versions/` 而非删除
+
+### 🔄 开发工作流
+
+```bash
+# 1. 阅读项目状态
+cat AGENTS.md
+
+# 2. 运行测试检查当前状态
+cd oxidation_finance_v20
+pytest
+
+# 3. 开发 / 修复
+# ... 编写代码 ...
+
+# 4. 验证测试通过
+pytest tests/test_database.py
+
+# 5. 提交 (AI 或 人工)
+git add .
+git commit -m "feat(scope): description"
+```
+
 ---
 
 ## 🚀 快速开始 - 氧化加工厂专版
@@ -43,13 +128,14 @@ python tools/quick_panel.py  # 今日概览
 
 ```
 CWZS/
-├── 🏭 oxidation_finance_v20/    # 氧化加工厂财务系统 V2.0 (推荐)
-├── 📊 small_accountant_v16/      # 小会计财务管理系统 V1.6
-├── 🏭 oxidation_factory/         # 氧化加工厂 V1.x
-├── 📝 oxidation_workflow_v18/    # 工作流优化版
-├── 📦 oxidation_complete_v17/    # 完整版
-├── 🔄 workflow_v15/              # 工作流 V1.5
-├── 📄 AGENTS.md                  # AI助手开发指南
+├── 🏭 oxidation_finance_v20/    # 氧化加工厂财务系统 V2.0 (主版本)
+├── 📦 deprecated_versions/       # 已弃用的旧版本 (归档)
+│   ├── small_accountant_v16/    # 小会计财务管理系统 V1.6
+│   ├── oxidation_factory/       # 氧化加工厂 V1.x
+│   ├── oxidation_workflow_v18/  # 工作流 V1.8
+│   ├── oxidation_complete_v17/  # 完整版 V1.7
+│   └── workflow_v15/            # 工作流 V1.5
+├── 📄 AGENTS.md                  # AI助手开发指南 (必读!)
 └── 📊 财务报表/                  # 生成的报表目录
 ```
 
@@ -75,7 +161,7 @@ CWZS/
 
 ## 📦 版本说明
 
-### 🏭 氧化加工厂专版 V2.0 (推荐)
+### 🏭 氧化加工厂专版 V2.0 (主推)
 
 **位置**: `oxidation_finance_v20/`
 
@@ -84,6 +170,9 @@ CWZS/
 - ✅ 用户权限系统
 - ✅ 操作日志审计
 - ✅ 9个命令行工具
+- ✅ 服务层架构
+- ✅ SQL注入防护
+- ✅ 完整类型注解
 
 **快速开始**:
 ```bash
@@ -91,18 +180,17 @@ cd oxidation_finance_v20
 python web_app.py  # 启动Web服务
 ```
 
-### 小会计通用版 V1.6
+### 📦 旧版本 (已归档)
 
-**位置**: `small_accountant_v16/`
+旧版本已移动到 `deprecated_versions/` 目录，仅供历史参考：
 
-**适合**: 小微企业日常财务管理
+- **小会计通用版 V1.6**: `deprecated_versions/small_accountant_v16/`
+- **氧化加工厂 V1.x**: `deprecated_versions/oxidation_factory/`
+- **工作流 V1.8**: `deprecated_versions/oxidation_workflow_v18/`
+- **完整版 V1.7**: `deprecated_versions/oxidation_complete_v17/`
+- **工作流 V1.5**: `deprecated_versions/workflow_v15/`
 
-**适合**: 加工制造行业
-
-**特色功能**:
-- 订单管理
-- 加工流程追踪
-- 成本核算
+> **注意**: 这些版本已不再维护，建议使用 V2.0。
 
 ## 🚀 5分钟快速上手
 
