@@ -206,8 +206,8 @@ def new_order():
             customer_id = customer["id"]
 
         # 计算金额
-        quantity = Decimal(request.form["quantity"])
-        unit_price = Decimal(request.form["unit_price"])
+        quantity = float(request.form["quantity"])
+        unit_price = float(request.form["unit_price"])
         total_amount = quantity * unit_price
 
         # 插入订单
@@ -266,7 +266,7 @@ def new_income():
             (
                 str(uuid.uuid4()),
                 request.form["customer_name"],
-                Decimal(request.form["amount"]),
+                float(request.form["amount"]),
                 request.form["bank_type"],
                 request.form.get("income_date", date.today().isoformat()),
                 request.form.get("notes", ""),
@@ -301,7 +301,7 @@ def new_expense():
                 str(uuid.uuid4()),
                 request.form["expense_type"],
                 request.form.get("supplier_name", ""),
-                Decimal(request.form["amount"]),
+                float(request.form["amount"]),
                 request.form["bank_type"],
                 request.form.get("expense_date", date.today().isoformat()),
                 request.form.get("description", ""),
@@ -336,8 +336,8 @@ def edit_order(order_id):
     conn = get_db()
 
     if request.method == "POST":
-        quantity = Decimal(request.form["quantity"])
-        unit_price = Decimal(request.form["unit_price"])
+        quantity = float(request.form["quantity"])
+        unit_price = float(request.form["unit_price"])
         total_amount = quantity * unit_price
 
         conn.execute(
@@ -408,7 +408,7 @@ def edit_income(income_id):
         """,
             (
                 request.form["customer_name"],
-                Decimal(request.form["amount"]),
+                float(request.form["amount"]),
                 request.form["bank_type"],
                 request.form.get("income_date", date.today().isoformat()),
                 request.form.get("notes", ""),
@@ -452,7 +452,7 @@ def edit_expense(expense_id):
             (
                 request.form["expense_type"],
                 request.form.get("supplier_name", ""),
-                Decimal(request.form["amount"]),
+                float(request.form["amount"]),
                 request.form["bank_type"],
                 request.form.get("expense_date", date.today().isoformat()),
                 request.form.get("description", ""),

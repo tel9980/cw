@@ -90,6 +90,7 @@ class TestOrdersAPI:
             "item_description": "测试产品",
             "quantity": "100",
             "unit_price": "10.00",
+            "pricing_unit": "米",
             "processes": ["OXIDATION"],
         }
         response = client_with_db.post("/order/new", data=data, follow_redirects=True)
@@ -134,7 +135,12 @@ class TestExpenseAPI:
 
     def test_expense_new_post(self, client_with_db):
         """测试支出录入 POST"""
-        data = {"amount": "1000.00", "expense_type": "房租", "description": "测试支出"}
+        data = {
+            "amount": "1000.00",
+            "expense_type": "房租",
+            "bank_type": "G银行",
+            "description": "测试支出",
+        }
         response = client_with_db.post("/expense/new", data=data, follow_redirects=True)
         assert response.status_code == 200
 
