@@ -1,0 +1,142 @@
+{
+  "7cb58187-5e29-43be-ab29-d6d41bdac64e": {
+    "id": "7cb58187-5e29-43be-ab29-d6d41bdac64e",
+    "type": "payable",
+    "title": "应付账款提醒：优质原材料供应商（3天后到期）",
+    "description": "供应商：优质原材料供应商\n金额：25,000.00 元\n到期日期：2026年02月13日\n说明：采购原材料 - 待付款",
+    "due_date": "2026-02-13",
+    "priority": "medium",
+    "status": "pending",
+    "notification_channels": [
+      "desktop",
+      "wechat"
+    ],
+    "created_at": "2026-02-10T12:38:49.731835"
+  },
+  "b42085ff-0070-4bcd-8e02-ead9efa607c9": {
+    "id": "b42085ff-0070-4bcd-8e02-ead9efa607c9",
+    "type": "payable",
+    "title": "应付账款提醒：快速物流公司（1天后到期）",
+    "description": "供应商：快速物流公司\n金额：8,000.00 元\n到期日期：2026年02月11日\n说明：物流费用 - 待付款",
+    "due_date": "2026-02-11",
+    "priority": "high",
+    "status": "pending",
+    "notification_channels": [
+      "desktop",
+      "wechat"
+    ],
+    "created_at": "2026-02-10T12:38:49.734102"
+  },
+  "37f5089c-3058-4e13-85b6-c4fe41850a89": {
+    "id": "37f5089c-3058-4e13-85b6-c4fe41850a89",
+    "type": "receivable",
+    "title": "应收账款逾期提醒：ABC贸易公司（逾期30天）",
+    "description": "客户：ABC贸易公司\n金额：45,000.00 元\n原到期日期：2026年01月11日\n逾期天数：30 天\n说明：销售产品 - 待收款\n\n催款函已生成：demo_data\\collection_letters\\催款函_ABC贸易公司_首次提醒_20260210_123849.docx",
+    "due_date": "2026-01-11",
+    "priority": "high",
+    "status": "pending",
+    "notification_channels": [
+      "desktop",
+      "wechat"
+    ],
+    "created_at": "2026-02-10T12:38:49.781324"
+  },
+  "05752bb2-9851-404e-9da5-bc139f51a569": {
+    "id": "05752bb2-9851-404e-9da5-bc139f51a569",
+    "type": "receivable",
+    "title": "应收账款逾期提醒：XYZ科技有限公司（逾期60天）",
+    "description": "客户：XYZ科技有限公司\n金额：32,000.00 元\n原到期日期：2025年12月12日\n逾期天数：60 天\n说明：提供服务 - 待收款\n\n催款函已生成：demo_data\\collection_letters\\催款函_XYZ科技有限公司_二次催收_20260210_123849.docx",
+    "due_date": "2025-12-12",
+    "priority": "high",
+    "status": "pending",
+    "notification_channels": [
+      "desktop",
+      "wechat"
+    ],
+    "created_at": "2026-02-10T12:38:49.828756"
+  },
+  "ec645bce-d6b7-41fb-a06d-74885370cb08": {
+    "id": "ec645bce-d6b7-41fb-a06d-74885370cb08",
+    "type": "receivable",
+    "title": "应收账款逾期提醒：ABC贸易公司（逾期90天）",
+    "description": "客户：ABC贸易公司\n金额：28,000.00 元\n原到期日期：2025年11月12日\n逾期天数：90 天\n说明：销售产品 - 待收款\n\n催款函已生成：demo_data\\collection_letters\\催款函_ABC贸易公司_最后通知_20260210_123849.docx",
+    "due_date": "2025-11-12",
+    "priority": "high",
+    "status": "pending",
+    "notification_channels": [
+      "desktop",
+      "wechat"
+    ],
+    "created_at": "2026-02-10T12:38:49.884236"
+  },
+  "9f81ff40-2b24-4f94-ad54-ef8fe8951e8a": {
+    "id": "9f81ff40-2b24-4f94-ad54-ef8fe8951e8a",
+    "type": "payable",
+    "title": "应付账款提醒：优质原材料供应商（3天后到期）",
+    "description": "供应商：优质原材料供应商\n金额：25,000.00 元\n到期日期：2026年02月13日\n说明：采购原材料 - 待付款",
+    "due_date": "2026-02-13",
+    "priority": "medium",
+    "status": "pending",
+    "notification_channels": [
+      "desktop",
+      "wechat"
+    ],
+    "created_at": "2026-02-10T12:38:49.899234"
+  },
+  "88ef33a9-588c-4d73-8819-291868009730": {
+    "id": "88ef33a9-588c-4d73-8819-291868009730",
+    "type": "payable",
+    "title": "应付账款提醒：快速物流公司（1天后到期）",
+    "description": "供应商：快速物流公司\n金额：8,000.00 元\n到期日期：2026年02月11日\n说明：物流费用 - 待付款",
+    "due_date": "2026-02-11",
+    "priority": "high",
+    "status": "pending",
+    "notification_channels": [
+      "desktop",
+      "wechat"
+    ],
+    "created_at": "2026-02-10T12:38:49.903183"
+  },
+  "ca6bb059-4a88-46cf-aff3-94d57264625a": {
+    "id": "ca6bb059-4a88-46cf-aff3-94d57264625a",
+    "type": "receivable",
+    "title": "应收账款逾期提醒：ABC贸易公司（逾期30天）",
+    "description": "客户：ABC贸易公司\n金额：45,000.00 元\n原到期日期：2026年01月11日\n逾期天数：30 天\n说明：销售产品 - 待收款\n\n催款函已生成：demo_data\\collection_letters\\催款函_ABC贸易公司_首次提醒_20260210_123849.docx",
+    "due_date": "2026-01-11",
+    "priority": "high",
+    "status": "pending",
+    "notification_channels": [
+      "desktop",
+      "wechat"
+    ],
+    "created_at": "2026-02-10T12:38:49.972356"
+  },
+  "3d7721c8-0e26-465d-86e4-b542b8bc09a1": {
+    "id": "3d7721c8-0e26-465d-86e4-b542b8bc09a1",
+    "type": "receivable",
+    "title": "应收账款逾期提醒：XYZ科技有限公司（逾期60天）",
+    "description": "客户：XYZ科技有限公司\n金额：32,000.00 元\n原到期日期：2025年12月12日\n逾期天数：60 天\n说明：提供服务 - 待收款\n\n催款函已生成：demo_data\\collection_letters\\催款函_XYZ科技有限公司_二次催收_20260210_123850.docx",
+    "due_date": "2025-12-12",
+    "priority": "high",
+    "status": "pending",
+    "notification_channels": [
+      "desktop",
+      "wechat"
+    ],
+    "created_at": "2026-02-10T12:38:50.036630"
+  },
+  "db30344e-9064-447f-bead-a940726963bf": {
+    "id": "db30344e-9064-447f-bead-a940726963bf",
+    "type": "receivable",
+    "title": "应收账款逾期提醒：ABC贸易公司（逾期90天）",
+    "description": "客户：ABC贸易公司\n金额：28,000.00 元\n原到期日期：2025年11月12日\n逾期天数：90 天\n说明：销售产品 - 待收款\n\n催款函已生成：demo_data\\collection_letters\\催款函_ABC贸易公司_最后通知_20260210_123850.docx",
+    "due_date": "2025-11-12",
+    "priority": "high",
+    "status": "pending",
+    "notification_channels": [
+      "desktop",
+      "wechat"
+    ],
+    "created_at": "2026-02-10T12:38:50.088892"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "CUST001": {
+    "id": "CUST001",
+    "name": "ABC贸易公司",
+    "type": "customer",
+    "contact_person": "张经理",
+    "phone": "13800138001",
+    "email": "zhang@abc.com",
+    "address": "北京市朝阳区建国路88号",
+    "tax_id": "91110000123456789A",
+    "created_at": "2026-02-10T12:38:49.688715",
+    "updated_at": "2026-02-10T12:38:49.688761"
+  },
+  "CUST002": {
+    "id": "CUST002",
+    "name": "XYZ科技有限公司",
+    "type": "customer",
+    "contact_person": "李总",
+    "phone": "13800138002",
+    "email": "li@xyz.com",
+    "address": "上海市浦东新区世纪大道100号",
+    "tax_id": "91310000987654321B",
+    "created_at": "2026-02-10T12:38:49.691291",
+    "updated_at": "2026-02-10T12:38:49.691294"
+  },
+  "SUPP001": {
+    "id": "SUPP001",
+    "name": "优质原材料供应商",
+    "type": "supplier",
+    "contact_person": "王经理",
+    "phone": "13900139001",
+    "email": "wang@supplier.com",
+    "address": "广州市天河区天河路200号",
+    "tax_id": "91440000111222333C",
+    "created_at": "2026-02-10T12:38:49.693489",
+    "updated_at": "2026-02-10T12:38:49.693491"
+  },
+  "SUPP002": {
+    "id": "SUPP002",
+    "name": "快速物流公司",
+    "type": "supplier",
+    "contact_person": "赵主管",
+    "phone": "13900139002",
+    "email": "zhao@logistics.com",
+    "address": "深圳市南山区科技园南路300号",
+    "tax_id": "91440300444555666D",
+    "created_at": "2026-02-10T12:38:49.695362",
+    "updated_at": "2026-02-10T12:38:49.695364"
+  }
+}

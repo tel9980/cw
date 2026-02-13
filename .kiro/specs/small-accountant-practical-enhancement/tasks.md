@@ -39,7 +39,7 @@
     - 支持常见列名变体（如"日期"、"时间"、"交易日期"等）
     - _Requirements: 4.1, 4.6_
   
-  - [ ] 3.2 为列识别器编写属性测试
+  - [x] 3.2 为列识别器编写属性测试
     - **Property 14: Column recognition accuracy**
     - **Validates: Requirements 4.1**
   
@@ -61,19 +61,19 @@
     - 实现undo_import()（撤销导入）
     - _Requirements: 4.2, 4.3, 4.4, 4.5_
   
-  - [ ] 3.6 为导入引擎编写属性测试
+  - [x] 3.6 为导入引擎编写属性测试
     - **Property 15: Transaction import completeness**
     - **Validates: Requirements 4.2**
   
-  - [ ] 3.7 为导入引擎编写属性测试
+  - [x] 3.7 为导入引擎编写属性测试
     - **Property 16: Counterparty import completeness**
     - **Validates: Requirements 4.3**
   
-  - [ ] 3.8 为导入引擎编写属性测试
+  - [x] 3.8 为导入引擎编写属性测试
     - **Property 17: Import preview validation**
     - **Validates: Requirements 4.4**
   
-  - [ ] 3.9 为导入引擎编写属性测试
+  - [x] 3.9 为导入引擎编写属性测试
     - **Property 18: Import undo round-trip**
     - **Validates: Requirements 4.5**
 
@@ -90,7 +90,7 @@
     - 实现模板加载和应用逻辑
     - _Requirements: 1.1, 1.2, 1.3, 1.5_
   
-  - [-] 5.2 实现ChartGenerator（图表生成器）
+  - [x] 5.2 实现ChartGenerator（图表生成器）
     - 实现create_revenue_comparison_chart()（收支对比图）
     - 实现create_profit_trend_chart()（利润趋势图）
     - 实现create_customer_ranking_chart()（客户排名图）
@@ -109,19 +109,19 @@
     - 集成模板和图表生成
     - _Requirements: 1.1, 1.2, 1.3_
   
-  - [ ] 5.5 为报表生成器编写属性测试
+  - [x] 5.5 为报表生成器编写属性测试
     - **Property 1: Management report completeness**
     - **Validates: Requirements 1.1**
   
-  - [ ] 5.6 为报表生成器编写属性测试
+  - [x] 5.6 为报表生成器编写属性测试
     - **Property 2: Tax report structure**
     - **Validates: Requirements 1.2**
   
-  - [ ] 5.7 为报表生成器编写属性测试
+  - [x] 5.7 为报表生成器编写属性测试
     - **Property 3: Bank loan report completeness**
     - **Validates: Requirements 1.3**
   
-  - [ ] 5.8 为报表生成器编写属性测试
+  - [x] 5.8 为报表生成器编写属性测试
     - **Property 4: Excel output format consistency**
     - **Validates: Requirements 1.4, 1.6**
 
@@ -137,7 +137,7 @@
     - 支持模糊匹配（金额、日期容差）
     - _Requirements: 3.1_
   
-  - [ ] 7.2 为银行流水匹配器编写属性测试
+  - [x] 7.2 为银行流水匹配器编写属性测试
     - **Property 11: Bank reconciliation matching and discrepancy detection**
     - **Validates: Requirements 3.1, 3.4**
   
@@ -147,7 +147,7 @@
     - 格式化Excel输出
     - _Requirements: 3.2, 3.4_
   
-  - [ ] 7.4 为对账报告生成器编写属性测试
+  - [x] 7.4 为对账报告生成器编写属性测试
     - **Property 12: Customer statement generation**
     - **Validates: Requirements 3.2**
   
@@ -158,7 +158,7 @@
     - 集成匹配器和报告生成器
     - _Requirements: 3.1, 3.2, 3.3_
   
-  - [ ] 7.6 为对账助手编写属性测试
+  - [x] 7.6 为对账助手编写属性测试
     - **Property 13: Supplier reconciliation verification**
     - **Validates: Requirements 3.3**
 
@@ -198,7 +198,7 @@
     - 实现send_reminder()（发送提醒）
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
   
-  - [ ] 9.6 为提醒系统编写属性测试
+  - [x] 9.6 为提醒系统编写属性测试
     - **Property 5: Tax reminder timing**
     - **Validates: Requirements 2.1**
   

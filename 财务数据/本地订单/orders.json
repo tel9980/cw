@@ -1,0 +1,22 @@
+[
+  {
+    "order_no": "TEST_OPT_001",
+    "customer": "测试客户A",
+    "order_date": "2026-02-09",
+    "item_name": "测试物品",
+    "pricing_unit": "件",
+    "quantity": 100,
+    "unit_price": 2.5,
+    "order_amount": 250.0,
+    "paid_amount": 0.0,
+    "unpaid_amount": 250.0,
+    "process_details": "氧化",
+    "outsourced_processes": [
+      "喷砂"
+    ],
+    "outsourced_cost": 50.0,
+    "status": "待生产",
+    "remark": "",
+    "created_at": "2026-02-09 16:48:46"
+  }
+]

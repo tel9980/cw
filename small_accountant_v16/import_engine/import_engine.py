@@ -592,15 +592,22 @@ class ImportEngine:
         # 解析单位类型
         cp_type = self._parse_counterparty_type(record['type'])
         
+        # 处理可选字段，确保它们是字符串类型
+        def safe_str(value):
+            """安全地转换为字符串，处理NaN和None"""
+            if value is None or (isinstance(value, float) and pd.isna(value)):
+                return ''
+            return str(value)
+        
         return Counterparty(
             id=str(uuid.uuid4()),
             name=record['name'],
             type=cp_type,
-            contact_person=record.get('contact_person', ''),
-            phone=record.get('phone', ''),
-            email=record.get('email', ''),
-            address=record.get('address', ''),
-            tax_id=record.get('tax_id', ''),
+            contact_person=safe_str(record.get('contact_person', '')),
+            phone=safe_str(record.get('phone', '')),
+            email=safe_str(record.get('email', '')),
+            address=safe_str(record.get('address', '')),
+            tax_id=safe_str(record.get('tax_id', '')),
             created_at=datetime.now(),
             updated_at=datetime.now()
         )

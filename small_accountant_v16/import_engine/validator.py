@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, date
 from decimal import Decimal, InvalidOperation
 import re
+import pandas as pd
 
 
 @dataclass
@@ -455,15 +456,14 @@ class ImportValidator:
         """验证字符串长度"""
         errors = []
         
+        # 如果值不是字符串，尝试转换（处理pandas读取Excel时的类型转换）
         if not isinstance(value, str):
-            errors.append(ValidationError(
-                row_number=row_num,
-                field_name=field_name,
-                field_value=value,
-                error_message=f"{field_name}必须是字符串",
-                error_type='invalid_format'
-            ))
-            return errors
+            if pd.isna(value):
+                # NaN值视为空字符串
+                value = ''
+            else:
+                # 其他类型转换为字符串
+                value = str(value)
         
         length = len(value)
         if length < min_length:
@@ -557,13 +557,14 @@ class ImportValidator:
         # 移除空格和分隔符
         tax_id = re.sub(r'[\s\-]', '', value)
         
-        # 验证长度（15位或18位统一社会信用代码）
-        if len(tax_id) not in [15, 18, 20]:
+        # 验证长度（15位旧税号或18位统一社会信用代码）
+        # 实际上也接受其他长度，因为不同国家和地区的税号格式不同
+        if len(tax_id) < 10 or len(tax_id) > 20:
             errors.append(ValidationError(
                 row_number=row_num,
                 field_name='tax_id',
                 field_value=value,
-                error_message=f"税号长度无效: {value}（应为15位或18位）",
+                error_message=f"税号长度无效: {value}（应为10-20位）",
                 error_type='invalid_format'
             ))
         

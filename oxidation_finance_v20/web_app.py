@@ -31,7 +31,11 @@ except ImportError:
     print("  pip install flask")
     sys.exit(1)
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder=Path(__file__).resolve().parent / "templates")
+# 禁用Jinja模板缓存
+app.jinja_env.auto_reload = True
+app.config["TEMPLATES_AUTO_RELOAD"] = True
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 # 数据库路径 - 使用当前目录下的文件
 DB_PATH = Path(__file__).resolve().parent / "oxidation_finance_demo_ready.db"

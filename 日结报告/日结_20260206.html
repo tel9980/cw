@@ -1,0 +1,78 @@
+
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>每日结账报告 - 2026-02-06</title>
+        <style>
+            body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; padding: 20px; }
+            .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            h1 { color: #1a1a1a; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
+            .summary-box { display: flex; gap: 20px; margin: 20px 0; }
+            .card { flex: 1; background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #e9ecef; }
+            .num { font-size: 24px; font-weight: bold; color: #2c3e50; }
+            .label { color: #7f8c8d; font-size: 14px; }
+            .income { color: #27ae60; }
+            .expense { color: #c0392b; }
+            
+            h3 { margin-top: 30px; color: #34495e; border-left: 5px solid #3498db; padding-left: 10px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+            th, td { padding: 10px; text-align: left; border-bottom: 1px solid #eee; }
+            th { background: #f8f9fa; color: #7f8c8d; }
+            
+            .log-box { background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 5px; font-family: monospace; max-height: 200px; overflow-y: auto; }
+            .pending-alert { background: #fff3cd; color: #856404; padding: 10px; border-radius: 5px; margin-top: 10px; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>📅 每日结账报告 <small style="font-size: 16px; color: #7f8c8d">2026-02-06 20:17</small></h1>
+            
+            <div class="summary-box">
+                <div class="card">
+                    <div class="num income">+80,000.00</div>
+                    <div class="label">今日收款</div>
+                </div>
+                <div class="card">
+                    <div class="num expense">-16,010.50</div>
+                    <div class="label">今日支出</div>
+                </div>
+                <div class="card">
+                    <div class="num">8</div>
+                    <div class="label">业务笔数</div>
+                </div>
+                <div class="card">
+                    <div class="num" style="color: #2980b9">63,989.50</div>
+                    <div class="label">今日净现金流</div>
+                </div>
+            </div>
+            
+            <h3>📝 今日业务明细</h3>
+            <table><thead><tr><th>类型</th><th>金额</th><th>对象</th><th>摘要</th></tr></thead><tbody><tr><td><span style='color:green'>收款</span></td><td>50,000.00</td><td>上海xx贸易有限公司</td><td>Q1服务费首款</td></tr><tr><td><span style='color:red'>付款</span></td><td>2,500.00</td><td>杭州阿里云计算有限公司</td><td>1月云资源费</td></tr><tr><td><span style='color:red'>费用</span></td><td>356.50</td><td>滴滴出行科技有限公司</td><td>销售部拜访客户打车</td></tr><tr><td><span style='color:red'>费用</span></td><td>899.00</td><td>京东办公用品</td><td>采购A4纸和墨盒</td></tr><tr><td><span style='color:green'>收款</span></td><td>30,000.00</td><td>上海xx贸易有限公司</td><td>Q1服务费尾款</td></tr><tr><td><span style='color:red'>费用</span></td><td>199.00</td><td>中国移动通信</td><td>公司宽带费</td></tr><tr><td><span style='color:red'>付款</span></td><td>12,000.00</td><td>房租物业</td><td>临时仓库租金(房东个人)</td></tr><tr><td><span style='color:red'>费用</span></td><td>56.00</td><td>顺丰快递</td><td>寄送合同快递费(微信支付)</td></tr></tbody></table>
+        <h3>⚙️ 系统处理日志</h3>
+        <div class="log-box">
+        <div>【处理摘要】</div><div>⏩ 跳过: bank.xlsx</div><div>✅ 导入: 利润表_2026.xlsx</div><div>✅ 导入: 未匹配流水_20260205191531.xlsx</div><div>✅ 导入: 未匹配流水_20260205192446.xlsx</div><div>✅ 导入: 标准凭证导出_20260206_143547.xlsx</div><div>✅ 导入: 标准凭证导出_20260206_190811.xlsx</div><div>✅ 导入: 标准凭证导出_20260206_195355.xlsx</div><div>✅ 导入: 标准凭证导出_20260206_195533.xlsx</div><div>✅ 导入: 标准凭证导出_20260206_200150.xlsx</div><div>✅ 导入: 标准凭证导出_20260206_200231.xlsx</div><div>✅ 导入: 标准凭证导出_20260206_200959.xlsx</div><div>✅ 导入: 标准凭证导出_20260206_201100.xlsx</div><div>✅ 导入: 测试数据_别名导入模板.xlsx</div><div>✅ 导入: 测试数据_待对账流水_G银行.xlsx</div><div>⚠️ 发现 2 笔待补票记录</div><div>
+【详细日志】</div><div>
+【税务风险测算】
+📊 财务经营月报 (费率: 3.0%)
+------------------------
+💰 有票收入: 80,000.00
+💸 有票成本: 3,954.50
+🚫 无票支出: 12,056.00 (含G银行: 0.00)
+------------------------
+🧾 预计增值税: 2,330.10
+🏦 预计所得税: 19,011.38
+📈 账面利润率: 95.1%
+------------------------
+⚠️ [经营风险] 无票支出整体占比 75.3%
+
+🤖 [AI 财务诊断]
+AI 诊断建议: 经营状况良好。
+------------------------
+💡 仅供参考，具体以申报为准</div><div>
+【待补票据】
+发现 2 笔支出未收发票，请及时催收！</div></div>
+        </div>
+    </body>
+    </html>
+    

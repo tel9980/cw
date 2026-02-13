@@ -39,6 +39,7 @@ env/
 .coverage
 htmlcov/
 .tox/
+.hypothesis/
 
 # 小会计运行时生成的文件
 data/
@@ -54,6 +55,7 @@ config.json
 *.backup
 .DS_Store
 Thumbs.db
+nul/
 
 # Excel临时文件
 ~$*.xlsx
@@ -66,3 +68,21 @@ Thumbs.db
 # 保留配置示例
 !small_accountant_v16/config_example.json
 !**/config_example.json
+
+# 氧化加工厂V2.0 - 保留数据库文件
+!oxidation_finance_v20/*.db
+!oxidation_finance_v20/*.db-journal
+
+# 氧化加工厂V2.0 - 保留模板和工具
+!oxidation_finance_v20/templates/
+!oxidation_finance_v20/tools/*.py
+!oxidation_finance_v20/examples/*.py
+
+# AI中转站工具（如果从C盘拷贝过来）
+gcli2api/
+*/gcli2api/
+
+# 环境配置
+.env
+.env.local
+.env.*.local

@@ -1,0 +1,25 @@
+{
+  "session_id": "8e314298-1417-46a9-9233-4ff93926305d",
+  "user_id": "demo_user",
+  "workflow_type": "morning_setup",
+  "template_id": "morning_setup_v1",
+  "current_step": 1,
+  "step_data": {
+    "morning_1": {
+      "action": "reviewed_tasks",
+      "notes": "已查看今日任务"
+    }
+  },
+  "context": {
+    "user_id": "demo_user",
+    "date": "2026-02-09"
+  },
+  "created_at": "2026-02-09T21:29:11.210029",
+  "last_updated": "2026-02-09T21:29:11.215570",
+  "is_active": true,
+  "completed_steps": [
+    "morning_1"
+  ],
+  "customizations": {},
+  "progress": 0.3333333333333333
+}

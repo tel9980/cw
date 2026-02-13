@@ -1,0 +1,123 @@
+
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>银行对账报告 - 2026-02-06</title>
+        <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+        <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; margin: 0; padding: 20px; }
+            .container { max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+            h1 { color: #2c3e50; text-align: center; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+            .summary { display: flex; justify-content: space-around; margin: 30px 0; }
+            .card { text-align: center; padding: 20px; background: #f8f9fa; border-radius: 8px; width: 30%; }
+            .number { font-size: 24px; font-weight: bold; color: #2c3e50; }
+            .chart-box { height: 400px; margin: 20px 0; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+            th { background-color: #3498db; color: white; }
+            tr:nth-child(even) { background-color: #f2f2f2; }
+            .badge { padding: 5px 10px; border-radius: 4px; font-size: 12px; }
+            .badge-danger { background-color: #e74c3c; color: white; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🏦 银行对账报告</h1>
+            <p style="text-align: center; color: #7f8c8d;">生成时间: 2026-02-06 20:17:30</p>
+            
+            <div class="summary">
+                <div class="card">
+                    <div class="number" style="color: #3498db;">2</div>
+                    <div>总流水数</div>
+                </div>
+                <div class="card">
+                    <div class="number" style="color: #27ae60;">0</div>
+                    <div>自动匹配成功</div>
+                </div>
+                <div class="card">
+                    <div class="number" style="color: #e74c3c;">2</div>
+                    <div>待处理异常</div>
+                </div>
+            </div>
+
+            <div id="pie-chart" class="chart-box"></div>
+
+            <h3>📋 待处理异常清单 (2条)</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>日期</th>
+                        <th>摘要</th>
+                        <th>金额</th>
+                        <th>对象</th>
+                        <th>建议分类</th>
+                        <th>原因</th>
+                    </tr>
+                </thead>
+                <tbody>
+    
+                    <tr>
+                        <td>2026-02-04</td>
+                        <td>流水导入: </td>
+                        <td>20000.0</td>
+                        <td>未知</td>
+                        <td>办公费</td>
+                        <td><span class="badge badge-danger">飞书无此金额或日期超2天</span></td>
+                    </tr>
+        
+                    <tr>
+                        <td>2026-02-06</td>
+                        <td>流水导入: </td>
+                        <td>-350.0</td>
+                        <td>未知</td>
+                        <td>办公费</td>
+                        <td><span class="badge badge-danger">飞书无此金额或日期超2天</span></td>
+                    </tr>
+        
+                </tbody>
+            </table>
+            
+            <script>
+                var chartDom = document.getElementById('pie-chart');
+                var myChart = echarts.init(chartDom);
+                var option = {
+                    title: { text: '对账匹配率', left: 'center' },
+                    tooltip: { trigger: 'item' },
+                    legend: { orient: 'vertical', left: 'left' },
+                    series: [
+                        {
+                            name: '匹配结果',
+                            type: 'pie',
+                            radius: ['40%', '70%'],
+                            avoidLabelOverlap: false,
+                            itemStyle: {
+                                borderRadius: 10,
+                                borderColor: '#fff',
+                                borderWidth: 2
+                            },
+                            label: {
+                                show: false,
+                                position: 'center'
+                            },
+                            emphasis: {
+                                label: {
+                                    show: true,
+                                    fontSize: 20,
+                                    fontWeight: 'bold'
+                                }
+                            },
+                            labelLine: { show: false },
+                            data: [
+                                { value: 0, name: '匹配成功', itemStyle: { color: '#27ae60' } },
+                                { value: 2, name: '未匹配异常', itemStyle: { color: '#e74c3c' } }
+                            ]
+                        }
+                    ]
+                };
+                option && myChart.setOption(option);
+            </script>
+        </div>
+    </body>
+    </html>
+    

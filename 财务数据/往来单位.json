@@ -1,0 +1,85 @@
+{
+  "华为精密制造": {
+    "type": "customer",
+    "contact": "张经理",
+    "phone": "138****1001",
+    "payment_terms": "30天",
+    "created_at": "2025-06-02T07:09:17.207678"
+  },
+  "比亚迪汽车配件": {
+    "type": "customer",
+    "contact": "李总",
+    "phone": "139****2002",
+    "payment_terms": "60天",
+    "created_at": "2025-03-31T07:09:17.207734"
+  },
+  "格力电器零件": {
+    "type": "customer",
+    "contact": "王主管",
+    "phone": "136****3003",
+    "payment_terms": "60天",
+    "created_at": "2025-11-06T07:09:17.207752"
+  },
+  "美的家电部件": {
+    "type": "customer",
+    "contact": "赵经理",
+    "phone": "137****4004",
+    "payment_terms": "30天",
+    "created_at": "2025-08-28T07:09:17.207845"
+  },
+  "小米科技配件": {
+    "type": "customer",
+    "contact": "刘总",
+    "phone": "135****5005",
+    "payment_terms": "60天",
+    "created_at": "2025-06-05T07:09:17.207863"
+  },
+  "三酸供应商_化工贸易": {
+    "type": "supplier",
+    "category": "原材料",
+    "payment_terms": "现金",
+    "created_at": "2025-08-03T07:09:17.207877"
+  },
+  "片碱供应商_化学品公司": {
+    "type": "supplier",
+    "category": "原材料",
+    "payment_terms": "月结",
+    "created_at": "2026-01-11T07:09:17.207888"
+  },
+  "色粉供应商_颜料厂": {
+    "type": "supplier",
+    "category": "原材料",
+    "payment_terms": "月结",
+    "created_at": "2025-03-14T07:09:17.207897"
+  },
+  "除油剂供应商_清洁剂厂": {
+    "type": "supplier",
+    "category": "原材料",
+    "payment_terms": "现金",
+    "created_at": "2025-10-18T07:09:17.207906"
+  },
+  "喷砂外发_表面处理厂": {
+    "type": "supplier",
+    "category": "外发加工",
+    "payment_terms": "现金",
+    "created_at": "2025-04-11T07:09:17.207914"
+  },
+  "拉丝外发_金属加工厂": {
+    "type": "supplier",
+    "category": "外发加工",
+    "payment_terms": "30天",
+    "created_at": "2025-04-26T07:09:17.207931"
+  },
+  "抛光外发_精密加工厂": {
+    "type": "supplier",
+    "category": "外发加工",
+    "payment_terms": "30天",
+    "created_at": "2025-07-16T07:09:17.207958"
+  },
+  "挂具供应商_工具厂": {
+    "type": "supplier",
+    "category": "工具设备",
+    "payment_terms": "月结",
+    "created_at": "2025-04-28T07:09:17.207982"
+  }
+}

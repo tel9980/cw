@@ -1,0 +1,117 @@
+
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>往来对账单 - 京东办公用品</title>
+        <style>
+            body { font-family: 'Segoe UI', sans-serif; background: #f5f7fa; color: #333; padding: 20px; }
+            .container { max-width: 900px; margin: 0 auto; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
+            .header { border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: center; }
+            .title h1 { margin: 0; font-size: 24px; color: #2c3e50; }
+            .title p { margin: 5px 0 0; color: #7f8c8d; font-size: 14px; }
+            .meta { text-align: right; color: #95a5a6; font-size: 13px; }
+            
+            .cards { display: flex; gap: 20px; margin-bottom: 40px; }
+            .card { flex: 1; background: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center; border: 1px solid #e9ecef; }
+            .card .val { font-size: 24px; font-weight: bold; margin-bottom: 5px; }
+            .card .lbl { font-size: 13px; color: #7f8c8d; }
+            .c-in { color: #27ae60; }
+            .c-out { color: #c0392b; }
+            .c-net { color: #2980b9; }
+            
+            table { width: 100%; border-collapse: collapse; font-size: 14px; }
+            th { text-align: left; padding: 12px; background: #f8f9fa; color: #7f8c8d; border-bottom: 2px solid #eee; }
+            td { padding: 12px; border-bottom: 1px solid #f1f1f1; }
+            tr:hover { background: #fafafa; }
+            
+            .chart-container { margin: 30px 0; padding: 20px; border: 1px solid #eee; border-radius: 8px; background: #fff; }
+            .chart-title { font-size: 14px; font-weight: bold; color: #34495e; margin-bottom: 15px; }
+            
+            /* Tag styles */
+            .tag { padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+            .tag-in { background: #e8f5e9; color: #2e7d32; }
+            .tag-out { background: #ffebee; color: #c62828; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <div class="title">
+                    <h1>往来对账单</h1>
+                    <p>单位: <strong>京东办公用品</strong></p>
+                </div>
+                <div class="meta">
+                    期间: 2026-01-01至2026-12-31<br>
+                    生成: 2026-02-07 10:13
+                </div>
+            </div>
+            
+            <div class="cards">
+                <div class="card">
+                    <div class="val c-in">+0.00</div>
+                    <div class="lbl">累计收款 (我方收)</div>
+                </div>
+                <div class="card">
+                    <div class="val c-out">-899.00</div>
+                    <div class="lbl">累计付款 (我方付)</div>
+                </div>
+                <div class="card">
+                    <div class="val expense">-899.00</div>
+                    <div class="lbl">净额 (收-付)</div>
+                </div>
+            </div>
+            
+            <div class="chart-container">
+                <div class="chart-title">📈 累计净额走势 (Cumulative Net Balance)</div>
+                <svg width="100%" height="200" viewBox="0 0 800 200" preserveAspectRatio="none">
+                    <defs>
+                        <linearGradient id="grad" x1="0%" y1="0%" x2="0%" y2="100%">
+                            <stop offset="0%" style="stop-color:#3498db;stop-opacity:0.2" />
+                            <stop offset="100%" style="stop-color:#3498db;stop-opacity:0" />
+                        </linearGradient>
+                    </defs>
+                    <!-- Grid lines -->
+                    <line x1="0" y1="100" x2="800" y2="100" stroke="#eee" stroke-width="1" />
+                    <line x1="0" y1="0" x2="800" y2="0" stroke="#eee" stroke-width="1" />
+                    <line x1="0" y1="200" x2="800" y2="200" stroke="#eee" stroke-width="1" />
+                    
+                    <!-- The Line -->
+                    <polyline points="0.0,200.0 800.0,200.0" fill="none" stroke="#3498db" stroke-width="2" />
+                </svg>
+                <div style="text-align: center; font-size: 12px; color: #999; margin-top: 5px;">
+                    (起始: -899 &rarr; 结束: -899)
+                </div>
+            </div>
+            
+            <h3>📄 交易明细</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th width="120">日期</th>
+                        <th width="80">类型</th>
+                        <th width="120">金额</th>
+                        <th>摘要/备注</th>
+                        <th width="80">凭证</th>
+                    </tr>
+                </thead>
+                <tbody>
+    
+        <tr>
+            <td>2026-02-10</td>
+            <td><span class="tag tag-out">费用</span></td>
+            <td style="color: #c0392b; font-family: monospace; font-weight: bold;">-899.00</td>
+            <td>采购A4纸和墨盒 <span style="color:#999; font-size:12px">()</span></td>
+            <td>有票</td>
+        </tr>
+        
+                </tbody>
+            </table>
+            
+            <div style="margin-top: 40px; text-align: center; color: #ccc; font-size: 12px; border-top: 1px solid #eee; padding-top: 20px;">
+                Generated by Feishu Financial Assistant
+            </div>
+        </div>
+    </body>
+    </html>
+    

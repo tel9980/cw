@@ -1,0 +1,265 @@
+{
+  "version": "1.7.0",
+  "project_name": "氧化加工厂智能财务助手完整版",
+  "description": "专为小型氧化加工厂设计的全功能财务管理系统",
+  
+  "pricing_units": {
+    "description": "氧化加工行业计价单位",
+    "units": [
+      {
+        "code": "piece",
+        "name": "件",
+        "description": "按件计价,适用于单个产品"
+      },
+      {
+        "code": "strip",
+        "name": "条",
+        "description": "按条计价,适用于条状产品"
+      },
+      {
+        "code": "item",
+        "name": "只",
+        "description": "按只计价,适用于单个物品"
+      },
+      {
+        "code": "unit",
+        "name": "个",
+        "description": "按个计价,通用计数单位"
+      },
+      {
+        "code": "meter_length",
+        "name": "米长",
+        "description": "按长度米计价,适用于长条产品"
+      },
+      {
+        "code": "meter_weight",
+        "name": "米重",
+        "description": "按重量米计价,适用于按重量计算的产品"
+      },
+      {
+        "code": "square_meter",
+        "name": "平方",
+        "description": "按平方米计价,适用于板材类产品"
+      }
+    ]
+  },
+  
+  "outsourced_processing": {
+    "description": "外发加工工序类型",
+    "process_types": [
+      {
+        "code": "sandblasting",
+        "name": "喷砂",
+        "description": "表面喷砂处理",
+        "typical_suppliers": ["A喷砂厂", "B表面处理"]
+      },
+      {
+        "code": "wire_drawing",
+        "name": "拉丝",
+        "description": "表面拉丝处理",
+        "typical_suppliers": ["C拉丝加工", "D金属表面"]
+      },
+      {
+        "code": "polishing",
+        "name": "抛光",
+        "description": "表面抛光处理",
+        "typical_suppliers": ["E抛光厂", "F精密加工"]
+      }
+    ]
+  },
+  
+  "raw_materials": {
+    "description": "氧化加工原材料类型",
+    "materials": [
+      {
+        "code": "three_acids",
+        "name": "三酸",
+        "category": "化学品",
+        "keywords": ["三酸", "硫酸", "硝酸", "盐酸"],
+        "typical_suppliers": ["化工原料公司", "化学品供应商"]
+      },
+      {
+        "code": "caustic_soda",
+        "name": "片碱",
+        "category": "化学品",
+        "keywords": ["片碱", "氢氧化钠", "烧碱"],
+        "typical_suppliers": ["化工原料公司", "化学品供应商"]
+      },
+      {
+        "code": "sodium_sulfite",
+        "name": "亚钠",
+        "category": "化学品",
+        "keywords": ["亚钠", "亚硫酸钠"],
+        "typical_suppliers": ["化工原料公司", "化学品供应商"]
+      },
+      {
+        "code": "color_powder",
+        "name": "色粉",
+        "category": "染料",
+        "keywords": ["色粉", "染料", "着色剂"],
+        "typical_suppliers": ["染料供应商", "化工原料公司"]
+      },
+      {
+        "code": "degreaser",
+        "name": "除油剂",
+        "category": "清洁剂",
+        "keywords": ["除油剂", "清洗剂", "脱脂剂"],
+        "typical_suppliers": ["化工原料公司", "清洁用品供应商"]
+      },
+      {
+        "code": "fixture",
+        "name": "挂具",
+        "category": "工具",
+        "keywords": ["挂具", "夹具", "治具"],
+        "typical_suppliers": ["五金工具店", "加工设备供应商"]
+      }
+    ]
+  },
+  
+  "bank_accounts": {
+    "description": "银行账户配置",
+    "accounts": [
+      {
+        "code": "g_bank",
+        "name": "G银行",
+        "account_type": "business",
+        "has_invoice": true,
+        "description": "对公账户,有票据",
+        "typical_use": "正规业务往来,需要开票的交易"
+      },
+      {
+        "code": "n_bank",
+        "name": "N银行",
+        "account_type": "cash",
+        "has_invoice": false,
+        "description": "现金账户,无票据",
+        "typical_use": "小额现金交易,日常费用支付"
+      },
+      {
+        "code": "wechat",
+        "name": "微信",
+        "account_type": "cash",
+        "has_invoice": false,
+        "description": "微信支付,现金账户",
+        "typical_use": "小额支付,便捷交易"
+      }
+    ]
+  },
+  
+  "expense_classification": {
+    "description": "氧化加工行业费用分类规则",
+    "income_categories": [
+      {
+        "code": "processing_income",
+        "name": "加工费收入",
+        "keywords": ["加工费", "氧化费", "表面处理费", "订单", "客户付款"],
+        "confidence_threshold": 0.7
+      },
+      {
+        "code": "other_income",
+        "name": "其他收入",
+        "keywords": ["利息", "补贴", "退款", "其他"],
+        "confidence_threshold": 0.5
+      }
+    ],
+    "expense_categories": [
+      {
+        "code": "raw_materials",
+        "name": "原材料",
+        "subcategories": ["三酸", "片碱", "亚钠", "色粉", "除油剂"],
+        "keywords": ["三酸", "片碱", "亚钠", "色粉", "除油剂", "化工", "原料"],
+        "confidence_threshold": 0.8
+      },
+      {
+        "code": "fixtures",
+        "name": "挂具",
+        "keywords": ["挂具", "夹具", "治具", "工装"],
+        "confidence_threshold": 0.8
+      },
+      {
+        "code": "outsourced_processing",
+        "name": "外发加工费",
+        "subcategories": ["喷砂", "拉丝", "抛光"],
+        "keywords": ["喷砂", "拉丝", "抛光", "外发", "委外", "加工费"],
+        "confidence_threshold": 0.8
+      },
+      {
+        "code": "rent",
+        "name": "房租",
+        "keywords": ["房租", "租金", "厂房", "场地"],
+        "confidence_threshold": 0.9
+      },
+      {
+        "code": "utilities",
+        "name": "水电费",
+        "keywords": ["水费", "电费", "水电", "电力", "自来水"],
+        "confidence_threshold": 0.9
+      },
+      {
+        "code": "salary",
+        "name": "工资",
+        "keywords": ["工资", "薪资", "薪酬", "劳务", "社保", "公积金"],
+        "confidence_threshold": 0.9
+      },
+      {
+        "code": "daily_expenses",
+        "name": "日常费用",
+        "keywords": ["办公", "差旅", "通讯", "交通", "餐费", "招待"],
+        "confidence_threshold": 0.7
+      },
+      {
+        "code": "other_expenses",
+        "name": "其他支出",
+        "keywords": ["维修", "保养", "杂费", "其他"],
+        "confidence_threshold": 0.5
+      }
+    ]
+  },
+  
+  "reconciliation_settings": {
+    "description": "对账功能配置",
+    "enable_one_to_many": true,
+    "enable_many_to_one": true,
+    "auto_match_threshold": 0.95,
+    "amount_tolerance": 0.01,
+    "date_tolerance_days": 7,
+    "enable_partial_matching": true
+  },
+  
+  "reminder_settings": {
+    "description": "提醒系统配置",
+    "tax_reminder_days": [7, 3, 1, 0],
+    "receivable_overdue_days": [30, 60, 90],
+    "payable_reminder_days": [3, 1, 0],
+    "cashflow_warning_threshold": 10000,
+    "enable_desktop_notification": true,
+    "enable_wechat_notification": false
+  },
+  
+  "report_settings": {
+    "description": "报表生成配置",
+    "default_date_format": "%Y-%m-%d",
+    "default_currency": "CNY",
+    "enable_charts": true,
+    "chart_style": "default",
+    "excel_template_path": "templates/"
+  },
+  
+  "data_settings": {
+    "description": "数据管理配置",
+    "data_directory": "财务数据/",
+    "backup_directory": "backup/",
+    "backup_retention_days": 30,
+    "auto_backup_enabled": true,
+    "auto_backup_time": "23:00"
+  },
+  
+  "ui_settings": {
+    "description": "用户界面配置",
+    "language": "zh_CN",
+    "max_menu_options": 5,
+    "enable_progressive_disclosure": true,
+    "enable_smart_suggestions": true,
+    "show_help_tips": true
+  }
+}

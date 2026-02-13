@@ -111,9 +111,18 @@ class TransactionRecord:
     @classmethod
     def from_dict(cls, data: dict) -> "TransactionRecord":
         """从字典创建"""
+        # 处理日期字段 - 可能是date或datetime格式
+        date_str = data["date"]
+        if 'T' in date_str:
+            # datetime格式，提取日期部分
+            trans_date = datetime.fromisoformat(date_str).date()
+        else:
+            # date格式
+            trans_date = date.fromisoformat(date_str)
+        
         return cls(
             id=data["id"],
-            date=date.fromisoformat(data["date"]),
+            date=trans_date,
             type=TransactionType(data["type"]),
             amount=Decimal(data["amount"]),
             counterparty_id=data["counterparty_id"],

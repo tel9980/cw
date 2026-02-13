@@ -1,0 +1,183 @@
+
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>银行对账报告 - 2026-02-07</title>
+        <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+        <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; margin: 0; padding: 20px; }
+            .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+            h1 { color: #2c3e50; text-align: center; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+            .summary { display: flex; justify-content: space-around; margin: 30px 0; }
+            .card { text-align: center; padding: 20px; background: #f8f9fa; border-radius: 8px; width: 22%; }
+            .number { font-size: 24px; font-weight: bold; color: #2c3e50; }
+            .chart-row { display: flex; justify-content: space-between; height: 400px; margin: 20px 0; }
+            .chart-box { width: 48%; height: 100%; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px; }
+            th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+            th { background-color: #3498db; color: white; }
+            tr:nth-child(even) { background-color: #f2f2f2; }
+            .badge { padding: 5px 10px; border-radius: 4px; font-size: 12px; }
+            .badge-danger { background-color: #e74c3c; color: white; }
+            .badge-warning { background-color: #f39c12; color: white; }
+            .section-title { margin-top: 40px; color: #2c3e50; border-left: 5px solid #3498db; padding-left: 10px; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🏦 银行对账报告</h1>
+            <p style="text-align: center; color: #7f8c8d;">生成时间: 2026-02-07 09:17:41</p>
+            
+            <div class="summary">
+                <div class="card">
+                    <div class="number" style="color: #3498db;">52</div>
+                    <div>银行流水总数</div>
+                </div>
+                <div class="card">
+                    <div class="number" style="color: #27ae60;">50</div>
+                    <div>✅ 自动匹配成功</div>
+                </div>
+                <div class="card">
+                    <div class="number" style="color: #e74c3c;">2</div>
+                    <div>❌ 银行有而台账无</div>
+                </div>
+                <div class="card">
+                    <div class="number" style="color: #f39c12;">1</div>
+                    <div>❓ 台账有而银行无</div>
+                </div>
+            </div>
+
+            <div class="chart-row">
+                <div id="pie-chart" class="chart-box"></div>
+                <div id="bar-chart" class="chart-box"></div>
+            </div>
+
+            <h3 class="section-title">❌ 异常类型一：银行流水有，但台账未记录 (2条)</h3>
+            <p style="color: #7f8c8d; font-size: 14px;">👉 建议：检查是否漏记，可使用"待补录流水.xlsx"直接导入</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>日期</th>
+                        <th>摘要</th>
+                        <th>金额</th>
+                        <th>对象</th>
+                        <th>建议分类</th>
+                        <th>原因</th>
+                    </tr>
+                </thead>
+                <tbody>
+    
+                    <tr>
+                        <td>2023-10-01</td>
+                        <td>微信支付-餐饮</td>
+                        <td>-120.5</td>
+                        <td>餐饮店</td>
+                        <td>业务招待费</td>
+                        <td><span class="badge badge-danger">飞书无此记录</span></td>
+                    </tr>
+        
+                    <tr>
+                        <td>2023-10-05</td>
+                        <td>银行手续费</td>
+                        <td>-5.0</td>
+                        <td>银行</td>
+                        <td>财务费用</td>
+                        <td><span class="badge badge-danger">飞书无此记录</span></td>
+                    </tr>
+        
+                </tbody>
+            </table>
+
+            <h3 class="section-title">❓ 异常类型二：台账已记，但银行流水无 (1条)</h3>
+            <p style="color: #7f8c8d; font-size: 14px;">👉 建议：检查是否多记、重复记账、日期偏差过大(>2天)或银行选错</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>日期</th>
+                        <th>摘要</th>
+                        <th>金额</th>
+                        <th>往来对象</th>
+                        <th>登记银行</th>
+                        <th>原因</th>
+                    </tr>
+                </thead>
+                <tbody>
+    
+                    <tr>
+                        <td>2023-10-03</td>
+                        <td>重复记账测试</td>
+                        <td>-100.0</td>
+                        <td>某供应商</td>
+                        <td>G银行</td>
+                        <td><span class="badge badge-warning">台账有但流水无</span></td>
+                    </tr>
+        
+                </tbody>
+            </table>
+            
+            <script>
+                var chartDom = document.getElementById('pie-chart');
+                var myChart = echarts.init(chartDom);
+                var option = {
+                    title: { text: '银行流水匹配情况', left: 'center' },
+                    tooltip: { trigger: 'item' },
+                    legend: { orient: 'vertical', left: 'left' },
+                    series: [
+                        {
+                            name: '匹配结果',
+                            type: 'pie',
+                            radius: ['40%', '70%'],
+                            avoidLabelOverlap: false,
+                            itemStyle: {
+                                borderRadius: 10,
+                                borderColor: '#fff',
+                                borderWidth: 2
+                            },
+                            label: {
+                                show: false,
+                                position: 'center'
+                            },
+                            emphasis: {
+                                label: {
+                                    show: true,
+                                    fontSize: 20,
+                                    fontWeight: 'bold'
+                                }
+                            },
+                            labelLine: { show: false },
+                            data: [
+                                { value: 50, name: '匹配成功', itemStyle: { color: '#27ae60' } },
+                                { value: 2, name: '银行未入账', itemStyle: { color: '#e74c3c' } }
+                            ]
+                        }
+                    ]
+                };
+                myChart.setOption(option);
+                
+                var barDom = document.getElementById('bar-chart');
+                var barChart = echarts.init(barDom);
+                var barOption = {
+                    title: { text: '双向差异概览', left: 'center' },
+                    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+                    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+                    xAxis: [ { type: 'category', data: ['银行有台账无', '台账有银行无'], axisTick: { alignWithLabel: true } } ],
+                    yAxis: [ { type: 'value' } ],
+                    series: [
+                        {
+                            name: '笔数',
+                            type: 'bar',
+                            barWidth: '60%',
+                            data: [
+                                { value: 2, itemStyle: { color: '#e74c3c' } },
+                                { value: 1, itemStyle: { color: '#f39c12' } }
+                            ]
+                        }
+                    ]
+                };
+                barChart.setOption(barOption);
+            </script>
+        </div>
+    </body>
+    </html>
+    

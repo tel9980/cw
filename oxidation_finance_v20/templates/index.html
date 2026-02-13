@@ -34,67 +34,29 @@
     <a href="/expense/new" class="btn btn-warning">+ 录入支出</a>
 </div>
 
-<div class="grid-2">
-    <div class="card">
-        <h2>📋 最近订单</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>订单号</th>
-                    <th>客户</th>
-                    <th>金额</th>
-                    <th>状态</th>
-                    <th>日期</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for order in recent_orders %}
-                <tr>
-                    <td>{{ order.order_no }}</td>
-                    <td>{{ order.customer_name }}</td>
-                    <td>{{ "%.2f"|format(order.total_amount) }}</td>
-                    <td><span class="status-badge status-{{ order.status }}">{{ order.status }}</span></td>
-                    <td>{{ order.order_date }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    <div class="card">
-        <h2>💡 使用帮助</h2>
-        <div style="line-height: 1.8; color: #666;">
-            <p><strong>📝 订单管理</strong><br>点击"新建订单"创建新订单，支持7种计价单位</p>
-            <p><strong>💰 收入录入</strong><br>G银行用于有票据交易，N银行用于微信/现金</p>
-            <p><strong>📊 支出管理</strong><br>支持房租、水电、酸碱、工资等12种类型</p>
-            <p><strong>🔄 流程状态</strong><br>待加工 → 加工中 → 已完工 → 已交付 → 已收款</p>
-            <p><strong>📈 报表查看</strong><br>生成月度统计、客户排名等财务报表</p>
-        </div>
-    </div>
-</div>
-
 <div class="card">
-    <h2>🏭 系统信息</h2>
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; text-align: center;">
-        <div>
-            <div style="font-size: 32px; margin-bottom: 8px;">📦</div>
-            <div style="font-weight: 600;">订单管理</div>
-            <div style="color: #999; font-size: 12px;">5种状态追踪</div>
-        </div>
-        <div>
-            <div style="font-size: 32px; margin-bottom: 8px;">💵</div>
-            <div style="font-weight: 600;">收入管理</div>
-            <div style="color: #999; font-size: 12px;">G银行/N银行</div>
-        </div>
-        <div>
-            <div style="font-size: 32px; margin-bottom: 8px;">💸</div>
-            <div style="font-weight: 600;">支出管理</div>
-            <div style="color: #999; font-size: 12px;">12种支出类型</div>
-        </div>
-        <div>
-            <div style="font-size: 32px; margin-bottom: 8px;">👥</div>
-            <div style="font-weight: 600;">客户管理</div>
-            <div style="color: #999; font-size: 12px;">信用额度控制</div>
-        </div>
-    </div>
+    <h2>最近订单</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>订单号</th>
+                <th>客户</th>
+                <th>金额</th>
+                <th>状态</th>
+                <th>日期</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for order in recent_orders %}
+            <tr>
+                <td>{{ order.order_no }}</td>
+                <td>{{ order.customer_name }}</td>
+                <td>{{ "%.2f"|format(order.total_amount) }}</td>
+                <td><span class="status-badge status-{{ order.status }}">{{ order.status }}</span></td>
+                <td>{{ order.order_date }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
 </div>
 {% endblock %}
