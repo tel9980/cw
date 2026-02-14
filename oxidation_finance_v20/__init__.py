@@ -1,9 +1,5 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-氧化加工厂财务管理系统 V2.0
-专为小型氧化加工企业设计的财务管理解决方案
+Oxidation Finance V2.0 core package init.
+This file marks oxidation_finance_v20 as a Python package to enable imports
+across tests and applications.
 """
-
-__version__ = "2.0.0"
-__author__ = "Oxidation Finance Team"

@@ -1,0 +1,16 @@
+# 开发环境依赖包
+-r requirements.txt
+
+# 测试框架
+pytest>=7.4.0
+pytest-cov>=4.1.0
+hypothesis>=6.82.0
+
+# 代码质量工具
+ruff>=0.1.0
+black>=23.0.0
+mypy>=1.5.0
+
+# 可选依赖
+lark-oapi>=3.0.0
+zhipuai>=2.0.0

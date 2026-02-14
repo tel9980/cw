@@ -1,0 +1,836 @@
+{
+  "customers": [
+    {
+      "id": "C001",
+      "name": "优质客户有限公司",
+      "contact": "张经理",
+      "phone": "13800138001",
+      "credit_limit": "50000",
+      "payment_terms": "月结30天"
+    },
+    {
+      "id": "C002",
+      "name": "新兴科技股份有限公司",
+      "contact": "李总",
+      "phone": "13900139002",
+      "credit_limit": "30000",
+      "payment_terms": "月结60天"
+    },
+    {
+      "id": "C003",
+      "name": "长期合作伙伴公司",
+      "contact": "王主任",
+      "phone": "13700137003",
+      "credit_limit": "80000",
+      "payment_terms": "预付款50%"
+    },
+    {
+      "id": "C004",
+      "name": "诚信贸易公司",
+      "contact": "陈经理",
+      "phone": "13600136004",
+      "credit_limit": "20000",
+      "payment_terms": "货到付款"
+    },
+    {
+      "id": "C005",
+      "name": "实力制造企业",
+      "contact": "刘总",
+      "phone": "13500135005",
+      "credit_limit": "100000",
+      "payment_terms": "月结90天"
+    },
+    {
+      "id": "C006",
+      "name": "可靠供应商集团",
+      "contact": "赵主任",
+      "phone": "13400134006",
+      "credit_limit": "60000",
+      "payment_terms": "季度结算"
+    },
+    {
+      "id": "C007",
+      "name": "精密零件厂",
+      "contact": "孙厂长",
+      "phone": "13300133007",
+      "credit_limit": "40000",
+      "payment_terms": "月结45天"
+    },
+    {
+      "id": "C008",
+      "name": "五金制品公司",
+      "contact": "周经理",
+      "phone": "13200132008",
+      "credit_limit": "25000",
+      "payment_terms": "预付款30%"
+    }
+  ],
+  "orders": [
+    {
+      "id": "O0001",
+      "customer_id": "C005",
+      "item_name": "铝合金把手",
+      "quantity": 500.0,
+      "unit_price": "2.5",
+      "pricing_unit": "件",
+      "amount": "1250.0",
+      "outsourcing_processes": [
+        "氧化"
+      ],
+      "status": "已完工",
+      "order_date": "2026-01-10",
+      "delivery_date": "2026-01-19",
+      "created_at": "2026-02-14 10:04:25.745637"
+    },
+    {
+      "id": "O0002",
+      "customer_id": "C001",
+      "item_name": "不锈钢螺丝",
+      "quantity": 1000.0,
+      "unit_price": "0.8",
+      "pricing_unit": "件",
+      "amount": "800.0",
+      "outsourcing_processes": [
+        "氧化"
+      ],
+      "status": "已完工",
+      "order_date": "2026-01-27",
+      "delivery_date": null,
+      "created_at": "2026-02-14 10:04:25.745835"
+    },
+    {
+      "id": "O0003",
+      "customer_id": "C003",
+      "item_name": "铜质连接器",
+      "quantity": 300.0,
+      "unit_price": "5.2",
+      "pricing_unit": "件",
+      "amount": "1560.0",
+      "outsourcing_processes": [
+        "抛光",
+        "氧化"
+      ],
+      "status": "待加工",
+      "order_date": "2026-01-13",
+      "delivery_date": "2026-01-21",
+      "created_at": "2026-02-14 10:04:25.746037"
+    },
+    {
+      "id": "O0004",
+      "customer_id": "C008",
+      "item_name": "铁质支架",
+      "quantity": 200.0,
+      "unit_price": "8.6",
+      "pricing_unit": "件",
+      "amount": "1720.0",
+      "outsourcing_processes": [
+        "喷砂",
+        "氧化"
+      ],
+      "status": "已交付",
+      "order_date": "2026-01-14",
+      "delivery_date": "2026-01-27",
+      "created_at": "2026-02-14 10:04:25.746209"
+    },
+    {
+      "id": "O0005",
+      "customer_id": "C004",
+      "item_name": "铜管",
+      "quantity": 200.0,
+      "unit_price": "15.0",
+      "pricing_unit": "条",
+      "amount": "3000.0",
+      "outsourcing_processes": [
+        "氧化"
+      ],
+      "status": "加工中",
+      "order_date": "2025-12-16",
+      "delivery_date": "2025-12-30",
+      "created_at": "2026-02-14 10:04:25.746377"
+    },
+    {
+      "id": "O0006",
+      "customer_id": "C001",
+      "item_name": "铝型材",
+      "quantity": 150.0,
+      "unit_price": "12.0",
+      "pricing_unit": "条",
+      "amount": "1800.0",
+      "outsourcing_processes": [
+        "拉丝",
+        "氧化"
+      ],
+      "status": "已完工",
+      "order_date": "2025-12-23",
+      "delivery_date": "2026-01-01",
+      "created_at": "2026-02-14 10:04:25.746544"
+    },
+    {
+      "id": "O0007",
+      "customer_id": "C004",
+      "item_name": "不锈钢管",
+      "quantity": 80.0,
+      "unit_price": "25.0",
+      "pricing_unit": "米",
+      "amount": "2000.0",
+      "outsourcing_processes": [
+        "喷砂",
+        "氧化"
+      ],
+      "status": "待加工",
+      "order_date": "2025-12-18",
+      "delivery_date": "2025-12-31",
+      "created_at": "2026-02-14 10:04:25.746703"
+    },
+    {
+      "id": "O0008",
+      "customer_id": "C004",
+      "item_name": "铝型材",
+      "quantity": 120.0,
+      "unit_price": "18.5",
+      "pricing_unit": "米",
+      "amount": "2220.0",
+      "outsourcing_processes": [
+        "拉丝",
+        "氧化"
+      ],
+      "status": "已交付",
+      "order_date": "2026-01-06",
+      "delivery_date": null,
+      "created_at": "2026-02-14 10:04:25.746859"
+    },
+    {
+      "id": "O0009",
+      "customer_id": "C005",
+      "item_name": "铜线",
+      "quantity": 500.0,
+      "unit_price": "3.2",
+      "pricing_unit": "米",
+      "amount": "1600.0",
+      "outsourcing_processes": [
+        "氧化"
+      ],
+      "status": "待加工",
+      "order_date": "2026-02-05",
+      "delivery_date": "2026-02-13",
+      "created_at": "2026-02-14 10:04:25.747021"
+    },
+    {
+      "id": "O0010",
+      "customer_id": "C004",
+      "item_name": "铁质零件",
+      "quantity": 300.0,
+      "unit_price": "8.0",
+      "pricing_unit": "公斤",
+      "amount": "2400.0",
+      "outsourcing_processes": [
+        "氧化"
+      ],
+      "status": "加工中",
+      "order_date": "2026-02-01",
+      "delivery_date": "2026-02-07",
+      "created_at": "2026-02-14 10:04:25.747174"
+    },
+    {
+      "id": "O0011",
+      "customer_id": "C003",
+      "item_name": "铜质配件",
+      "quantity": 150.0,
+      "unit_price": "28.0",
+      "pricing_unit": "公斤",
+      "amount": "4200.0",
+      "outsourcing_processes": [
+        "抛光",
+        "氧化"
+      ],
+      "status": "加工中",
+      "order_date": "2026-01-19",
+      "delivery_date": "2026-02-01",
+      "created_at": "2026-02-14 10:04:25.747328"
+    },
+    {
+      "id": "O0012",
+      "customer_id": "C005",
+      "item_name": "铝合金废料",
+      "quantity": 200.0,
+      "unit_price": "12.5",
+      "pricing_unit": "公斤",
+      "amount": "2500.0",
+      "outsourcing_processes": [
+        "氧化"
+      ],
+      "status": "已完工",
+      "order_date": "2026-01-02",
+      "delivery_date": null,
+      "created_at": "2026-02-14 10:04:25.747530"
+    },
+    {
+      "id": "O0013",
+      "customer_id": "C003",
+      "item_name": "铝板",
+      "quantity": 50.0,
+      "unit_price": "45.0",
+      "pricing_unit": "平方米",
+      "amount": "2250.0",
+      "outsourcing_processes": [
+        "氧化"
+      ],
+      "status": "加工中",
+      "order_date": "2025-12-30",
+      "delivery_date": "2026-01-10",
+      "created_at": "2026-02-14 10:04:25.747699"
+    },
+    {
+      "id": "O0014",
+      "customer_id": "C007",
+      "item_name": "不锈钢板",
+      "quantity": 30.0,
+      "unit_price": "68.0",
+      "pricing_unit": "平方米",
+      "amount": "2040.0",
+      "outsourcing_processes": [
+        "拉丝",
+        "氧化"
+      ],
+      "status": "已交付",
+      "order_date": "2026-01-06",
+      "delivery_date": "2026-01-19",
+      "created_at": "2026-02-14 10:04:25.747848"
+    },
+    {
+      "id": "O0015",
+      "customer_id": "C004",
+      "item_name": "铜板",
+      "quantity": 25.0,
+      "unit_price": "85.0",
+      "pricing_unit": "平方米",
+      "amount": "2125.0",
+      "outsourcing_processes": [
+        "抛光",
+        "氧化"
+      ],
+      "status": "已完工",
+      "order_date": "2026-01-21",
+      "delivery_date": "2026-01-27",
+      "created_at": "2026-02-14 10:04:25.748036"
+    },
+    {
+      "id": "O0016",
+      "customer_id": "C005",
+      "item_name": "精密零件",
+      "quantity": 200.0,
+      "unit_price": "18.0",
+      "pricing_unit": "件",
+      "amount": "3600.0",
+      "outsourcing_processes": [
+        "喷砂",
+        "拉丝",
+        "氧化"
+      ],
+      "status": "已完工",
+      "order_date": "2026-01-29",
+      "delivery_date": "2026-02-10",
+      "created_at": "2026-02-14 10:04:25.748222"
+    },
+    {
+      "id": "O0017",
+      "customer_id": "C007",
+      "item_name": "装饰配件",
+      "quantity": 150.0,
+      "unit_price": "12.8",
+      "pricing_unit": "件",
+      "amount": "1920.0",
+      "outsourcing_processes": [
+        "抛光",
+        "氧化"
+      ],
+      "status": "待加工",
+      "order_date": "2026-01-18",
+      "delivery_date": null,
+      "created_at": "2026-02-14 10:04:25.748369"
+    },
+    {
+      "id": "O0018",
+      "customer_id": "C003",
+      "item_name": "工业零件",
+      "quantity": 80.0,
+      "unit_price": "35.0",
+      "pricing_unit": "公斤",
+      "amount": "2800.0",
+      "outsourcing_processes": [
+        "喷砂",
+        "氧化"
+      ],
+      "status": "已完工",
+      "order_date": "2026-02-13",
+      "delivery_date": "2026-02-19",
+      "created_at": "2026-02-14 10:04:25.748580"
+    },
+    {
+      "id": "O0019",
+      "customer_id": "C007",
+      "item_name": "建筑型材",
+      "quantity": 60.0,
+      "unit_price": "42.0",
+      "pricing_unit": "米",
+      "amount": "2520.0",
+      "outsourcing_processes": [
+        "拉丝",
+        "氧化"
+      ],
+      "status": "加工中",
+      "order_date": "2026-01-21",
+      "delivery_date": "2026-01-31",
+      "created_at": "2026-02-14 10:04:25.748744"
+    },
+    {
+      "id": "O0020",
+      "customer_id": "C005",
+      "item_name": "电子元件",
+      "quantity": 500.0,
+      "unit_price": "3.6",
+      "pricing_unit": "件",
+      "amount": "1800.0",
+      "outsourcing_processes": [
+        "氧化"
+      ],
+      "status": "已完工",
+      "order_date": "2026-02-03",
+      "delivery_date": "2026-02-18",
+      "created_at": "2026-02-14 10:04:25.748926"
+    }
+  ],
+  "income": [
+    {
+      "id": "I0001",
+      "customer_id": "C001",
+      "amount": "2500",
+      "bank_type": "G银行",
+      "description": "铝合金把手加工费",
+      "date": "2026-01-31",
+      "created_at": "2026-02-14 10:04:25.749268"
+    },
+    {
+      "id": "I0002",
+      "customer_id": "C002",
+      "amount": "1800",
+      "bank_type": "G银行",
+      "description": "不锈钢螺丝加工费",
+      "date": "2026-02-11",
+      "created_at": "2026-02-14 10:04:25.749455"
+    },
+    {
+      "id": "I0003",
+      "customer_id": "C003",
+      "amount": "3000",
+      "bank_type": "N银行",
+      "description": "铜管加工费",
+      "date": "2026-01-28",
+      "created_at": "2026-02-14 10:04:25.749859"
+    },
+    {
+      "id": "I0004",
+      "customer_id": "C001",
+      "amount": "1200",
+      "bank_type": "微信",
+      "description": "部分款项",
+      "date": "2026-01-17",
+      "created_at": "2026-02-14 10:04:25.752042"
+    },
+    {
+      "id": "I0005",
+      "customer_id": "C004",
+      "amount": "2800",
+      "bank_type": "G银行",
+      "description": "不锈钢管加工费",
+      "date": "2026-02-11",
+      "created_at": "2026-02-14 10:04:25.752478"
+    },
+    {
+      "id": "I0006",
+      "customer_id": "C002",
+      "amount": "1500",
+      "bank_type": "N银行",
+      "description": "铁质零件加工费",
+      "date": "2026-02-11",
+      "created_at": "2026-02-14 10:04:25.752781"
+    },
+    {
+      "id": "I0007",
+      "customer_id": "C005",
+      "amount": "4200",
+      "bank_type": "G银行",
+      "description": "铝板加工费",
+      "date": "2026-01-28",
+      "created_at": "2026-02-14 10:04:25.756146"
+    },
+    {
+      "id": "I0008",
+      "customer_id": "C006",
+      "amount": "1800",
+      "bank_type": "微信",
+      "description": "铜质配件加工费",
+      "date": "2026-01-21",
+      "created_at": "2026-02-14 10:04:25.758025"
+    },
+    {
+      "id": "I0009",
+      "customer_id": "C007",
+      "amount": "3200",
+      "bank_type": "G银行",
+      "description": "精密零件加工费",
+      "date": "2026-02-03",
+      "created_at": "2026-02-14 10:04:25.758224"
+    },
+    {
+      "id": "I0010",
+      "customer_id": "C008",
+      "amount": "900",
+      "bank_type": "N银行",
+      "description": "装饰配件加工费",
+      "date": "2026-02-01",
+      "created_at": "2026-02-14 10:04:25.758888"
+    },
+    {
+      "id": "I0011",
+      "customer_id": "C003",
+      "amount": "2100",
+      "bank_type": "G银行",
+      "description": "工业零件加工费",
+      "date": "2026-02-13",
+      "created_at": "2026-02-14 10:04:25.759213"
+    },
+    {
+      "id": "I0012",
+      "customer_id": "C004",
+      "amount": "1600",
+      "bank_type": "微信",
+      "description": "建筑型材加工费",
+      "date": "2026-01-25",
+      "created_at": "2026-02-14 10:04:25.759493"
+    },
+    {
+      "id": "I0013",
+      "customer_id": "C005",
+      "amount": "800",
+      "bank_type": "N银行",
+      "description": "部分付款",
+      "date": "2026-01-17",
+      "created_at": "2026-02-14 10:04:25.759686"
+    },
+    {
+      "id": "I0014",
+      "customer_id": "C006",
+      "amount": "2400",
+      "bank_type": "G银行",
+      "description": "电子元件加工费",
+      "date": "2026-02-06",
+      "created_at": "2026-02-14 10:04:25.759862"
+    },
+    {
+      "id": "I0015",
+      "customer_id": "C007",
+      "amount": "1300",
+      "bank_type": "微信",
+      "description": "尾款结算",
+      "date": "2026-01-24",
+      "created_at": "2026-02-14 10:04:25.760143"
+    }
+  ],
+  "expenses": [
+    {
+      "id": "E0001",
+      "type": "房租",
+      "amount": "8000",
+      "description": "厂房租金",
+      "supplier": "",
+      "date": "2026-01-26",
+      "created_at": "2026-02-14 10:04:25.761794"
+    },
+    {
+      "id": "E0002",
+      "type": "水电费",
+      "amount": "2500",
+      "description": "本月水电费",
+      "supplier": "",
+      "date": "2026-02-12",
+      "created_at": "2026-02-14 10:04:25.762399"
+    },
+    {
+      "id": "E0003",
+      "type": "三酸",
+      "amount": "3200",
+      "description": "硫酸、盐酸、硝酸",
+      "supplier": "化工供应商",
+      "date": "2026-01-09",
+      "created_at": "2026-02-14 10:04:25.764998"
+    },
+    {
+      "id": "E0004",
+      "type": "片碱",
+      "amount": "1800",
+      "description": "氢氧化钠",
+      "supplier": "化工供应商",
+      "date": "2026-01-20",
+      "created_at": "2026-02-14 10:04:25.766478"
+    },
+    {
+      "id": "E0005",
+      "type": "亚钠",
+      "amount": "1200",
+      "description": "亚硝酸钠",
+      "supplier": "化工供应商",
+      "date": "2026-01-21",
+      "created_at": "2026-02-14 10:04:25.766718"
+    },
+    {
+      "id": "E0006",
+      "type": "色粉",
+      "amount": "800",
+      "description": "各种颜色粉末",
+      "supplier": "颜料供应商",
+      "date": "2026-02-02",
+      "created_at": "2026-02-14 10:04:25.767121"
+    },
+    {
+      "id": "E0007",
+      "type": "除油剂",
+      "amount": "600",
+      "description": "金属表面处理剂",
+      "supplier": "表面处理供应商",
+      "date": "2026-01-11",
+      "created_at": "2026-02-14 10:04:25.767604"
+    },
+    {
+      "id": "E0008",
+      "type": "挂具",
+      "amount": "1500",
+      "description": "电镀挂具",
+      "supplier": "设备供应商",
+      "date": "2026-01-21",
+      "created_at": "2026-02-14 10:04:25.767859"
+    },
+    {
+      "id": "E0009",
+      "type": "外发加工费",
+      "amount": "2800",
+      "description": "喷砂拉丝费用",
+      "supplier": "外协加工厂",
+      "date": "2026-01-25",
+      "created_at": "2026-02-14 10:04:25.768352"
+    },
+    {
+      "id": "E0010",
+      "type": "日常费用",
+      "amount": "1200",
+      "description": "办公用品等",
+      "supplier": "",
+      "date": "2026-02-03",
+      "created_at": "2026-02-14 10:04:25.769788"
+    },
+    {
+      "id": "E0011",
+      "type": "工资",
+      "amount": "15000",
+      "description": "员工工资",
+      "supplier": "",
+      "date": "2026-01-06",
+      "created_at": "2026-02-14 10:04:25.775560"
+    },
+    {
+      "id": "E0012",
+      "type": "其他",
+      "amount": "500",
+      "description": "杂项支出",
+      "supplier": "",
+      "date": "2026-02-11",
+      "created_at": "2026-02-14 10:04:25.776585"
+    }
+  ],
+  "bank_transactions": [
+    {
+      "id": "BT001",
+      "bank": "G银行",
+      "type": "收入",
+      "amount": "19000.0",
+      "description": "客户加工费收入",
+      "date": "2026-02-14",
+      "has_invoice": true
+    },
+    {
+      "id": "BT002",
+      "bank": "N银行",
+      "type": "收入",
+      "amount": "7260.0",
+      "description": "现金收入",
+      "date": "2026-02-14",
+      "has_invoice": false
+    },
+    {
+      "id": "BT003",
+      "bank": "微信",
+      "type": "收入",
+      "amount": "4840.0",
+      "description": "微信收款",
+      "date": "2026-02-14",
+      "has_invoice": false
+    },
+    {
+      "id": "BT004",
+      "bank": "G银行",
+      "type": "支出",
+      "amount": "27370.0",
+      "description": "日常经营支出",
+      "date": "2026-02-14",
+      "has_invoice": true
+    },
+    {
+      "id": "BT005",
+      "bank": "N银行",
+      "type": "支出",
+      "amount": "11730.0",
+      "description": "现金支出",
+      "date": "2026-02-14",
+      "has_invoice": false
+    }
+  ],
+  "suppliers": [],
+  "outsourcing_records": [
+    {
+      "id": "OS0001",
+      "order_id": "O0003",
+      "process": "抛光",
+      "supplier": "抛光外协加工厂",
+      "cost": "468.0",
+      "status": "已完成",
+      "date": "2026-01-13",
+      "created_at": "2026-02-14 10:04:25.798792"
+    },
+    {
+      "id": "OS0002",
+      "order_id": "O0004",
+      "process": "喷砂",
+      "supplier": "喷砂外协加工厂",
+      "cost": "516.0",
+      "status": "已完成",
+      "date": "2026-01-14",
+      "created_at": "2026-02-14 10:04:25.799180"
+    },
+    {
+      "id": "OS0003",
+      "order_id": "O0006",
+      "process": "拉丝",
+      "supplier": "拉丝外协加工厂",
+      "cost": "540.0",
+      "status": "已完成",
+      "date": "2025-12-23",
+      "created_at": "2026-02-14 10:04:25.800811"
+    },
+    {
+      "id": "OS0004",
+      "order_id": "O0007",
+      "process": "喷砂",
+      "supplier": "喷砂外协加工厂",
+      "cost": "600.0",
+      "status": "已完成",
+      "date": "2025-12-18",
+      "created_at": "2026-02-14 10:04:25.801664"
+    },
+    {
+      "id": "OS0005",
+      "order_id": "O0008",
+      "process": "拉丝",
+      "supplier": "拉丝外协加工厂",
+      "cost": "666.0",
+      "status": "进行中",
+      "date": "2026-01-06",
+      "created_at": "2026-02-14 10:04:25.807884"
+    },
+    {
+      "id": "OS0006",
+      "order_id": "O0011",
+      "process": "抛光",
+      "supplier": "抛光外协加工厂",
+      "cost": "1260.0",
+      "status": "已完成",
+      "date": "2026-01-19",
+      "created_at": "2026-02-14 10:04:25.810235"
+    },
+    {
+      "id": "OS0007",
+      "order_id": "O0014",
+      "process": "拉丝",
+      "supplier": "拉丝外协加工厂",
+      "cost": "612.0",
+      "status": "进行中",
+      "date": "2026-01-06",
+      "created_at": "2026-02-14 10:04:25.810733"
+    },
+    {
+      "id": "OS0008",
+      "order_id": "O0015",
+      "process": "抛光",
+      "supplier": "抛光外协加工厂",
+      "cost": "637.5",
+      "status": "进行中",
+      "date": "2026-01-21",
+      "created_at": "2026-02-14 10:04:25.812206"
+    },
+    {
+      "id": "OS0009",
+      "order_id": "O0016",
+      "process": "喷砂",
+      "supplier": "喷砂外协加工厂",
+      "cost": "540.0",
+      "status": "已完成",
+      "date": "2026-01-29",
+      "created_at": "2026-02-14 10:04:25.812594"
+    },
+    {
+      "id": "OS0010",
+      "order_id": "O0016",
+      "process": "拉丝",
+      "supplier": "拉丝外协加工厂",
+      "cost": "540.0",
+      "status": "已完成",
+      "date": "2026-01-31",
+      "created_at": "2026-02-14 10:04:25.813026"
+    },
+    {
+      "id": "OS0011",
+      "order_id": "O0017",
+      "process": "抛光",
+      "supplier": "抛光外协加工厂",
+      "cost": "576.0",
+      "status": "已完成",
+      "date": "2026-01-18",
+      "created_at": "2026-02-14 10:04:25.814693"
+    },
+    {
+      "id": "OS0012",
+      "order_id": "O0018",
+      "process": "喷砂",
+      "supplier": "喷砂外协加工厂",
+      "cost": "840.0",
+      "status": "已完成",
+      "date": "2026-02-13",
+      "created_at": "2026-02-14 10:04:25.815047"
+    },
+    {
+      "id": "OS0013",
+      "order_id": "O0019",
+      "process": "拉丝",
+      "supplier": "拉丝外协加工厂",
+      "cost": "756.0",
+      "status": "进行中",
+      "date": "2026-01-21",
+      "created_at": "2026-02-14 10:04:25.816113"
+    }
+  ],
+  "settings": {
+    "company_name": "诚信氧化加工厂",
+    "business_type": "五金氧化加工",
+    "created_at": "2026-02-14 10:04:25.744064"
+  },
+  "last_updated": "2026-02-14 10:04:25.744099"
+}

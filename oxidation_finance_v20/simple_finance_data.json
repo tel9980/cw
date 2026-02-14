@@ -1,0 +1,32 @@
+{
+  "customers": [
+    {
+      "id": "C001",
+      "name": "测试客户",
+      "contact": "联系人",
+      "phone": "13800138000",
+      "created_at": "2026-02-14 09:35:57.187857"
+    }
+  ],
+  "orders": [
+    {
+      "id": "O0001",
+      "customer_id": "C001",
+      "item_name": "测试产品",
+      "quantity": 100.0,
+      "unit_price": "5.0",
+      "pricing_unit": "件",
+      "amount": "500.0",
+      "outsourcing_processes": [
+        "氧化"
+      ],
+      "status": "待加工",
+      "created_at": "2026-02-14 09:35:57.189513"
+    }
+  ],
+  "income": [],
+  "expenses": [],
+  "bank_transactions": [],
+  "suppliers": [],
+  "last_updated": "2026-02-14 09:35:57.189529"
+}
