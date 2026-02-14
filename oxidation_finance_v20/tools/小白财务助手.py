@@ -186,6 +186,205 @@ class SimpleFinanceHelper:
             print(f"❌ 财务统计失败: {e}")
             return {"错误": str(e)}
 
+    # ========== 快捷操作功能 ==========
+    
+    def quick_add_income(self):
+        """快速收款 - 减少步骤"""
+        if not self.data['customers']:
+            print("暂无客户，请先添加客户")
+            return None
+        
+        print("\n客户列表:")
+        for i, c in enumerate(self.data['customers'], 1):
+            print(f"  {i}. {c['name']}")
+        
+        try:
+            idx = int(input("\n选择客户编号: ")) - 1
+            if idx < 0 or idx >= len(self.data['customers']):
+                print("无效选择")
+                return None
+            
+            customer = self.data['customers'][idx]
+            amount = input("收款金额: ")
+            if not amount:
+                return None
+            
+            print("\n银行: 1.G银行(有票)  2.N银行(现金)  3.微信")
+            bank_choice = input("选择 [1-3]: ")
+            bank_map = {"1": "G银行", "2": "N银行", "3": "微信"}
+            bank_type = bank_map.get(bank_choice, "G银行")
+            
+            desc = input("备注说明: ")
+            self.add_income(customer['id'], float(amount), bank_type, desc or f"{customer['name']}收款")
+            print(f"\n✅ 收款成功！{customer['name']} - ¥{amount}")
+            return True
+        except:
+            print("输入错误")
+            return None
+    
+    def quick_add_expense(self):
+        """快速付款 - 减少步骤"""
+        expense_types = [
+            ("房租", "厂房/办公租金"), ("水电费", "水费和电费"),
+            ("三酸", "硫酸/盐酸/硝酸"), ("片碱", "氢氧化钠"),
+            ("亚钠", "亚硝酸钠"), ("色粉", "各种颜色粉末"),
+            ("除油剂", "金属表面处理剂"), ("挂具", "电镀/氧化挂具"),
+            ("外发加工费", "喷砂/拉丝/抛光外包"), ("工资", "员工工资"),
+            ("日常费用", "办公/交通/通讯"), ("其他", "其他支出")
+        ]
+        
+        print("\n支出类型:")
+        for i, (etype, desc) in enumerate(expense_types, 1):
+            print(f"  {i}. {etype} - {desc}")
+        
+        try:
+            idx = int(input("\n选择支出类型 [1-12]: ")) - 1
+            if idx < 0 or idx >= len(expense_types):
+                print("无效选择")
+                return None
+            
+            expense_type = expense_types[idx][0]
+            amount = input("付款金额: ")
+            if not amount:
+                return None
+            
+            desc = input("备注说明: ")
+            self.add_expense(expense_type, float(amount), desc or expense_type)
+            print(f"\n✅ 付款记录成功！{expense_type} - ¥{amount}")
+            return True
+        except:
+            print("输入错误")
+            return None
+    
+    def quick_add_order(self):
+        """快速录单 - 简化流程"""
+        if not self.data['customers']:
+            print("暂无客户，请先添加客户")
+            return None
+        
+        print("\n客户列表:")
+        for i, c in enumerate(self.data['customers'], 1):
+            print(f"  {i}. {c['name']}")
+        
+        try:
+            idx = int(input("\n选择客户: ")) - 1
+            if idx < 0 or idx >= len(self.data['customers']):
+                print("无效选择")
+                return None
+            
+            customer = self.data['customers'][idx]
+            item_name = input("产品名称: ")
+            if not item_name:
+                return None
+            
+            quantity = float(input("数量: "))
+            
+            print("\n计价: 1.件  2.条  3.米  4.公斤  5.平方米")
+            unit_choice = input("选择 [1-5]: ")
+            unit_map = {"1": "件", "2": "条", "3": "米", "4": "公斤", "5": "平方米"}
+            unit = unit_map.get(unit_choice, "件")
+            
+            unit_price = input(f"单价(元/{unit}): ")
+            if not unit_price:
+                return None
+            
+            # 工序
+            print("\n工序: 1.喷砂  2.拉丝  3.抛光  4.氧化(必选)")
+            process_input = input("选择(空格分隔): ")
+            processes = ["氧化"]
+            if process_input:
+                process_map = {"1": "喷砂", "2": "拉丝", "3": "抛光"}
+                for p in process_input.split():
+                    if p in process_map and process_map[p] not in processes:
+                        processes.append(process_map[p])
+            
+            order = self.add_order(customer['id'], item_name, quantity, float(unit_price), unit, processes)
+            total = quantity * float(unit_price)
+            print(f"\n✅ 订单添加成功！{item_name} {quantity}{unit}×¥{unit_price}=¥{total}")
+            return True
+        except:
+            print("输入错误")
+            return None
+    
+    # ========== 报表功能 ==========
+    
+    def show_daily_report(self):
+        """今日收支报表"""
+        print("\n" + "="*50)
+        print(f"📊 今日收支报表 - {date.today()}")
+        print("="*50)
+        
+        today = str(date.today())
+        today_income = [i for i in self.data['income'] if i.get('date', '') == today]
+        today_expense = [e for e in self.data['expenses'] if e.get('date', '') == today]
+        
+        total_income = sum(Decimal(i['amount']) for i in today_income)
+        total_expense = sum(Decimal(e['amount']) for e in today_expense)
+        
+        print(f"\n💰 今日收入: ¥{total_income:,.2f}")
+        for inc in today_income:
+            cname = next((c['name'] for c in self.data['customers'] if c['id'] == inc.get('customer_id')), "未知")
+            print(f"   - {cname}: ¥{inc['amount']} ({inc.get('bank_type', '')})")
+        
+        print(f"\n💸 今日支出: ¥{total_expense:,.2f}")
+        for exp in today_expense:
+            print(f"   - {exp['type']}: ¥{exp['amount']}")
+        
+        print(f"\n📈 今日利润: ¥{total_income - total_expense:,.2f}")
+    
+    def show_monthly_report(self):
+        """本月统计报表"""
+        print("\n" + "="*50)
+        this_month = date.today().strftime("%Y-%m")
+        print(f"📊 本月统计报表 - {this_month}")
+        print("="*50)
+        
+        month_income = [i for i in self.data['income'] if i.get('date', '').startswith(this_month)]
+        month_expense = [e for e in self.data['expenses'] if e.get('date', '').startswith(this_month)]
+        
+        total_income = sum(Decimal(i['amount']) for i in month_income)
+        total_expense = sum(Decimal(e['amount']) for e in month_expense)
+        
+        g_income = sum(Decimal(i['amount']) for i in month_income if i.get('bank_type') == 'G银行')
+        n_income = sum(Decimal(i['amount']) for i in month_income if i.get('bank_type') == 'N银行')
+        wx_income = sum(Decimal(i['amount']) for i in month_income if i.get('bank_type') == '微信')
+        
+        print(f"\n💰 本月收入: ¥{total_income:,.2f}")
+        print(f"   G银行(有票): ¥{g_income:,.2f}")
+        print(f"   N银行(现金): ¥{n_income:,.2f}")
+        print(f"   微信: ¥{wx_income:,.2f}")
+        
+        expense_by_type = {}
+        for e in month_expense:
+            t = e['type']
+            expense_by_type[t] = expense_by_type.get(t, 0) + Decimal(e['amount'])
+        
+        print(f"\n💸 本月支出: ¥{total_expense:,.2f}")
+        for etype, amount in sorted(expense_by_type.items(), key=lambda x: -x[1]):
+            print(f"   - {etype}: ¥{amount:,.2f}")
+        
+        profit = total_income - total_expense
+        print(f"\n📈 本月利润: ¥{profit:,.2f}")
+    
+    def show_customer_summary(self):
+        """客户往来汇总"""
+        print("\n" + "="*50)
+        print("👥 客户往来汇总")
+        print("="*50)
+        
+        for customer in self.data['customers']:
+            orders = [o for o in self.data['orders'] if o['customer_id'] == customer['id']]
+            income = [i for i in self.data['income'] if i['customer_id'] == customer['id']]
+            
+            total_orders = sum(Decimal(o['amount']) for o in orders)
+            total_received = sum(Decimal(i['amount']) for i in income)
+            receivable = total_orders - total_received
+            
+            print(f"\n{customer['name']}")
+            print(f"   订单总额: ¥{total_orders:,.2f}")
+            print(f"   已收款项: ¥{total_received:,.2f}")
+            print(f"   应收余额: ¥{receivable:,.2f}")
+
 def create_sample_data(helper):
     """创建氧化加工厂的模拟数据（优先使用完整演示数据）"""
     print("\n🔄 正在生成氧化加工厂模拟数据...")
@@ -306,16 +505,29 @@ def show_main_menu():
         print("✅ 检测到完整系统，功能更强大")
     else:
         print("ℹ️  使用简化版本，满足基本需求")
-    print("\n📋 主要功能:")
-    print("  1. 查看财务概况")
-    print("  2. 添加客户信息")
-    print("  3. 录入加工订单")
-    print("  4. 记录客户收入")
-    print("  5. 登记费用支出")
-    print("  6. 生成学习数据")
-    print("  7. 查看详细数据")
-    print("  8. 启动Web界面")
-    print("  0. 退出系统")
+    print("\n📋 主菜单:")
+    print("  【快捷操作】")
+    print("    1. 快速收款    - 减少步骤，快速记录客户付款")
+    print("    2. 快速付款    - 减少步骤，快速记录支出")
+    print("    3. 快速录单    - 减少步骤，快速录入订单")
+    print()
+    print("  【日常管理】")
+    print("    4. 查看财务概况   - 总收入/支出/利润")
+    print("    5. 添加客户信息   - 新增客户档案")
+    print("    6. 录入加工订单   - 详细订单录入")
+    print("    7. 记录客户收入   - 详细收入记录")
+    print("    8. 登记费用支出   - 详细支出记录")
+    print()
+    print("  【报表查询】")
+    print("    9. 今日收支报表   - 今日收支明细")
+    print("   10. 本月统计报表   - 本月收支汇总")
+    print("   11. 客户往来汇总   - 各客户应收应付")
+    print()
+    print("  【其他】")
+    print("   12. 生成学习数据   - 创建示例数据")
+    print("   13. 查看详细数据   - 所有业务数据")
+    print("   14. 启动Web界面   - 浏览器界面")
+    print("    0. 退出系统")
     print("="*60)
 
 def main():
@@ -328,21 +540,28 @@ def main():
     while True:
         show_main_menu()
         try:
-            choice = input("\n请选择功能 (0-8): ").strip()
+            choice = input("\n请选择功能 (0-14): ").strip()
             
             if choice == "0":
                 print("\n👋 感谢使用，再见！")
                 break
-                
+            
+            # 快捷操作
             elif choice == "1":
+                helper.quick_add_income()
+            elif choice == "2":
+                helper.quick_add_expense()
+            elif choice == "3":
+                helper.quick_add_order()
+            
+            # 日常管理
+            elif choice == "4":
                 summary = helper.get_financial_summary()
                 print("\n📊 财务概况:")
                 print("-" * 40)
                 for key, value in summary.items():
                     print(f"{key:10}: {value}")
-                    
-            elif choice == "2":
-                print("\n📝 添加客户信息")
+            elif choice == "5":
                 name = input("客户名称: ").strip()
                 if not name:
                     print("❌ 客户名称不能为空")
@@ -352,14 +571,84 @@ def main():
                 customer = helper.add_customer(name, contact, phone)
                 print(f"✅ 客户添加成功: {customer['id']} - {name}")
                 
-            elif choice == "3":
+            elif choice == "6":
+                # 详细订单录入
                 print("\n📋 录入加工订单")
                 print("支持计价方式: 件/条/只/个/米/公斤/平方米")
-                
+                            
                 # 显示现有客户
                 if helper.data['customers']:
                     print("\n现有客户:")
                     for customer in helper.data['customers'][-5:]:  # 显示最近5个
+                        print(f"  {customer['id']}: {customer['name']}")
+                            
+                customer_id = input("客户ID: ").strip()
+                if not customer_id:
+                    print("❌ 客户ID不能为空")
+                    continue
+                                
+                item_name = input("物品名称: ").strip()
+                if not item_name:
+                    print("❌ 物品名称不能为空")
+                    continue
+                                
+                try:
+                    quantity = float(input("数量: "))
+                    unit_price = float(input("单价: "))
+                except ValueError:
+                    print("❌ 数量和单价必须是数字")
+                    continue
+                                
+                pricing_unit = input("计价单位(件/条/米/公斤/平方米等): ").strip()
+                if not pricing_unit:
+                    print("❌ 计价单位不能为空")
+                    continue
+                            
+                # 委外工序
+                print("委外工序(喷砂/拉丝/抛光，多个用逗号分隔，可留空):")
+                outsourcing = input("委外工序: ").strip()
+                processes = [p.strip() for p in outsourcing.split(",") if p.strip()] if outsourcing else ["氧化"]
+                            
+                order = helper.add_order(customer_id, item_name, quantity, unit_price, pricing_unit, processes)
+                if order:
+                    print(f"✅ 订单添加成功: {order['id']}")
+                    print(f"   金额: ¥{float(quantity)*float(unit_price):.2f}")
+                    print(f"   工序: {' → '.join(processes)}")
+                        
+            # 报表查询
+            elif choice == "9":
+                helper.show_daily_report()
+            elif choice == "10":
+                helper.show_monthly_report()
+            elif choice == "11":
+                helper.show_customer_summary()
+                        
+            elif choice == "12":
+                print("\n🎯 生成学习用的模拟数据")
+                print("将创建氧化加工厂的完整示例数据:")
+                print("• 6个典型客户")
+                print("• 10个不同计价方式的订单")
+                print("• 6笔收入记录") 
+                print("• 12类支出项目")
+                            
+                confirm = input("\n确认生成？(y/N): ").strip().lower()
+                if confirm == 'y':
+                    if create_sample_data(helper):
+                        print("\n✅ 模拟数据已生成，您可以:")
+                        print("   • 查看财务概况了解整体情况")
+                        print("   • 浏览订单数据学习录入方式")
+                        print("   • 修改删除数据进行练习")
+                else:
+                    print("❌ 取消生成")
+                    
+            elif choice == "7":
+                # 详细收入记录
+                print("\n📋 录入加工订单")
+                print("支持计价方式: 件/条/只/个/米/公斤/平方米")
+                
+                if helper.data['customers']:
+                    print("\n现有客户:")
+                    for customer in helper.data['customers'][-5:]:
                         print(f"  {customer['id']}: {customer['name']}")
                 
                 customer_id = input("客户ID: ").strip()
@@ -384,88 +673,17 @@ def main():
                     print("❌ 计价单位不能为空")
                     continue
                 
-                # 委外工序
                 print("委外工序(喷砂/拉丝/抛光，多个用逗号分隔，可留空):")
                 outsourcing = input("委外工序: ").strip()
-                processes = [p.strip() for p in outsourcing.split(",") if p.strip()] if outsourcing else ["氧化"]
+                processes = [p.strip() for p in outsourcing.split(",")] if outsourcing else ["氧化"]
                 
                 order = helper.add_order(customer_id, item_name, quantity, unit_price, pricing_unit, processes)
                 if order:
                     print(f"✅ 订单添加成功: {order['id']}")
                     print(f"   金额: ¥{float(quantity)*float(unit_price):.2f}")
                     print(f"   工序: {' → '.join(processes)}")
-                
-            elif choice == "4":
-                print("\n💰 记录客户收入")
-                if helper.data['customers']:
-                    print("现有客户:")
-                    for customer in helper.data['customers'][-3:]:
-                        print(f"  {customer['id']}: {customer['name']}")
-                
-                customer_id = input("客户ID: ").strip()
-                if not customer_id:
-                    print("❌ 客户ID不能为空")
-                    continue
-                    
-                try:
-                    amount = float(input("金额: "))
-                except ValueError:
-                    print("❌ 金额必须是数字")
-                    continue
-                    
-                print("银行类型: G银行(有票) / N银行(现金/微信)")
-                bank_type = input("银行类型(G/N): ").strip().upper() or "G"
-                bank_type = "G银行" if bank_type == "G" else "N银行"
-                
-                description = input("说明(可选): ").strip()
-                
-                income = helper.add_income(customer_id, amount, bank_type, description)
-                if income:
-                    print(f"✅ 收入记录成功: {income['id']} - ¥{amount}")
-                    
-            elif choice == "5":
-                print("\n💸 登记费用支出")
-                expense_types = ["房租", "水电费", "三酸", "片碱", "亚钠", "色粉", 
-                               "除油剂", "挂具", "外发加工费", "日常费用", "工资", "其他"]
-                print("支出类型:", " / ".join(expense_types))
-                
-                exp_type = input("支出类型: ").strip()
-                if not exp_type:
-                    print("❌ 支出类型不能为空")
-                    continue
-                    
-                try:
-                    amount = float(input("金额: "))
-                except ValueError:
-                    print("❌ 金额必须是数字")
-                    continue
-                    
-                description = input("说明(可选): ").strip()
-                supplier = input("供应商(可选): ").strip()
-                
-                expense = helper.add_expense(exp_type, amount, description, supplier)
-                if expense:
-                    print(f"✅ 支出记录成功: {expense['id']} - ¥{amount}")
-                    
-            elif choice == "6":
-                print("\n🎯 生成学习用的模拟数据")
-                print("将创建氧化加工厂的完整示例数据:")
-                print("• 6个典型客户")
-                print("• 10个不同计价方式的订单")
-                print("• 6笔收入记录") 
-                print("• 12类支出项目")
-                
-                confirm = input("\n确认生成？(y/N): ").strip().lower()
-                if confirm == 'y':
-                    if create_sample_data(helper):
-                        print("\n✅ 模拟数据已生成，您可以:")
-                        print("   • 查看财务概况了解整体情况")
-                        print("   • 浏览订单数据学习录入方式")
-                        print("   • 修改删除数据进行练习")
-                else:
-                    print("❌ 取消生成")
-                    
-            elif choice == "7":
+
+            elif choice == "13":
                 print("\n📂 详细数据查看")
                 print(f"客户数量: {len(helper.data['customers'])}")
                 print(f"订单数量: {len(helper.data['orders'])}")
@@ -485,7 +703,7 @@ def main():
                         print(f"  {income['id']}: {income['description']} "
                               f"- ¥{float(income['amount'])} ({income['bank_type']})")
                               
-            elif choice == "8":
+            elif choice == "14":
                 print("\n🌐 启动Web界面")
                 if HAS_FULL_SYSTEM:
                     try:
@@ -493,7 +711,6 @@ def main():
                         print("请在浏览器中访问: http://localhost:5000")
                         print("按 Ctrl+C 停止服务")
                         
-                        # 启动Web应用
                         web_app_path = os.path.join(project_root, "web_app.py")
                         if os.path.exists(web_app_path):
                             os.system(f"python \"{web_app_path}\"")
@@ -508,7 +725,7 @@ def main():
                     print("💡 建议使用菜单式操作或生成模拟数据学习")
                     
             else:
-                print("❌ 无效选择，请输入 0-8 之间的数字")
+                print("❌ 无效选择，请输入 0-14 之间的数字")
                 
         except KeyboardInterrupt:
             print("\n\n👋 程序已退出")
