@@ -6,6 +6,20 @@
       "contact": "联系人",
       "phone": "13800138000",
       "created_at": "2026-02-14 09:35:57.187857"
+    },
+    {
+      "id": "C002",
+      "name": "测试客户A有限公司",
+      "contact": "张经理",
+      "phone": "13800138001",
+      "created_at": "2026-02-14 10:42:56.359524"
+    },
+    {
+      "id": "C003",
+      "name": "测试客户B公司",
+      "contact": "李总",
+      "phone": "13900139002",
+      "created_at": "2026-02-14 10:42:56.361076"
     }
   ],
   "orders": [
@@ -22,11 +36,271 @@
       ],
       "status": "待加工",
       "created_at": "2026-02-14 09:35:57.189513"
+    },
+    {
+      "id": "O0002",
+      "customer_id": "C002",
+      "item_name": "铝合金把手",
+      "quantity": 500.0,
+      "unit_price": "2.5",
+      "pricing_unit": "件",
+      "amount": "1250.0",
+      "outsourcing_processes": [
+        "氧化"
+      ],
+      "status": "待加工",
+      "created_at": "2026-02-14 10:42:56.362596"
+    },
+    {
+      "id": "O0003",
+      "customer_id": "C002",
+      "item_name": "铜管",
+      "quantity": 200.0,
+      "unit_price": "15.0",
+      "pricing_unit": "条",
+      "amount": "3000.0",
+      "outsourcing_processes": [
+        "氧化"
+      ],
+      "status": "待加工",
+      "created_at": "2026-02-14 10:42:56.363456"
+    },
+    {
+      "id": "O0004",
+      "customer_id": "C003",
+      "item_name": "不锈钢管",
+      "quantity": 80.0,
+      "unit_price": "25.0",
+      "pricing_unit": "米",
+      "amount": "2000.0",
+      "outsourcing_processes": [
+        "喷砂",
+        "氧化"
+      ],
+      "status": "待加工",
+      "created_at": "2026-02-14 10:42:56.364804"
+    },
+    {
+      "id": "O0005",
+      "customer_id": "C003",
+      "item_name": "铁质零件",
+      "quantity": 300.0,
+      "unit_price": "8.0",
+      "pricing_unit": "公斤",
+      "amount": "2400.0",
+      "outsourcing_processes": [
+        "氧化"
+      ],
+      "status": "待加工",
+      "created_at": "2026-02-14 10:42:56.365956"
+    },
+    {
+      "id": "O0006",
+      "customer_id": "C002",
+      "item_name": "铝板",
+      "quantity": 50.0,
+      "unit_price": "45.0",
+      "pricing_unit": "平方米",
+      "amount": "2250.0",
+      "outsourcing_processes": [
+        "氧化"
+      ],
+      "status": "待加工",
+      "created_at": "2026-02-14 10:42:56.367089"
+    },
+    {
+      "id": "O0007",
+      "customer_id": "C003",
+      "item_name": "精密零件",
+      "quantity": 200.0,
+      "unit_price": "18.0",
+      "pricing_unit": "件",
+      "amount": "3600.0",
+      "outsourcing_processes": [
+        "喷砂",
+        "拉丝",
+        "氧化"
+      ],
+      "status": "待加工",
+      "created_at": "2026-02-14 10:42:56.368245"
     }
   ],
-  "income": [],
-  "expenses": [],
+  "income": [
+    {
+      "id": "I0001",
+      "customer_id": "C002",
+      "amount": "2500",
+      "bank_type": "G银行",
+      "description": "铝合金把手加工费",
+      "date": "2026-02-14",
+      "created_at": "2026-02-14 10:42:56.370014"
+    },
+    {
+      "id": "I0002",
+      "customer_id": "C002",
+      "amount": "1200",
+      "bank_type": "N银行",
+      "description": "部分款项",
+      "date": "2026-02-14",
+      "created_at": "2026-02-14 10:42:56.374504"
+    },
+    {
+      "id": "I0003",
+      "customer_id": "C003",
+      "amount": "800",
+      "bank_type": "微信",
+      "description": "微信收款",
+      "date": "2026-02-14",
+      "created_at": "2026-02-14 10:42:56.377194"
+    },
+    {
+      "id": "I0004",
+      "customer_id": "C002",
+      "amount": "5000",
+      "bank_type": "G银行",
+      "description": "混合收款1",
+      "date": "2026-02-14",
+      "created_at": "2026-02-14 10:42:56.400198"
+    },
+    {
+      "id": "I0005",
+      "customer_id": "C003",
+      "amount": "3000",
+      "bank_type": "N银行",
+      "description": "混合收款2",
+      "date": "2026-02-14",
+      "created_at": "2026-02-14 10:42:56.401676"
+    }
+  ],
+  "expenses": [
+    {
+      "id": "E0001",
+      "type": "房租",
+      "amount": "8000",
+      "description": "厂房租金",
+      "supplier": "",
+      "date": "2026-02-14",
+      "created_at": "2026-02-14 10:42:56.379780"
+    },
+    {
+      "id": "E0002",
+      "type": "水电费",
+      "amount": "2500",
+      "description": "本月水电费",
+      "supplier": "",
+      "date": "2026-02-14",
+      "created_at": "2026-02-14 10:42:56.381089"
+    },
+    {
+      "id": "E0003",
+      "type": "三酸",
+      "amount": "3200",
+      "description": "硫酸、盐酸、硝酸",
+      "supplier": "",
+      "date": "2026-02-14",
+      "created_at": "2026-02-14 10:42:56.381896"
+    },
+    {
+      "id": "E0004",
+      "type": "片碱",
+      "amount": "1800",
+      "description": "氢氧化钠",
+      "supplier": "",
+      "date": "2026-02-14",
+      "created_at": "2026-02-14 10:42:56.382609"
+    },
+    {
+      "id": "E0005",
+      "type": "亚钠",
+      "amount": "1200",
+      "description": "亚硝酸钠",
+      "supplier": "",
+      "date": "2026-02-14",
+      "created_at": "2026-02-14 10:42:56.383316"
+    },
+    {
+      "id": "E0006",
+      "type": "色粉",
+      "amount": "800",
+      "description": "各种颜色粉末",
+      "supplier": "",
+      "date": "2026-02-14",
+      "created_at": "2026-02-14 10:42:56.384017"
+    },
+    {
+      "id": "E0007",
+      "type": "除油剂",
+      "amount": "600",
+      "description": "金属表面处理剂",
+      "supplier": "",
+      "date": "2026-02-14",
+      "created_at": "2026-02-14 10:42:56.384737"
+    },
+    {
+      "id": "E0008",
+      "type": "挂具",
+      "amount": "1500",
+      "description": "电镀挂具",
+      "supplier": "",
+      "date": "2026-02-14",
+      "created_at": "2026-02-14 10:42:56.385572"
+    },
+    {
+      "id": "E0009",
+      "type": "外发加工费",
+      "amount": "2800",
+      "description": "喷砂拉丝外发费用",
+      "supplier": "",
+      "date": "2026-02-14",
+      "created_at": "2026-02-14 10:42:56.386553"
+    },
+    {
+      "id": "E0010",
+      "type": "日常费用",
+      "amount": "1200",
+      "description": "办公用品等",
+      "supplier": "",
+      "date": "2026-02-14",
+      "created_at": "2026-02-14 10:42:56.387461"
+    },
+    {
+      "id": "E0011",
+      "type": "工资",
+      "amount": "15000",
+      "description": "员工工资",
+      "supplier": "",
+      "date": "2026-02-14",
+      "created_at": "2026-02-14 10:42:56.391791"
+    },
+    {
+      "id": "E0012",
+      "type": "其他",
+      "amount": "500",
+      "description": "杂项支出",
+      "supplier": "",
+      "date": "2026-02-14",
+      "created_at": "2026-02-14 10:42:56.393582"
+    },
+    {
+      "id": "E0013",
+      "type": "房租",
+      "amount": "8000",
+      "description": "厂房租金2",
+      "supplier": "",
+      "date": "2026-02-14",
+      "created_at": "2026-02-14 10:42:56.403259"
+    },
+    {
+      "id": "E0014",
+      "type": "工资",
+      "amount": "15000",
+      "description": "员工工资2",
+      "supplier": "",
+      "date": "2026-02-14",
+      "created_at": "2026-02-14 10:42:56.406596"
+    }
+  ],
   "bank_transactions": [],
   "suppliers": [],
-  "last_updated": "2026-02-14 09:35:57.189529"
+  "last_updated": "2026-02-14 10:42:56.406608"
 }
