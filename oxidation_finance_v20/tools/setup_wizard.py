@@ -81,7 +81,13 @@ class SetupWizard:
         if self.db_file.exists():
             checks.append(("数据库文件", True, str(self.db_file)))
         else:
-            checks.append(("数据库文件", False, "将自动创建"))
+            # 自动创建最小数据库以继续安装流程
+            try:
+                self.create_minimal_database()
+                checks.append(("数据库文件", True, str(self.db_file)))
+                print("  [OK] 数据库文件已自动创建")
+            except Exception as e:
+                checks.append(("数据库文件", False, f"创建失败: {e}"))
 
         # 显示检查结果
         all_passed = True
@@ -120,19 +126,31 @@ class SetupWizard:
         print("  [按回车使用默认值]")
         print()
 
-        company_name = input(f"  公司名称 [{defaults['company_name']}]: ").strip()
+        try:
+            company_name = input(f"  公司名称 [{defaults['company_name']}]: ").strip()
+        except EOFError:
+            company_name = defaults["company_name"]
         if not company_name:
             company_name = defaults["company_name"]
 
-        contact = input(f"  联系人 [{defaults['contact_person']}]: ").strip()
+        try:
+            contact = input(f"  联系人 [{defaults['contact_person']}]: ").strip()
+        except EOFError:
+            contact = defaults["contact_person"]
         if not contact:
             contact = defaults["contact_person"]
 
-        phone = input(f"  联系电话 [{defaults['phone']}]: ").strip()
+        try:
+            phone = input(f"  联系电话 [{defaults['phone']}]: ").strip()
+        except EOFError:
+            phone = defaults["phone"]
         if not phone:
             phone = defaults["phone"]
 
-        address = input(f"  公司地址 [{defaults['address']}]: ").strip()
+        try:
+            address = input(f"  公司地址 [{defaults['address']}]: ").strip()
+        except EOFError:
+            address = defaults["address"]
         if not address:
             address = defaults["address"]
 
@@ -198,7 +216,10 @@ class SetupWizard:
 
             if total > 0:
                 print(f"\n  发现现有数据 ({total}条)")
-                choice = input("  是否重新生成示例数据? (y/N): ").strip().lower()
+                try:
+                    choice = input("  是否重新生成示例数据? (y/N): ").strip().lower()
+                except EOFError:
+                    choice = "n"
                 if choice == "y":
                     self.db_file.unlink()
                     print("  已删除旧数据")
@@ -218,8 +239,8 @@ class SetupWizard:
             print("\n  [OK] 示例数据生成完成")
             return True
         except Exception as e:
-            print(f"\n  [ERROR] 生成失败: {e}")
-            print("  尝试直接创建数据库...")
+            print(f"\n  [WARN] 示例数据生成失败: {e}")
+            print("  正在创建最小数据库...")
 
             # 直接创建数据库
             self.create_minimal_database()
@@ -231,7 +252,7 @@ class SetupWizard:
         conn.executescript("""
             CREATE TABLE customers (
                 id TEXT PRIMARY KEY, name TEXT, contact TEXT, phone TEXT,
-                address TEXT, credit_limit REAL, notes TEXT, created_at TEXT
+                address TEXT, credit_limit TEXT, notes TEXT, created_at TEXT
             );
             CREATE TABLE suppliers (
                 id TEXT PRIMARY KEY, name TEXT, contact TEXT, phone TEXT,
@@ -239,27 +260,27 @@ class SetupWizard:
             );
             CREATE TABLE processing_orders (
                 id TEXT PRIMARY KEY, order_no TEXT, customer_id TEXT, customer_name TEXT,
-                item_description TEXT, quantity REAL, pricing_unit TEXT, unit_price REAL,
-                processes TEXT, outsourced_processes TEXT, total_amount REAL,
-                outsourcing_cost REAL, status TEXT, order_date TEXT, completion_date TEXT,
-                delivery_date TEXT, received_amount REAL, notes TEXT, created_at TEXT, updated_at TEXT
+                item_description TEXT, quantity TEXT, pricing_unit TEXT, unit_price TEXT,
+                processes TEXT, outsourced_processes TEXT, total_amount TEXT,
+                outsourcing_cost TEXT, status TEXT, order_date TEXT, completion_date TEXT,
+                delivery_date TEXT, received_amount TEXT, notes TEXT, created_at TEXT, updated_at TEXT
             );
             CREATE TABLE incomes (
-                id TEXT PRIMARY KEY, customer_id TEXT, customer_name TEXT, amount REAL,
+                id TEXT PRIMARY KEY, customer_id TEXT, customer_name TEXT, amount TEXT,
                 bank_type TEXT, has_invoice INTEGER, related_orders TEXT, allocation TEXT,
                 income_date TEXT, notes TEXT, created_at TEXT
             );
             CREATE TABLE expenses (
                 id TEXT PRIMARY KEY, expense_type TEXT, supplier_id TEXT, supplier_name TEXT,
-                amount REAL, bank_type TEXT, has_invoice INTEGER, related_order_id TEXT,
+                amount TEXT, bank_type TEXT, has_invoice INTEGER, related_order_id TEXT,
                 expense_date TEXT, description TEXT, notes TEXT, created_at TEXT
             );
             CREATE TABLE bank_accounts (
                 id TEXT PRIMARY KEY, bank_type TEXT, account_name TEXT,
-                account_number TEXT, balance REAL, notes TEXT
+                account_number TEXT, balance TEXT, notes TEXT
             );
             CREATE TABLE bank_transactions (
-                id TEXT PRIMARY KEY, bank_type TEXT, transaction_date TEXT, amount REAL,
+                id TEXT PRIMARY KEY, bank_type TEXT, transaction_date TEXT, amount TEXT,
                 counterparty TEXT, description TEXT, matched INTEGER,
                 matched_income_id TEXT, matched_expense_id TEXT, notes TEXT, created_at TEXT
             );
@@ -275,8 +296,20 @@ class SetupWizard:
         print("=" * 60)
 
         if not self.db_file.exists():
-            print("  [FAIL] 数据库文件不存在")
-            return False
+            print("  [WARN] 数据库文件不存在，正在自动创建...")
+            
+            # 尝试创建最小数据库
+            try:
+                self.create_minimal_database()
+                print("  [OK] 最小数据库已创建")
+            except Exception as e:
+                print(f"  [FAIL] 创建数据库失败: {e}")
+                return False
+            
+            # 验证创建成功
+            if not self.db_file.exists():
+                print("  [FAIL] 数据库文件创建失败")
+                return False
 
         try:
             conn = sqlite3.connect(str(self.db_file))

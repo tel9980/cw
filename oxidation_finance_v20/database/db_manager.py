@@ -6,6 +6,8 @@
 
 import sqlite3
 import json
+import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -38,6 +40,36 @@ class DatabaseManager:
         if self.conn:
             self.conn.close()
             self.conn = None
+
+    # =============== 审计日志（Audit） ===============
+    def log_audit(self, operation_type: str, entity_type: str, entity_id: str, entity_name: str,
+                  old_value: str | None, new_value: str | None, description: str = "") -> None:
+        """简单审计日志记录到 audit_logs 表，失败时不抛错"""
+        try:
+            if not self.conn:
+                return
+            cur = self.conn.cursor()
+            cur.execute(
+                """INSERT INTO audit_logs (id, operation_type, entity_type, entity_id, entity_name, operator, operation_time, operation_description, old_value, new_value, ip_address, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    str(uuid.uuid4()),
+                    operation_type,
+                    entity_type,
+                    entity_id,
+                    entity_name,
+                    "system",
+                    datetime.utcnow().isoformat(),
+                    description,
+                    old_value,
+                    new_value,
+                    "",
+                    "",
+                ),
+            )
+            self.conn.commit()
+        except Exception:
+            # 审计日志失败不影响主业务
+            pass
     
     def __enter__(self):
         """上下文管理器入口"""
@@ -51,18 +83,31 @@ class DatabaseManager:
     # ==================== 客户管理 ====================
     
     def save_customer(self, customer: Customer) -> str:
-        """保存客户信息"""
+        """保存客户信息，并记录审计日志（CREATE/UPDATE）"""
         cursor = self.conn.cursor()
+        # 判断创建还是更新
+        exists = False
+        try:
+            row = cursor.execute("SELECT id FROM customers WHERE id = ?", (customer.id,)).fetchone()
+            exists = row is not None
+        except Exception:
+            exists = False
         cursor.execute("""
             INSERT OR REPLACE INTO customers 
             (id, name, contact, phone, address, credit_limit, notes, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             customer.id, customer.name, customer.contact, customer.phone,
-            customer.address, float(customer.credit_limit), customer.notes,
+            customer.address, str(customer.credit_limit), customer.notes,
             customer.created_at.isoformat()
         ))
         self.conn.commit()
+        # 审计日志：创建/更新
+        audit_type = "UPDATE" if exists else "CREATE"
+        try:
+            self.log_audit(audit_type, "CUSTOMER", customer.id, customer.name, None, str(customer))
+        except Exception:
+            pass
         return customer.id
     
     def get_customer(self, customer_id: str) -> Optional[Customer]:
@@ -109,6 +154,13 @@ class DatabaseManager:
     def save_supplier(self, supplier: Supplier) -> str:
         """保存供应商信息"""
         cursor = self.conn.cursor()
+        # 判断创建还是更新
+        exists = False
+        try:
+            row = cursor.execute("SELECT id FROM suppliers WHERE id = ?", (supplier.id,)).fetchone()
+            exists = row is not None
+        except Exception:
+            exists = False
         cursor.execute("""
             INSERT OR REPLACE INTO suppliers 
             (id, name, contact, phone, address, business_type, notes, created_at)
@@ -119,6 +171,11 @@ class DatabaseManager:
             supplier.created_at.isoformat()
         ))
         self.conn.commit()
+        audit_type = "UPDATE" if exists else "CREATE"
+        try:
+            self.log_audit(audit_type, "SUPPLIER", supplier.id, supplier.name, None, str(supplier))
+        except Exception:
+            pass
         return supplier.id
     
     def get_supplier(self, supplier_id: str) -> Optional[Supplier]:
@@ -164,6 +221,13 @@ class DatabaseManager:
     
     def save_order(self, order: ProcessingOrder) -> str:
         """保存加工订单"""
+        # determine create vs update based on existence
+        exists = False
+        try:
+            existing = self.get_order(order.id)
+            exists = existing is not None
+        except Exception:
+            exists = False
         cursor = self.conn.cursor()
         cursor.execute("""
             INSERT OR REPLACE INTO processing_orders 
@@ -174,18 +238,23 @@ class DatabaseManager:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             order.id, order.order_no, order.customer_id, order.customer_name,
-            order.item_description, float(order.quantity), order.pricing_unit.value,
-            float(order.unit_price), 
+            order.item_description, str(order.quantity), order.pricing_unit.value,
+            str(order.unit_price), 
             json.dumps([p.value if hasattr(p, 'value') else p for p in order.processes]),
-            json.dumps(order.outsourced_processes), float(order.total_amount),
-            float(order.outsourcing_cost), order.status.value,
+            json.dumps(order.outsourced_processes), str(order.total_amount),
+            str(order.outsourcing_cost), order.status.value,
             order.order_date.isoformat(),
             order.completion_date.isoformat() if order.completion_date else None,
             order.delivery_date.isoformat() if order.delivery_date else None,
-            float(order.received_amount), order.notes,
+            str(order.received_amount), order.notes,
             order.created_at.isoformat(), order.updated_at.isoformat()
         ))
         self.conn.commit()
+        audit_type = "UPDATE" if exists else "CREATE"
+        try:
+            self.log_audit(audit_type, "ORDER", order.id, order.order_no, None, str(order))
+        except Exception:
+            pass
         return order.id
     
     def get_order(self, order_id: str) -> Optional[ProcessingOrder]:
@@ -253,6 +322,14 @@ class DatabaseManager:
     def save_income(self, income: Income) -> str:
         """保存收入记录"""
         cursor = self.conn.cursor()
+        # 重复收入检查：基于 id 判断是否已经存在
+        exists = False
+        try:
+            row = cursor.execute("SELECT id FROM incomes WHERE id = ?", (income.id,)).fetchone()
+            exists = row is not None
+        except Exception:
+            exists = False
+        # 保存
         cursor.execute("""
             INSERT OR REPLACE INTO incomes 
             (id, customer_id, customer_name, amount, bank_type, has_invoice,
@@ -260,12 +337,17 @@ class DatabaseManager:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             income.id, income.customer_id, income.customer_name,
-            float(income.amount), income.bank_type.value, int(income.has_invoice),
-            json.dumps(income.related_orders), json.dumps({k: float(v) for k, v in income.allocation.items()}),
+            str(income.amount), income.bank_type.value, int(income.has_invoice),
+            json.dumps(income.related_orders), json.dumps({k: str(v) for k, v in income.allocation.items()}),
             income.income_date.isoformat(), income.notes,
             income.created_at.isoformat()
         ))
         self.conn.commit()
+        audit_type = "UPDATE" if exists else "CREATE"
+        try:
+            self.log_audit(audit_type, "INCOME", income.id, income.customer_name, None, str(income))
+        except Exception:
+            pass
         return income.id
     
     def get_income(self, income_id: str) -> Optional[Income]:
@@ -315,6 +397,23 @@ class DatabaseManager:
     def save_expense(self, expense: Expense) -> str:
         """保存支出记录"""
         cursor = self.conn.cursor()
+        # detect existence for accurate audit type
+        exists = False
+        try:
+            row = cursor.execute("SELECT id FROM expenses WHERE id = ?", (expense.id,)).fetchone()
+            exists = row is not None
+        except Exception:
+            exists = False
+        # 1) 重复性保护：若已存在相同的支出记录，返回已有记录的 id，避免重复记账
+        try:
+            existing = cursor.execute(
+                "SELECT id FROM expenses WHERE expense_type = ? AND supplier_id = ? AND expense_date = ? AND amount = ?",
+                (expense.expense_type.value, expense.supplier_id, expense.expense_date.isoformat(), str(expense.amount)),
+            ).fetchone()
+            if existing:
+                return existing[0]
+        except Exception:
+            pass
         cursor.execute("""
             INSERT OR REPLACE INTO expenses 
             (id, expense_type, supplier_id, supplier_name, amount, bank_type,
@@ -322,12 +421,17 @@ class DatabaseManager:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             expense.id, expense.expense_type.value, expense.supplier_id,
-            expense.supplier_name, float(expense.amount), expense.bank_type.value,
+            expense.supplier_name, str(expense.amount), expense.bank_type.value,
             int(expense.has_invoice), expense.related_order_id,
             expense.expense_date.isoformat(), expense.description,
             expense.notes, expense.created_at.isoformat()
         ))
         self.conn.commit()
+        audit_type = "UPDATE" if exists else "CREATE"
+        try:
+            self.log_audit(audit_type, "EXPENSE", expense.id, expense.supplier_name or "", None, str(expense))
+        except Exception:
+            pass
         return expense.id
     
     def get_expense(self, expense_id: str) -> Optional[Expense]:
@@ -387,15 +491,27 @@ class DatabaseManager:
     def save_bank_account(self, account: BankAccount) -> str:
         """保存银行账户"""
         cursor = self.conn.cursor()
+        # existence check for accurate audit type
+        exists = False
+        try:
+            row = cursor.execute("SELECT id FROM bank_accounts WHERE id = ?", (account.id,)).fetchone()
+            exists = row is not None
+        except Exception:
+            exists = False
         cursor.execute("""
             INSERT OR REPLACE INTO bank_accounts 
             (id, bank_type, account_name, account_number, balance, notes)
             VALUES (?, ?, ?, ?, ?, ?)
         """, (
             account.id, account.bank_type.value, account.account_name,
-            account.account_number, float(account.balance), account.notes
+            account.account_number, str(account.balance), account.notes
         ))
         self.conn.commit()
+        audit_type = "UPDATE" if exists else "CREATE"
+        try:
+            self.log_audit(audit_type, "BANK_ACCOUNT", account.id, account.account_name, None, str(account))
+        except Exception:
+            pass
         return account.id
     
     def get_bank_account(self, account_id: str) -> Optional[BankAccount]:
@@ -436,8 +552,18 @@ class DatabaseManager:
     # ==================== 银行交易管理 ====================
     
     def save_bank_transaction(self, transaction: BankTransaction) -> str:
-        """保存银行交易记录"""
+        """保存银行交易记录，含简单的重复记录防护"""
         cursor = self.conn.cursor()
+        # 重复性检查：基于关键字段判断是否已存在
+        exists = False
+        try:
+            row = cursor.execute(
+                "SELECT id FROM bank_transactions WHERE bank_type = ? AND transaction_date = ? AND amount = ? AND counterparty = ? AND description = ?",
+                (transaction.bank_type.value, transaction.transaction_date.isoformat(), str(transaction.amount), transaction.counterparty, transaction.description),
+            ).fetchone()
+            exists = row is not None
+        except Exception:
+            exists = False
         cursor.execute("""
             INSERT OR REPLACE INTO bank_transactions 
             (id, bank_type, transaction_date, amount, counterparty, description,
@@ -445,12 +571,13 @@ class DatabaseManager:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             transaction.id, transaction.bank_type.value,
-            transaction.transaction_date.isoformat(), float(transaction.amount),
+            transaction.transaction_date.isoformat(), str(transaction.amount),
             transaction.counterparty, transaction.description, int(transaction.matched),
-            transaction.matched_income_id, transaction.matched_expense_id,
+            transaction.matched_income_id, transaction.matched_expense_id, 
             transaction.notes, transaction.created_at.isoformat()
         ))
         self.conn.commit()
+        self.log_audit("UPDATE", "BANK_TRANSACTION", transaction.id, transaction.counterparty, None, str(transaction))
         return transaction.id
     
     def get_bank_transaction(self, transaction_id: str) -> Optional[BankTransaction]:
@@ -499,6 +626,16 @@ class DatabaseManager:
     def save_outsourced_processing(self, processing: OutsourcedProcessing) -> str:
         """保存委外加工记录"""
         cursor = self.conn.cursor()
+        # 重复性检查：基于关键字段判定是否已存在
+        try:
+            existing = cursor.execute(
+                "SELECT id FROM outsourced_processing WHERE order_id = ? AND supplier_id = ? AND process_type = ? AND process_date = ?",
+                (processing.order_id, processing.supplier_id, processing.process_type.value if hasattr(processing.process_type, 'value') else processing.process_type, processing.process_date.isoformat()),
+            ).fetchone()
+            if existing:
+                return existing[0]
+        except Exception:
+            existing = None
         cursor.execute("""
             INSERT OR REPLACE INTO outsourced_processing 
             (id, order_id, supplier_id, supplier_name, process_type, process_description,
@@ -508,11 +645,16 @@ class DatabaseManager:
             processing.id, processing.order_id, processing.supplier_id, processing.supplier_name,
             processing.process_type.value if hasattr(processing.process_type, 'value') else processing.process_type,
             processing.process_description,
-            float(processing.quantity), float(processing.unit_price), float(processing.total_cost),
-            float(processing.paid_amount), processing.process_date.isoformat(),
+            str(processing.quantity), str(processing.unit_price), str(processing.total_cost),
+            str(processing.paid_amount), processing.process_date.isoformat(),
             processing.notes, processing.created_at.isoformat(), processing.updated_at.isoformat()
         ))
         self.conn.commit()
+        audit_type = "UPDATE" if existing else "CREATE"
+        try:
+            self.log_audit(audit_type, "OUTSOURCED_PROCESSING", processing.id, processing.supplier_name, None, str(processing))
+        except Exception:
+            pass
         return processing.id
     
     def get_outsourced_processing(self, processing_id: str) -> Optional[OutsourcedProcessing]:
@@ -693,9 +835,9 @@ class DatabaseManager:
             period.end_date.isoformat(),
             period.status,
             1 if period.is_closed else 0,
-            float(period.total_income),
-            float(period.total_expense),
-            float(period.net_profit),
+            str(period.total_income),
+            str(period.total_expense),
+            str(period.net_profit),
             period.closed_by or "",
             period.closed_at.isoformat() if period.closed_at else None,
             period.notes,
