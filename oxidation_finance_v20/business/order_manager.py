@@ -85,7 +85,19 @@ class OrderManager:
         
         # 保存到数据库
         self.db.save_order(order)
-        
+        # 审计日志：订单创建
+        try:
+            self.db.log_audit(
+                operation_type="CREATE",
+                entity_type="ORDER",
+                entity_id=order.id,
+                entity_name=order.order_no,
+                old_value=None,
+                new_value=str(order),
+                description="Order created"
+            )
+        except Exception:
+            pass
         return order
     
     def get_order(self, order_id: str) -> Optional[ProcessingOrder]:
@@ -123,8 +135,22 @@ class OrderManager:
         Returns:
             更新后的订单对象
         """
+        old_snapshot = str(order)
         order.updated_at = datetime.now()
         self.db.save_order(order)
+        # 审计日志：订单更新
+        try:
+            self.db.log_audit(
+                operation_type="UPDATE",
+                entity_type="ORDER",
+                entity_id=order.id,
+                entity_name=order.order_no,
+                old_value=old_snapshot,
+                new_value=str(order),
+                description="Order updated"
+            )
+        except Exception:
+            pass
         return order
     
     def update_order_status(
@@ -148,7 +174,7 @@ class OrderManager:
         order = self.get_order(order_id)
         if not order:
             return None
-        
+        old_status = order.status
         order.status = new_status
         
         # 根据状态更新相关日期
@@ -157,7 +183,21 @@ class OrderManager:
         elif new_status == OrderStatus.DELIVERED and delivery_date:
             order.delivery_date = delivery_date
         
-        return self.update_order(order)
+        updated = self.update_order(order)
+        # 审计日志：订单状态变更
+        try:
+            self.db.log_audit(
+                operation_type="UPDATE",
+                entity_type="ORDER",
+                entity_id=order.id,
+                entity_name=order.order_no,
+                old_value=str(old_status.value) if old_status else None,
+                new_value=str(new_status.value),
+                description="Order status updated"
+            )
+        except Exception:
+            pass
+        return updated
     
     def update_outsourcing_cost(
         self,
@@ -229,10 +269,33 @@ class OrderManager:
         if order.received_amount > 0:
             raise ValueError("已收款的订单不能删除")
         
-        # 从数据库删除
-        cursor = self.db.conn.cursor()
-        cursor.execute("DELETE FROM processing_orders WHERE id = ?", (order_id,))
-        self.db.conn.commit()
+        # 从数据库删除（事务保护）
+        conn = self.db.conn
+        if conn:
+            try:
+                conn.execute("BEGIN")
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM processing_orders WHERE id = ?", (order_id,))
+                conn.commit()
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                raise e
+        # 审计日志：订单删除
+        try:
+            self.db.log_audit(
+                operation_type="DELETE",
+                entity_type="ORDER",
+                entity_id=order_id,
+                entity_name=order.order_no,
+                old_value=None,
+                new_value=None,
+                description="Order deleted"
+            )
+        except Exception:
+            pass
         
         return True
     

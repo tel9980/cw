@@ -5,6 +5,9 @@
 """
 
 from decimal import Decimal
+import sqlite3
+import uuid
+from datetime import datetime
 from datetime import date
 from typing import Any, List, Dict, Optional, Tuple
 from ..models.business_models import (
@@ -66,6 +69,19 @@ class FinanceManager:
         )
 
         self.db.save_income(income)
+        # 审计日志：收入创建
+        try:
+            self.db.log_audit(
+                operation_type="CREATE",
+                entity_type="INCOME",
+                entity_id=income.id,
+                entity_name=income.customer_name,
+                old_value=None,
+                new_value=str(income),
+                description="Income created"
+            )
+        except Exception:
+            pass
         return income
 
     def allocate_payment_to_orders(
@@ -91,34 +107,89 @@ class FinanceManager:
         if total_allocated > income.amount:
             return False, f"分配金额总和 {total_allocated} 超过付款金额 {income.amount}"
 
-        # 验证每个订单并检查未付余额
-        for order_id, allocated_amount in allocations.items():
-            order = self.db.get_order(order_id)
-            if not order:
-                return False, f"订单不存在: {order_id}"
+        # 开始事务，确保原子性
+        conn = getattr(self.db, 'conn', None)
+        if conn is not None:
+            try:
+                conn.execute("BEGIN")
 
-            # 检查订单的未付余额
-            unpaid_amount = order.total_amount - order.received_amount
-            if allocated_amount > unpaid_amount:
-                return (
-                    False,
-                    f"订单 {order.order_no} 的分配金额 {allocated_amount} 超过未付余额 {unpaid_amount}",
+                # 验证每个订单并检查未付余额
+                for order_id, allocated_amount in allocations.items():
+                    order = self.db.get_order(order_id)
+                    if not order:
+                        conn.rollback()
+                        return False, f"订单不存在: {order_id}"
+                    unpaid_amount = order.total_amount - order.received_amount
+                    if allocated_amount > unpaid_amount:
+                        conn.rollback()
+                        return (
+                            False,
+                            f"订单 {order.order_no} 的分配金额 {allocated_amount} 超过未付余额 {unpaid_amount}",
+                        )
+
+                # 更新收入记录的分配信息
+                income.allocation = allocations
+                income.related_orders = list(allocations.keys())
+                self.db.save_income(income)
+
+                # 更新每个订单的已收金额
+                for order_id, allocated_amount in allocations.items():
+                    order = self.db.get_order(order_id)
+                    if not order:
+                        continue  # Skip if order no longer exists
+                    order.received_amount += allocated_amount
+                    self.db.save_order(order)
+
+                # 提交事务
+                conn.commit()
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                return False, f"数据库错误: {e}"
+            finally:
+                pass
+
+            # 审计日志（简单实现，便于追踪分配操作）
+            try:
+                audit_id = str(uuid.uuid4())
+                conn.execute(
+                    "INSERT INTO audit_logs (id, operation_type, entity_type, entity_id, entity_name, operator, operation_time, operation_description, old_value, new_value, ip_address, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        audit_id,
+                        "UPDATE",
+                        "INCOME/ORDER_ALLOCATION",
+                        income_id,
+                        income.customer_name,
+                        "system",
+                        datetime.utcnow().isoformat(),
+                        "Allocate income to orders",
+                        None,
+                        str(allocations),
+                        None,
+                        "",
+                        "",
+                    ),
                 )
+                conn.commit()
+            except Exception:
+                # 审计日志失败不影响业务结果
+                pass
 
-        # 更新收入记录的分配信息
-        income.allocation = allocations
-        income.related_orders = list(allocations.keys())
-        self.db.save_income(income)
-
-        # 更新每个订单的已收金额
-        for order_id, allocated_amount in allocations.items():
-            order = self.db.get_order(order_id)
-            if not order:
-                continue  # Skip if order no longer exists
-            order.received_amount += allocated_amount
-            self.db.save_order(order)
-
-        return True, "付款分配成功"
+            return True, "付款分配成功"
+        else:
+            # 无事务，按渐进式执行（不推荐）
+            income.allocation = allocations
+            income.related_orders = list(allocations.keys())
+            self.db.save_income(income)
+            for order_id, allocated_amount in allocations.items():
+                order = self.db.get_order(order_id)
+                if not order:
+                    continue
+                order.received_amount += allocated_amount
+                self.db.save_order(order)
+            return True, "付款分配成功（无事务环境）"
 
     def get_customer_incomes(self, customer_id: str) -> List[Income]:
         """
