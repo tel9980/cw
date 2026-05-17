@@ -1,14 +1,25 @@
-# 🏭 CWZS - 氧化加工厂财务系统 V2.1
+# 🏭 CWZS - 氧化加工厂财务系统 V2.2
 
 > 企业级财务管理解决方案 - AI 辅助开发
 
-**版本**: V2.1 | **状态**: ✅ 生产就绪
+**版本**: V2.2 | **状态**: ✅ 生产就绪
 
 ---
 
-## ✨ V2.1 最新优化 (2026-05-17)
+## ✨ V2.2 最新优化 (2026-05-17)
 
 ### 重大改进
+
+| 改进项 | 描述 | 状态 |
+|------|------|------|
+| **性能监控中间件** | 添加请求性能监控，自动记录响应时间 | ✅ |
+| **API文档页面** | 创建完整的API文档页面，包含性能统计 | ✅ |
+| **独立HTML模板** | 创建完整的模板系统，便于维护 | ✅ |
+| **响应式CSS** | 现代化渐变UI，完美支持移动端 | ✅ |
+
+---
+
+## ✨ V2.1 优化回顾
 
 | 改进项 | 描述 | 状态 |
 |------|------|------|
@@ -17,7 +28,6 @@
 | **日志系统** | 集成结构化日志记录，支持错误追踪 | ✅ |
 | **错误处理** | 全局错误处理，统一错误页面 | ✅ |
 | **统一启动器** | 创建交互式启动菜单，简化操作 | ✅ |
-| **UI优化** | 现代化渐变UI设计，提升用户体验 | ✅ |
 
 ---
 
@@ -39,6 +49,7 @@ python scripts/launcher.py
 cd oxidation_finance_v20
 python web_app.py
 # 浏览器访问: http://localhost:5000
+# API文档: http://localhost:5000/api-docs
 ```
 
 ### 方式3：命令行模式
@@ -62,36 +73,52 @@ pytest tests/ -v
 
 ```
 oxidation_finance_v20/          # 主项目目录
-├── models/                     # 数据模型层
-│   └── business_models.py     # 业务模型定义
-├── database/                  # 数据库层
+├── __init__.py               # 包初始化文件
+├── web_app.py                  # Web应用（V2.2，含性能监控和API文档）
+├── models/                      # 数据模型层
+│   └── business_models.py      # 业务模型定义
+├── database/                   # 数据库层
 │   ├── schema.py             # 数据表结构 + 索引
 │   └── db_manager.py         # 数据库管理器
-├── business/                  # 业务逻辑层
+├── business/                   # 业务逻辑层
 │   ├── order_manager.py      # 订单管理
 │   ├── finance_manager.py    # 财务管理
 │   └── cost_calculation_engine.py  # 费用计算引擎
-├── config/                     # 配置管理
+├── config/                      # 配置管理
 │   └── config_manager.py      # 配置管理器
 ├── utils/                      # 工具函数
 │   └── data_manager.py       # 数据管理器
-├── tools/                      # 业务工具
+├── tools/                       # 业务工具
 │   ├── setup_wizard.py      # 系统设置向导
 │   ├── quick_panel.py       # 快速操作面板
 │   ├── backup_restore.py     # 备份恢复
 │   └── import_excel.py      # Excel导入
-├── tests/                      # 测试套件 (426+ 测试)
-├── web_app.py                  # Web应用（V2.1重构版）
-└── requirements.txt            # 依赖包
+├── tests/                       # 测试套件 (426+ 测试)
+├── examples/                    # 示例和演示
+├── templates/                  # HTML模板
+│   ├── base.html            # 基础模板
+│   ├── index.html           # 首页
+│   ├── orders.html         # 订单列表
+│   ├── order_form.html     # 新建订单表单
+│   ├── income_form.html    # 收入表单
+│   ├── expense_form.html  # 支出表单
+│   ├── customers.html     # 客户列表
+│   ├── reports.html       # 报表中心
+│   ├── api_docs.html  # API文档
+│   └── error.html         # 错误页面
+├── static/                       # 静态资源
+│   └── css/
+│       └── style.css          # 响应式样式
+└── requirements.txt           # 依赖包
 
 deprecated_versions/             # 历史版本归档
-├── legacy_versions/           # 旧版Python文件
-├── business_docs/            # 历史文档
-└── tests_backup/             # 旧测试备份
+├── legacy_versions/         # 旧版Python文件
+├── business_docs/          # 历史文档
+└── tests_backup/         # 旧测试备份
 
 scripts/                        # 启动脚本
 ├── launcher.py               # 统一启动器
-└── launcher_full_demo.py     # 演示数据生成器
+└── launcher_full_demo.py    # 演示数据生成器
 ```
 
 ---
@@ -117,11 +144,36 @@ scripts/                        # 启动脚本
 - ✅ 客户分析
 - ✅ 支出分类统计
 
-### 4. 系统功能
+### 4. 性能监控（V2.2新增）
+- ✅ 请求响应时间记录
+- ✅ 慢请求警告（>500ms）
+- ✅ API性能统计展示
+- ✅ API文档页面
+
+### 5. 系统功能
 - ✅ 审计日志（完整操作追踪）
 - ✅ 自动备份
 - ✅ 数据库索引优化
 - ✅ 金额精度保护（TEXT存储）
+
+---
+
+## 📚 API文档
+
+访问 `http://localhost:5000/api-docs 查看完整的API文档。
+
+### 主要API接口
+
+| 接口 | 方法 | 说明 |
+|------|------|
+| `/api/search` | GET | 搜索客户和订单 |
+| `/api/stats` | GET | 获取统计数据 |
+
+### 性能监控
+
+- 自动记录每个请求的响应时间
+- 在API文档页面展示性能统计
+- 慢请求（>500ms）自动警告
 
 ---
 
@@ -158,7 +210,7 @@ python -m pytest tests/test_order_manager.py -v
 
 ---
 
-## 📖 使用指南
+## 📖 使用说明
 
 ### 初始化系统
 
@@ -176,17 +228,17 @@ python examples/generate_comprehensive_demo.py
 **输出示例**:
 ```
 📊 数据统计：
-   客户数量: 5
-   供应商数量: 5
-   订单数量: 30
-   收入记录: 31
-   支出记录: 74
-   银行交易: 105
+   客户数量：5
+   供应商数量：5
+   订单数量：30
+   收入记录：31
+   支出记录：74
+   银行交易：105
 
 💰 财务概况：
-   总收入: ¥36,704.73
-   总支出: ¥203,712.08
-   利润: ¥-167,007.34
+   总收入：¥36,704.73
+   总支出：¥203,712.08
+   利润：¥-167,007.34
 ```
 
 ### 启动Web界面
@@ -196,7 +248,8 @@ cd oxidation_finance_v20
 python web_app.py
 ```
 
-访问 `http://localhost:5000` 查看财务仪表盘。
+访问 `http://localhost:5000` 查看财务仪表盘，
+访问 `http://localhost:5000/api-docs` 查看API文档。
 
 ---
 
@@ -211,6 +264,8 @@ python web_app.py
 - ✅ **SQL注入防护** - 参数化查询 + 表名白名单
 - ✅ **数据库索引** - 15+ 索引提升查询性能
 - ✅ **结构化日志** - 完整的错误追踪
+- ✅ **性能监控** - 请求响应时间记录（V2.2新增）
+- ✅ **API文档** - 完整的API文档页面（V2.2新增）
 - ✅ **类型安全** - Decimal/UUID/Optional规范使用
 
 ### 技术栈
@@ -227,7 +282,8 @@ python web_app.py
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
-| V2.1 | 2026-05-17 | 项目结构整理、Web重构、日志系统、启动器优化 |
+| V2.2 | 2026-05-17 | 性能监控、API文档、独立模板 |
+| V2.1 | 2026-05-17 | 项目结构整理、Web重构、日志系统、启动器 |
 | V2.0.1 | 2026-02-25 | 审计日志全覆盖、金额精度改进、事务支持 |
 | V2.0 | 2026-02 | 初始版本 |
 
@@ -235,15 +291,15 @@ python web_app.py
 
 ## 📞 支持
 
-- 📖 查看文档: `oxidation_finance_v20/docs/`
-- 🐛 提交问题: GitHub Issues
-- 📧 技术支持: 查看 AGENTS.md
+- 📚 查看文档：`oxidation_finance_v20/docs/
+- 🐛 提交问题：GitHub Issues
+- 📧 技术支持：查看 AGENTS.md
 
 ---
 
 ## ⚠️ 重要提示
 
-1. **始终先读 `AGENTS.md`** - 这是项目黑匣子
+1. **始终先读 `AGENTS.md` - 这是项目黑匣子
 2. **运行测试** - 任何更改后必须运行测试
 3. **更新记忆核心** - 重大变更后更新 `AGENTS.md`
 4. **不要删除历史** - 旧版本移动到 `deprecated_versions/`
@@ -252,10 +308,10 @@ python web_app.py
 
 **最后更新**: 2026-05-17
 
-**优化版本**: V2.1
+**优化版本**: V2.2
 
 **AI 助手**: Kimi (OpenCode)
 
 ---
 
-💼 **氧化加工厂财务系统 V2.1** - 让财务管理更简单、更专业！
+💼 **氧化加工厂财务系统 V2.2 - 让财务管理更简单、更专业！

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Web版财务系统 V2.1 - 使用业务层重构
+Web版财务系统 V2.2 - 使用业务层重构 + 性能监控 + API文档
 
 功能：
 - 今日概览仪表盘
@@ -15,6 +15,8 @@ Web版财务系统 V2.1 - 使用业务层重构
 - 更好的错误处理
 - 结构化日志记录
 - 独立的HTML模板文件
+- 性能监控中间件
+- API文档页面
 
 使用方法：
     python web_app.py
@@ -23,12 +25,14 @@ Web版财务系统 V2.1 - 使用业务层重构
 
 import sys
 import logging
+import time
 from pathlib import Path
 from datetime import date
 from decimal import Decimal
+from collections import defaultdict
 
 try:
-    from flask import Flask, render_template, request, jsonify, redirect, url_for
+    from flask import Flask, render_template, request, jsonify, redirect, url_for, g
 except ImportError:
     print("[ERROR] 需要先安装Flask:")
     print("  pip install flask")
@@ -47,6 +51,9 @@ app = Flask(__name__,
 app.jinja_env.auto_reload = True
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
+
+# 性能统计
+request_stats = defaultdict(list)
 
 # 数据库路径
 DB_PATH = Path(__file__).resolve().parent / "oxidation_finance_demo_ready.db"
@@ -70,6 +77,54 @@ except ImportError as e:
     print("  请确保项目结构正确")
     sys.exit(1)
 
+
+# ========== 性能监控中间件 ==========
+
+@app.before_request
+def before_request():
+    """请求开始前记录时间"""
+    g.start_time = time.time()
+
+
+@app.after_request
+def after_request(response):
+    """请求结束后记录性能"""
+    if hasattr(g, 'start_time'):
+        duration = (time.time() - g.start_time) * 1000  # 毫秒
+        endpoint = request.endpoint or 'unknown'
+        
+        # 记录到日志
+        if duration > 500:  # 超过500ms的请求
+            logger.warning(f"⚠️ 慢请求: {endpoint} - {duration:.2f}ms")
+        else:
+            logger.info(f"📊 请求完成: {endpoint} - {duration:.2f}ms")
+        
+        # 记录统计
+        request_stats[endpoint].append(duration)
+    
+    return response
+
+
+# ========== API 文档路由 ==========
+
+@app.route('/api-docs')
+def api_docs():
+    """API 文档页面"""
+    # 统计信息
+    stats_summary = {}
+    for endpoint, times in request_stats.items():
+        if times:
+            stats_summary[endpoint] = {
+                'count': len(times),
+                'avg': sum(times) / len(times),
+                'max': max(times),
+                'min': min(times)
+            }
+    
+    return render_template('api_docs.html', stats=stats_summary)
+
+
+# ========== 数据库连接 ==========
 
 def get_db():
     """获取数据库连接"""
@@ -368,7 +423,16 @@ def reports():
 
 @app.route("/api/search")
 def api_search():
-    """搜索API"""
+    """搜索API
+    
+    搜索客户和订单信息
+    
+    参数:
+        q: 搜索关键词
+    
+    返回:
+        JSON格式的搜索结果
+    """
     keyword = request.args.get("q", "")
     if not keyword:
         return jsonify({"results": []})
@@ -411,7 +475,13 @@ def api_search():
 
 @app.route("/api/stats")
 def api_stats():
-    """统计数据API"""
+    """统计数据API
+    
+    获取今日统计和待处理订单数
+    
+    返回:
+        JSON格式的统计数据
+    """
     try:
         db, order_mgr, finance_mgr = init_business_managers()
         today = date.today().isoformat()
@@ -458,12 +528,13 @@ if __name__ == "__main__":
         sys.exit(1)
 
     print("\n" + "=" * 70)
-    print("🏭 氧化加工厂财务系统 V2.1 - Web版（业务层重构版）")
+    print("🏭 氧化加工厂财务系统 V2.2 - Web版（业务层重构 + 性能监控 + API文档）")
     print("=" * 70)
     print(f"\n数据库: {DB_PATH}")
     print("\n✅ 启动成功！")
     print("\n请打开浏览器访问:")
     print("  http://localhost:5000")
+    print("\nAPI文档: http://localhost:5000/api-docs")
     print("\n按 Ctrl+C 停止服务")
     print("=" * 70 + "\n")
 
