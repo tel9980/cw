@@ -3,38 +3,78 @@
 {% block title %}订单管理 - 氧化加工厂财务系统{% endblock %}
 
 {% block content %}
+<div class="page-header">
+    <h2>📋 订单管理</h2>
+    <p>查看和管理所有加工订单</p>
+</div>
+
 <div class="card">
-    <h2>订单列表</h2>
-    <div style="margin-bottom: 20px;">
-        <a href="/orders" class="btn {% if not current_status %}btn-primary{% endif %}">全部</a>
-        {% for status in statuses %}
-        <a href="/orders?status={{ status.status }}" class="btn {% if current_status == status.status %}btn-primary{% endif %}">{{ status.status }}</a>
-        {% endfor %}
-        <a href="/order/new" class="btn" style="float: right;">+ 新建订单</a>
+    <div class="card-header">
+        <div class="filter-bar">
+            <div class="filter-buttons">
+                <a href="{{ url_for('orders') }}" class="btn {% if not current_status %}btn-primary{% else %}btn-outline{% endif %}">
+                    全部
+                </a>
+                {% for status in statuses %}
+                <a href="{{ url_for('orders', status=status.status) }}" class="btn {% if current_status == status.status %}btn-primary{% else %}btn-outline{% endif %}">
+                    {{ status.status }}
+                </a>
+                {% endfor %}
+            </div>
+            <a href="{{ url_for('new_order') }}" class="btn btn-primary">
+                ➕ 新建订单
+            </a>
+        </div>
     </div>
-    <table>
-        <thead>
-            <tr>
-                <th>订单号</th>
-                <th>客户</th>
-                <th>物品</th>
-                <th>金额</th>
-                <th>状态</th>
-                <th>日期</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for order in orders %}
-            <tr>
-                <td>{{ order.order_no }}</td>
-                <td>{{ order.customer_name }}</td>
-                <td>{{ order.item_description }}</td>
-                <td>{{ "%.2f"|format(order.total_amount) }}</td>
-                <td><span class="status-badge status-{{ order.status }}">{{ order.status }}</span></td>
-                <td>{{ order.order_date }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>订单号</th>
+                        <th>客户</th>
+                        <th>物品</th>
+                        <th>计价方式</th>
+                        <th>数量</th>
+                        <th>单价</th>
+                        <th>金额</th>
+                        <th>状态</th>
+                        <th>日期</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for order in orders %}
+                    <tr>
+                        <td><strong>{{ order.order_no }}</strong></td>
+                        <td>{{ order.customer_name }}</td>
+                        <td>{{ order.item_description or '-' }}</td>
+                        <td>{{ order.pricing_unit.value }}</td>
+                        <td>{{ order.quantity }}</td>
+                        <td class="text-right">¥{{ "%.2f"|format(order.unit_price) }}</td>
+                        <td class="text-right text-success">
+                            <strong>¥{{ "%.2f"|format(order.total_amount) }}</strong>
+                        </td>
+                        <td>
+                            <span class="status-badge status-{{ order.status.value }}">
+                                {{ order.status.value }}
+                            </span>
+                        </td>
+                        <td>{{ order.order_date }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="9" class="text-center">
+                            <div class="empty-state">
+                                <div class="empty-icon">📋</div>
+                                <p>暂无订单</p>
+                                <a href="{{ url_for('new_order') }}" class="btn btn-primary">创建第一个订单</a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 {% endblock %}

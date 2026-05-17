@@ -3,39 +3,62 @@
 {% block title %}录入收入 - 氧化加工厂财务系统{% endblock %}
 
 {% block content %}
+<div class="page-header">
+    <h2>💵 录入收入</h2>
+    <p>记录客户付款信息</p>
+</div>
+
 <div class="card">
-    <h2>录入收入</h2>
-    <form method="POST">
-        <div class="form-group">
-            <label>客户名称</label>
-            <input type="text" name="customer_name" list="customers" required>
-            <datalist id="customers">
-                {% for customer in customers %}
-                <option value="{{ customer.name }}">
-                {% endfor %}
-            </datalist>
-        </div>
-        <div class="form-group">
-            <label>金额</label>
-            <input type="number" name="amount" step="0.01" required>
-        </div>
-        <div class="form-group">
-            <label>银行账户</label>
-            <select name="bank_type">
-                <option value="G银行">G银行（有发票）</option>
-                <option value="N银行">N银行（现金/微信）</option>
-            </select>
-        </div>
-        <div class="form-group">
-            <label>日期</label>
-            <input type="date" name="income_date" value="{{ today }}" required>
-        </div>
-        <div class="form-group">
-            <label>备注</label>
-            <input type="text" name="notes" placeholder="如：订单OX202401001收款">
-        </div>
-        <button type="submit" class="btn btn-success">保存收入</button>
-        <a href="/" class="btn" style="background: #999;">取消</a>
-    </form>
+    <div class="card-body">
+        <form method="POST" class="form">
+            <div class="form-grid">
+                <div class="form-group">
+                    <label for="customer_name">客户名称 *</label>
+                    <input type="text" id="customer_name" name="customer_name" 
+                           list="customers" placeholder="输入或选择客户" required>
+                    <datalist id="customers">
+                        {% for customer in customers %}
+                        <option value="{{ customer.name }}">
+                        {% endfor %}
+                    </datalist>
+                </div>
+                
+                <div class="form-group">
+                    <label for="amount">金额 *</label>
+                    <input type="number" id="amount" name="amount" 
+                           step="0.01" placeholder="0.00" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="bank_type">银行账户 *</label>
+                    <select id="bank_type" name="bank_type" required>
+                        <option value="G银行">G银行（有发票）</option>
+                        <option value="N银行">N银行（现金/微信）</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="income_date">日期</label>
+                    <input type="date" id="income_date" name="income_date" 
+                           value="{{ today }}">
+                </div>
+                
+                <div class="form-group form-group-full">
+                    <label for="notes">备注</label>
+                    <input type="text" id="notes" name="notes" 
+                           placeholder="如：订单收款">
+                </div>
+            </div>
+            
+            <div class="form-actions">
+                <button type="submit" class="btn btn-success">
+                    💾 保存收入
+                </button>
+                <a href="{{ url_for('index') }}" class="btn btn-outline">
+                    取消
+                </a>
+            </div>
+        </form>
+    </div>
 </div>
 {% endblock %}
