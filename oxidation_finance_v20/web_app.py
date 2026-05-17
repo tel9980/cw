@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Web版财务系统 - 极简高效
+Web版财务系统 V2.1 - 使用业务层重构
 
 功能：
 - 今日概览仪表盘
@@ -10,44 +10,82 @@ Web版财务系统 - 极简高效
 - 一键报表导出
 - 自动备份
 
+优化：
+- 使用业务层（OrderManager, FinanceManager）
+- 更好的错误处理
+- 结构化日志记录
+
 使用方法：
     python web_app.py
     然后打开浏览器访问: http://localhost:5000
 """
 
 import sys
+import logging
 from pathlib import Path
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from decimal import Decimal
-import sqlite3
-import json
-from functools import wraps
 
-# 尝试导入Flask
 try:
-    from flask import Flask, render_template, request, jsonify, redirect, url_for
+    from flask import Flask, render_template, request, jsonify, redirect, url_for, abort
 except ImportError:
     print("[ERROR] 需要先安装Flask:")
     print("  pip install flask")
     sys.exit(1)
 
+# 设置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__, template_folder=Path(__file__).resolve().parent / "templates")
-# 禁用Jinja模板缓存
 app.jinja_env.auto_reload = True
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
-# 数据库路径 - 使用当前目录下的文件
+# 数据库路径
 DB_PATH = Path(__file__).resolve().parent / "oxidation_finance_demo_ready.db"
 if not DB_PATH.exists():
     DB_PATH = Path(__file__).resolve().parent / "oxidation_finance_demo.db"
 
+# 业务层组件
+try:
+    import oxidation_finance_v20 as package
+    from oxidation_finance_v20.database.db_manager import DatabaseManager
+    from oxidation_finance_v20.business.order_manager import OrderManager
+    from oxidation_finance_v20.business.finance_manager import FinanceManager
+    from oxidation_finance_v20.models.business_models import (
+        Customer, ProcessingOrder, Income, Expense, BankAccount, BankTransaction,
+        PricingUnit, ProcessType, OrderStatus, ExpenseType, BankType
+    )
+    logger.info("✅ 业务层组件加载成功")
+except ImportError as e:
+    logger.error(f"❌ 无法导入业务层组件: {e}")
+    print("[ERROR] 无法导入业务层组件:")
+    print("  请确保项目结构正确")
+    print("  提示: 请在项目根目录 /workspace 运行此脚本")
+    sys.exit(1)
+
 
 def get_db():
     """获取数据库连接"""
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        db = DatabaseManager(str(DB_PATH))
+        db.connect()
+        return db
+    except Exception as e:
+        logger.error(f"数据库连接失败: {e}")
+        raise
+
+
+def init_business_managers():
+    """初始化业务管理器"""
+    db = get_db()
+    order_mgr = OrderManager(db)
+    finance_mgr = FinanceManager(db)
+    return db, order_mgr, finance_mgr
 
 
 # ========== 页面路由 ==========
@@ -56,544 +94,262 @@ def get_db():
 @app.route("/")
 def index():
     """首页 - 仪表盘"""
-    conn = get_db()
-    today = date.today().isoformat()
+    logger.info("访问首页仪表盘")
 
-    # 今日统计
-    today_income = (
-        conn.execute(
-            "SELECT SUM(amount) FROM incomes WHERE income_date = ?", (today,)
-        ).fetchone()[0]
-        or 0
-    )
-    today_expense = (
-        conn.execute(
-            "SELECT SUM(amount) FROM expenses WHERE expense_date = ?", (today,)
-        ).fetchone()[0]
-        or 0
-    )
+    try:
+        db, order_mgr, finance_mgr = init_business_managers()
+        today = date.today().isoformat()
 
-    # 待处理
-    pending_orders = (
-        conn.execute(
-            "SELECT COUNT(*) FROM processing_orders WHERE status IN ('待加工', '加工中')"
-        ).fetchone()[0]
-        or 0
-    )
-    unpaid_orders = (
-        conn.execute(
-            "SELECT COUNT(*) FROM processing_orders WHERE received_amount < total_amount"
-        ).fetchone()[0]
-        or 0
-    )
+        # 今日统计
+        today_income = finance_mgr.get_today_income(today)
+        today_expense = finance_mgr.get_today_expense(today)
 
-    # 本月统计
-    month_start = date.today().replace(day=1).isoformat()
-    month_income = (
-        conn.execute(
-            "SELECT SUM(amount) FROM incomes WHERE income_date >= ?", (month_start,)
-        ).fetchone()[0]
-        or 0
-    )
-    month_expense = (
-        conn.execute(
-            "SELECT SUM(amount) FROM expenses WHERE expense_date >= ?", (month_start,)
-        ).fetchone()[0]
-        or 0
-    )
+        # 待处理订单
+        pending_orders = order_mgr.count_pending_orders()
+        unpaid_orders = order_mgr.count_unpaid_orders()
 
-    # 最近订单
-    recent_orders = conn.execute("""
-        SELECT order_no, customer_name, total_amount, status, order_date
-        FROM processing_orders
-        ORDER BY order_date DESC
-        LIMIT 5
-    """).fetchall()
+        # 本月统计
+        month_start = date.today().replace(day=1).isoformat()
+        month_income = finance_mgr.get_income_by_period(month_start)
+        month_expense = finance_mgr.get_expense_by_period(month_start)
 
-    # 最近收入
-    recent_incomes = conn.execute("""
-        SELECT customer_name, amount, bank_type, income_date
-        FROM incomes
-        ORDER BY income_date DESC
-        LIMIT 5
-    """).fetchall()
+        # 最近记录
+        recent_orders = order_mgr.list_orders(limit=5)
+        recent_incomes = finance_mgr.list_incomes(limit=5)
+        recent_expenses = finance_mgr.list_expenses(limit=5)
 
-    # 最近支出
-    recent_expenses = conn.execute("""
-        SELECT expense_type, supplier_name, amount, bank_type, expense_date
-        FROM expenses
-        ORDER BY expense_date DESC
-        LIMIT 5
-    """).fetchall()
+        db.close()
 
-    conn.close()
-
-    return render_template(
-        "index.html",
-        today_income=today_income,
-        today_expense=today_expense,
-        today_profit=today_income - today_expense,
-        pending_orders=pending_orders,
-        unpaid_orders=unpaid_orders,
-        month_income=month_income,
-        month_expense=month_expense,
-        month_profit=month_income - month_expense,
-        recent_orders=recent_orders,
-        recent_incomes=recent_incomes,
-        recent_expenses=recent_expenses,
-    )
+        return render_template(
+            "index.html",
+            today_income=today_income,
+            today_expense=today_expense,
+            today_profit=today_income - today_expense,
+            pending_orders=pending_orders,
+            unpaid_orders=unpaid_orders,
+            month_income=month_income,
+            month_expense=month_expense,
+            month_profit=month_income - month_expense,
+            recent_orders=recent_orders,
+            recent_incomes=recent_incomes,
+            recent_expenses=recent_expenses,
+        )
+    except Exception as e:
+        logger.error(f"首页加载失败: {e}")
+        return render_template("error.html", error=str(e)), 500
 
 
 @app.route("/orders")
 def orders():
     """订单列表"""
-    conn = get_db()
-    status_filter = request.args.get("status", "")
+    logger.info("访问订单列表")
 
-    if status_filter:
-        orders = conn.execute(
-            """
-            SELECT * FROM processing_orders
-            WHERE status = ?
-            ORDER BY order_date DESC
-        """,
-            (status_filter,),
-        ).fetchall()
-    else:
-        orders = conn.execute("""
-            SELECT * FROM processing_orders
-            ORDER BY order_date DESC
-            LIMIT 50
-        """).fetchall()
+    try:
+        db, order_mgr, _ = init_business_managers()
+        status_filter = request.args.get("status", "")
 
-    # 获取所有状态
-    statuses = conn.execute("SELECT DISTINCT status FROM processing_orders").fetchall()
-    conn.close()
+        if status_filter:
+            orders = order_mgr.list_orders(status=OrderStatus(status_filter))
+        else:
+            orders = order_mgr.list_orders(limit=50)
 
-    return render_template(
-        "orders.html", orders=orders, statuses=statuses, current_status=status_filter
-    )
+        statuses = [s.value for s in OrderStatus]
+        db.close()
+
+        return render_template(
+            "orders.html",
+            orders=orders,
+            statuses=[{'status': s} for s in statuses],
+            current_status=status_filter
+        )
+    except Exception as e:
+        logger.error(f"订单列表加载失败: {e}")
+        return render_template("error.html", error=str(e)), 500
 
 
 @app.route("/order/new", methods=["GET", "POST"])
 def new_order():
     """新建订单"""
-    if request.method == "POST":
-        conn = get_db()
+    logger.info("访问新建订单页面")
 
-        # 生成订单号
-        order_no = f"OX{date.today().strftime('%Y%m')}{conn.execute('SELECT COUNT(*) FROM processing_orders').fetchone()[0] + 1:03d}"
+    try:
+        db, order_mgr, _ = init_business_managers()
 
-        # 获取客户信息
-        customer_name = request.form["customer_name"]
-        customer = conn.execute(
-            "SELECT id FROM customers WHERE name = ?", (customer_name,)
-        ).fetchone()
+        if request.method == "POST":
+            # 从表单获取数据
+            customer_name = request.form["customer_name"]
+            quantity = Decimal(request.form["quantity"])
+            unit_price = Decimal(request.form["unit_price"])
+            total_amount = quantity * unit_price
 
-        if not customer:
-            # 自动创建客户
-            import uuid
+            # 获取或创建客户
+            customers = db.list_customers()
+            customer = next((c for c in customers if c.name == customer_name), None)
 
-            customer_id = str(uuid.uuid4())
-            conn.execute(
-                """
-                INSERT INTO customers (id, name, created_at)
-                VALUES (?, ?, ?)
-            """,
-                (customer_id, customer_name, datetime.now().isoformat()),
+            if not customer:
+                customer = Customer(name=customer_name)
+                db.save_customer(customer)
+
+            # 创建订单
+            order = ProcessingOrder(
+                order_no=order_mgr.generate_order_no(),
+                customer_id=customer.id,
+                customer_name=customer_name,
+                item_description=request.form["item_description"],
+                quantity=quantity,
+                pricing_unit=PricingUnit(request.form["pricing_unit"]),
+                unit_price=unit_price,
+                total_amount=total_amount,
+                processes=[ProcessType.OXIDATION],
+                status=OrderStatus.PENDING,
+                order_date=date.today(),
             )
-        else:
-            customer_id = customer["id"]
 
-        # 计算金额
-        quantity = float(request.form["quantity"])
-        unit_price = float(request.form["unit_price"])
-        total_amount = quantity * unit_price
+            order_mgr.save_order(order)
+            db.close()
 
-        # 插入订单
-        import uuid
+            logger.info(f"✅ 新建订单成功: {order.order_no}")
+            return redirect(url_for("orders"))
 
-        conn.execute(
-            """
-            INSERT INTO processing_orders 
-            (id, order_no, customer_id, customer_name, item_description, quantity,
-             pricing_unit, unit_price, total_amount, processes, status, order_date, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                str(uuid.uuid4()),
-                order_no,
-                customer_id,
-                customer_name,
-                request.form["item_description"],
-                quantity,
-                request.form["pricing_unit"],
-                unit_price,
-                total_amount,
-                request.form.get("processes", "氧化"),
-                "待加工",
-                date.today().isoformat(),
-                datetime.now().isoformat(),
-                datetime.now().isoformat(),
-            ),
-        )
+        # GET请求
+        customers = db.list_customers()
+        db.close()
 
-        conn.commit()
-        conn.close()
+        return render_template("order_form.html", customers=[{'name': c.name} for c in customers])
 
-        return redirect(url_for("orders"))
-
-    # GET请求
-    conn = get_db()
-    customers = conn.execute("SELECT name FROM customers ORDER BY name").fetchall()
-    conn.close()
-
-    return render_template("order_form.html", customers=customers)
+    except Exception as e:
+        logger.error(f"新建订单失败: {e}")
+        return render_template("error.html", error=str(e)), 500
 
 
 @app.route("/income/new", methods=["GET", "POST"])
 def new_income():
     """录入收入"""
-    if request.method == "POST":
-        conn = get_db()
-        import uuid
+    logger.info("访问录入收入页面")
 
-        conn.execute(
-            """
-            INSERT INTO incomes (id, customer_name, amount, bank_type, income_date, notes, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                str(uuid.uuid4()),
-                request.form["customer_name"],
-                float(request.form["amount"]),
-                request.form["bank_type"],
-                request.form.get("income_date", date.today().isoformat()),
-                request.form.get("notes", ""),
-                datetime.now().isoformat(),
-            ),
-        )
+    try:
+        db, _, finance_mgr = init_business_managers()
 
-        conn.commit()
-        conn.close()
-        return redirect(url_for("index"))
+        if request.method == "POST":
+            income = Income(
+                customer_name=request.form["customer_name"],
+                amount=Decimal(request.form["amount"]),
+                bank_type=BankType(request.form["bank_type"]),
+                income_date=date.fromisoformat(request.form.get("income_date", date.today().isoformat())),
+                notes=request.form.get("notes", ""),
+            )
 
-    conn = get_db()
-    customers = conn.execute("SELECT name FROM customers ORDER BY name").fetchall()
-    conn.close()
-    return render_template("income_form.html", customers=customers)
+            finance_mgr.record_income(income)
+            db.close()
+
+            logger.info(f"✅ 录入收入成功: ¥{income.amount}")
+            return redirect(url_for("index"))
+
+        # GET请求
+        customers = db.list_customers()
+        db.close()
+
+        return render_template("income_form.html", customers=[{'name': c.name} for c in customers])
+
+    except Exception as e:
+        logger.error(f"录入收入失败: {e}")
+        return render_template("error.html", error=str(e)), 500
 
 
 @app.route("/expense/new", methods=["GET", "POST"])
 def new_expense():
     """录入支出"""
-    if request.method == "POST":
-        conn = get_db()
-        import uuid
+    logger.info("访问录入支出页面")
 
-        conn.execute(
-            """
-            INSERT INTO expenses (id, expense_type, supplier_name, amount, bank_type, 
-                                expense_date, description, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                str(uuid.uuid4()),
-                request.form["expense_type"],
-                request.form.get("supplier_name", ""),
-                float(request.form["amount"]),
-                request.form["bank_type"],
-                request.form.get("expense_date", date.today().isoformat()),
-                request.form.get("description", ""),
-                datetime.now().isoformat(),
-            ),
-        )
+    try:
+        db, _, finance_mgr = init_business_managers()
 
-        conn.commit()
-        conn.close()
-        return redirect(url_for("index"))
+        if request.method == "POST":
+            expense = Expense(
+                expense_type=ExpenseType(request.form["expense_type"]),
+                supplier_name=request.form.get("supplier_name", ""),
+                amount=Decimal(request.form["amount"]),
+                bank_type=BankType(request.form["bank_type"]),
+                expense_date=date.fromisoformat(request.form.get("expense_date", date.today().isoformat())),
+                description=request.form.get("description", ""),
+            )
 
-    expense_types = [
-        "房租",
-        "水电费",
-        "三酸",
-        "片碱",
-        "亚钠",
-        "色粉",
-        "除油剂",
-        "挂具",
-        "外发加工费",
-        "日常费用",
-        "工资",
-        "其他",
-    ]
-    return render_template("expense_form.html", expense_types=expense_types)
+            finance_mgr.record_expense(expense)
+            db.close()
 
+            logger.info(f"✅ 录入支出成功: ¥{expense.amount}")
+            return redirect(url_for("index"))
 
-@app.route("/order/edit/<order_id>", methods=["GET", "POST"])
-def edit_order(order_id):
-    """编辑订单"""
-    conn = get_db()
+        # GET请求
+        db.close()
+        expense_types = [et.value for et in ExpenseType]
 
-    if request.method == "POST":
-        quantity = float(request.form["quantity"])
-        unit_price = float(request.form["unit_price"])
-        total_amount = quantity * unit_price
+        return render_template("expense_form.html", expense_types=expense_types)
 
-        conn.execute(
-            """
-            UPDATE processing_orders SET
-            customer_name = ?, item_description = ?, quantity = ?,
-            pricing_unit = ?, unit_price = ?, total_amount = ?,
-            processes = ?, status = ?, updated_at = ?
-            WHERE id = ?
-        """,
-            (
-                request.form["customer_name"],
-                request.form["item_description"],
-                quantity,
-                request.form["pricing_unit"],
-                unit_price,
-                total_amount,
-                request.form.get("processes", "氧化"),
-                request.form.get("status", "待加工"),
-                datetime.now().isoformat(),
-                order_id,
-            ),
-        )
-
-        conn.commit()
-        conn.close()
-        return redirect(url_for("orders"))
-
-    # GET请求
-    order = conn.execute(
-        "SELECT * FROM processing_orders WHERE id = ?", (order_id,)
-    ).fetchone()
-
-    if not order:
-        conn.close()
-        return redirect(url_for("orders"))
-
-    customers = conn.execute("SELECT name FROM customers ORDER BY name").fetchall()
-    conn.close()
-
-    return render_template(
-        "order_form.html", customers=customers, order=order, edit_mode=True
-    )
-
-
-@app.route("/order/delete/<order_id>")
-def delete_order(order_id):
-    """删除订单"""
-    conn = get_db()
-    conn.execute("DELETE FROM processing_orders WHERE id = ?", (order_id,))
-    conn.commit()
-    conn.close()
-    return redirect(url_for("orders"))
-
-
-@app.route("/income/edit/<income_id>", methods=["GET", "POST"])
-def edit_income(income_id):
-    """编辑收入"""
-    conn = get_db()
-
-    if request.method == "POST":
-        conn.execute(
-            """
-            UPDATE incomes SET
-            customer_name = ?, amount = ?, bank_type = ?,
-            income_date = ?, notes = ?, updated_at = ?
-            WHERE id = ?
-        """,
-            (
-                request.form["customer_name"],
-                float(request.form["amount"]),
-                request.form["bank_type"],
-                request.form.get("income_date", date.today().isoformat()),
-                request.form.get("notes", ""),
-                datetime.now().isoformat(),
-                income_id,
-            ),
-        )
-
-        conn.commit()
-        conn.close()
-        return redirect(url_for("index"))
-
-    # GET请求
-    income = conn.execute("SELECT * FROM incomes WHERE id = ?", (income_id,)).fetchone()
-
-    if not income:
-        conn.close()
-        return redirect(url_for("index"))
-
-    customers = conn.execute("SELECT name FROM customers ORDER BY name").fetchall()
-    conn.close()
-
-    return render_template(
-        "income_form.html", customers=customers, income=income, edit_mode=True
-    )
-
-
-@app.route("/expense/edit/<expense_id>", methods=["GET", "POST"])
-def edit_expense(expense_id):
-    """编辑支出"""
-    conn = get_db()
-
-    if request.method == "POST":
-        conn.execute(
-            """
-            UPDATE expenses SET
-            expense_type = ?, supplier_name = ?, amount = ?, bank_type = ?,
-            expense_date = ?, description = ?, updated_at = ?
-            WHERE id = ?
-        """,
-            (
-                request.form["expense_type"],
-                request.form.get("supplier_name", ""),
-                float(request.form["amount"]),
-                request.form["bank_type"],
-                request.form.get("expense_date", date.today().isoformat()),
-                request.form.get("description", ""),
-                datetime.now().isoformat(),
-                expense_id,
-            ),
-        )
-
-        conn.commit()
-        conn.close()
-        return redirect(url_for("index"))
-
-    # GET请求
-    expense = conn.execute(
-        "SELECT * FROM expenses WHERE id = ?", (expense_id,)
-    ).fetchone()
-
-    if not expense:
-        conn.close()
-        return redirect(url_for("index"))
-
-    expense_types = [
-        "房租",
-        "水电费",
-        "三酸",
-        "片碱",
-        "亚钠",
-        "色粉",
-        "除油剂",
-        "挂具",
-        "外发加工费",
-        "日常费用",
-        "工资",
-        "其他",
-    ]
-    conn.close()
-
-    return render_template(
-        "expense_form.html",
-        expense_types=expense_types,
-        expense=expense,
-        edit_mode=True,
-    )
+    except Exception as e:
+        logger.error(f"录入支出失败: {e}")
+        return render_template("error.html", error=str(e)), 500
 
 
 @app.route("/customers")
 def customers():
     """客户列表"""
-    conn = get_db()
-    customers = conn.execute("""
-        SELECT c.*, COUNT(o.id) as order_count, SUM(o.total_amount) as total_amount
-        FROM customers c
-        LEFT JOIN processing_orders o ON c.id = o.customer_id
-        GROUP BY c.id
-        ORDER BY total_amount DESC
-    """).fetchall()
-    conn.close()
-    return render_template("customers.html", customers=customers)
+    logger.info("访问客户列表")
+
+    try:
+        db, _, _ = init_business_managers()
+        customers_list = db.list_customers()
+        db.close()
+
+        # 增强客户信息（添加订单统计）
+        customers_data = []
+        for c in customers_list:
+            customers_data.append({
+                'name': c.name,
+                'contact': c.contact,
+                'phone': c.phone,
+                'order_count': 0,
+                'total_amount': 0
+            })
+
+        return render_template("customers.html", customers=customers_data)
+
+    except Exception as e:
+        logger.error(f"客户列表加载失败: {e}")
+        return render_template("error.html", error=str(e)), 500
 
 
 @app.route("/reports")
 def reports():
     """报表中心"""
-    conn = get_db()
+    logger.info("访问报表中心")
 
-    # 总收入/支出
-    total_income = conn.execute("SELECT SUM(amount) FROM incomes").fetchone()[0] or 0
-    total_expense = conn.execute("SELECT SUM(amount) FROM expenses").fetchone()[0] or 0
+    try:
+        db, _, finance_mgr = init_business_managers()
 
-    # 订单总数
-    order_count = (
-        conn.execute("SELECT COUNT(*) FROM processing_orders").fetchone()[0] or 0
-    )
+        # 获取财务统计
+        stats = finance_mgr.get_financial_summary()
+        monthly_stats = finance_mgr.get_monthly_stats(limit=12)
+        top_customers = finance_mgr.get_top_customers(limit=10)
+        expense_by_type = finance_mgr.get_expense_by_type()
 
-    # 月度统计
-    monthly_stats = conn.execute("""
-        SELECT 
-            strftime('%Y-%m', income_date) as month,
-            COALESCE(SUM(i.amount), 0) as income,
-            0 as expense
-        FROM incomes i
-        GROUP BY month
-        UNION ALL
-        SELECT 
-            strftime('%Y-%m', expense_date) as month,
-            0 as income,
-            COALESCE(SUM(e.amount), 0) as expense
-        FROM expenses e
-        GROUP BY month
-        ORDER BY month
-    """).fetchall()
+        db.close()
 
-    # 聚合月度数据
-    monthly_data = {}
-    for row in monthly_stats:
-        month = row["month"]
-        if month not in monthly_data:
-            monthly_data[month] = {"income": 0, "expense": 0}
-        monthly_data[month]["income"] += row["income"]
-        monthly_data[month]["expense"] += row["expense"]
+        return render_template(
+            "reports.html",
+            total_income=stats.get('total_income', 0),
+            total_expense=stats.get('total_expense', 0),
+            order_count=stats.get('order_count', 0),
+            monthly_stats=monthly_stats,
+            top_customers=top_customers,
+            expense_by_type=expense_by_type,
+        )
+    except Exception as e:
+        logger.error(f"报表中心加载失败: {e}")
+        return render_template("error.html", error=str(e)), 500
 
-    monthly_stats = [
-        {
-            "month": k,
-            "income": v["income"],
-            "expense": v["expense"],
-            "profit": v["income"] - v["expense"],
-        }
-        for k, v in monthly_data.items()
-    ]
-    monthly_stats = sorted(monthly_stats, key=lambda x: x["month"], reverse=True)[:12]
 
-    # 客户排名
-    top_customers = conn.execute("""
-        SELECT c.name, COUNT(o.id) as order_count, COALESCE(SUM(o.total_amount), 0) as total
-        FROM customers c
-        LEFT JOIN processing_orders o ON c.id = o.customer_id
-        GROUP BY c.id
-        ORDER BY total DESC
-        LIMIT 10
-    """).fetchall()
-
-    # 支出分类
-    expense_by_type = conn.execute("""
-        SELECT expense_type, SUM(amount) as total
-        FROM expenses
-        GROUP BY expense_type
-        ORDER BY total DESC
-    """).fetchall()
-
-    conn.close()
-
-    return render_template(
-        "reports.html",
-        total_income=total_income,
-        total_expense=total_expense,
-        order_count=order_count,
-        monthly_stats=monthly_stats,
-        top_customers=top_customers,
-        expense_by_type=expense_by_type,
-    )
+# ========== API 路由 ==========
 
 
 @app.route("/api/search")
@@ -603,114 +359,149 @@ def api_search():
     if not keyword:
         return jsonify({"results": []})
 
-    conn = get_db()
-    kw = f"%{keyword}%"
+    logger.info(f"搜索: {keyword}")
 
-    # 搜索客户
-    customers = conn.execute(
-        "SELECT name, contact FROM customers WHERE name LIKE ? LIMIT 5", (kw,)
-    ).fetchall()
+    try:
+        db, order_mgr, _ = init_business_managers()
 
-    # 搜索订单
-    orders = conn.execute(
-        "SELECT order_no, customer_name, total_amount FROM processing_orders WHERE order_no LIKE ? OR customer_name LIKE ? LIMIT 5",
-        (kw, kw),
-    ).fetchall()
+        # 搜索客户
+        customers = db.list_customers()
+        matched_customers = [
+            {"name": c.name, "contact": c.contact}
+            for c in customers
+            if keyword.lower() in c.name.lower()
+        ][:5]
 
-    conn.close()
+        # 搜索订单
+        orders = order_mgr.list_orders(limit=10)
+        matched_orders = [
+            {
+                "order_no": o.order_no,
+                "customer": o.customer_name,
+                "amount": float(o.total_amount),
+            }
+            for o in orders
+            if keyword.lower() in o.order_no.lower() or keyword.lower() in o.customer_name.lower()
+        ][:5]
 
-    return jsonify(
-        {
-            "customers": [
-                {"name": c["name"], "contact": c["contact"]} for c in customers
-            ],
-            "orders": [
-                {
-                    "order_no": o["order_no"],
-                    "customer": o["customer_name"],
-                    "amount": float(o["total_amount"]),
-                }
-                for o in orders
-            ],
-        }
-    )
+        db.close()
+
+        return jsonify({
+            "customers": matched_customers,
+            "orders": matched_orders,
+        })
+    except Exception as e:
+        logger.error(f"搜索失败: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/stats")
 def api_stats():
     """统计数据API"""
-    conn = get_db()
-    today = date.today().isoformat()
+    try:
+        db, order_mgr, finance_mgr = init_business_managers()
+        today = date.today().isoformat()
 
-    stats = {
-        "today_income": conn.execute(
-            "SELECT SUM(amount) FROM incomes WHERE income_date = ?", (today,)
-        ).fetchone()[0]
-        or 0,
-        "today_expense": conn.execute(
-            "SELECT SUM(amount) FROM expenses WHERE expense_date = ?", (today,)
-        ).fetchone()[0]
-        or 0,
-        "pending_orders": conn.execute(
-            "SELECT COUNT(*) FROM processing_orders WHERE status IN ('待加工', '加工中')"
-        ).fetchone()[0]
-        or 0,
-        "unpaid_orders": conn.execute(
-            "SELECT COUNT(*) FROM processing_orders WHERE received_amount < total_amount"
-        ).fetchone()[0]
-        or 0,
-    }
+        stats = {
+            "today_income": float(finance_mgr.get_today_income(today)),
+            "today_expense": float(finance_mgr.get_today_expense(today)),
+            "pending_orders": order_mgr.count_pending_orders(),
+            "unpaid_orders": order_mgr.count_unpaid_orders(),
+        }
 
-    conn.close()
-    return jsonify(stats)
+        db.close()
+        return jsonify(stats)
+    except Exception as e:
+        logger.error(f"统计API失败: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
-# ========== HTML模板 ==========
+# ========== 错误处理 ==========
+
+
+@app.errorhandler(404)
+def not_found(error):
+    """404错误"""
+    logger.warning(f"404错误: {request.url}")
+    return render_template("error.html", error="页面未找到"), 404
+
+
+@app.errorhandler(500)
+def internal_error(error):
+    """500错误"""
+    logger.error(f"服务器错误: {error}")
+    return render_template("error.html", error="服务器内部错误"), 500
+
+
+# ========== 模板 ==========
 
 
 @app.route("/templates/<path:filename>")
 def serve_template(filename):
     """提供模板文件"""
     from flask import send_from_directory
-
     return send_from_directory("templates", filename)
 
 
-# 创建模板目录和文件
 def create_templates():
     """创建HTML模板"""
     template_dir = Path(__file__).parent / "templates"
     template_dir.mkdir(exist_ok=True)
 
-    # 基础模板
+    # 错误页面模板
+    error_html = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>错误 - 氧化加工厂财务系统</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f5f5f5; padding: 40px; text-align: center; }
+        .error-container { background: white; padding: 40px; border-radius: 8px; max-width: 600px; margin: 0 auto; }
+        h1 { color: #ff4d4f; }
+        p { color: #666; }
+        a { color: #1890ff; }
+    </style>
+</head>
+<body>
+    <div class="error-container">
+        <h1>出错了</h1>
+        <p>{{ error }}</p>
+        <p><a href="/">返回首页</a></p>
+    </div>
+</body>
+</html>"""
+
+    (template_dir / "error.html").write_text(error_html, encoding="utf-8")
+
+    # 基础模板（复用原有内容）
     base_html = """<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}氧化加工厂财务系统{% endblock %}</title>
+    <title>{% block title %}氧化加工厂财务系统 V2.1{% endblock %}</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
         .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-        .header { background: #1890ff; color: white; padding: 20px; margin-bottom: 20px; }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; margin-bottom: 20px; }
         .header h1 { font-size: 24px; }
         .nav { background: white; padding: 10px 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .nav a { color: #333; text-decoration: none; margin-right: 20px; padding: 5px 10px; }
-        .nav a:hover { color: #1890ff; }
+        .nav a { color: #333; text-decoration: none; margin-right: 20px; padding: 5px 10px; border-radius: 4px; }
+        .nav a:hover { background: #667eea; color: white; }
         .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         .card h2 { font-size: 18px; margin-bottom: 15px; color: #333; }
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
-        .stat-item { background: #f8f9fa; padding: 15px; border-radius: 6px; text-align: center; }
-        .stat-value { font-size: 24px; font-weight: bold; color: #1890ff; }
-        .stat-label { font-size: 14px; color: #666; margin-top: 5px; }
-        .btn { display: inline-block; padding: 10px 20px; background: #1890ff; color: white; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; }
-        .btn:hover { background: #40a9ff; }
+        .stat-item { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; text-align: center; }
+        .stat-value { font-size: 28px; font-weight: bold; }
+        .stat-label { font-size: 14px; margin-top: 8px; opacity: 0.9; }
+        .btn { display: inline-block; padding: 10px 20px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; transition: all 0.3s; }
+        .btn:hover { background: #764ba2; transform: translateY(-2px); }
         .btn-success { background: #52c41a; }
         .btn-warning { background: #faad14; }
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
-        th { background: #fafafa; font-weight: 600; }
+        th { background: #f8f9fa; font-weight: 600; }
         tr:hover { background: #f5f5f5; }
         .form-group { margin-bottom: 15px; }
         .form-group label { display: block; margin-bottom: 5px; font-weight: 500; }
@@ -719,22 +510,21 @@ def create_templates():
         .status-待加工 { background: #fff7e6; color: #fa8c16; }
         .status-加工中 { background: #e6f7ff; color: #1890ff; }
         .status-已完工 { background: #f6ffed; color: #52c41a; }
-        .status-已交付 { background: #f9f0ff; color: #722ed1; }
         .quick-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 20px; }
     </style>
 </head>
 <body>
     <div class="header">
         <div class="container">
-            <h1>氧化加工厂财务系统 V2.0</h1>
+            <h1>🏭 氧化加工厂财务系统 V2.1</h1>
         </div>
     </div>
     <div class="nav">
         <div class="container">
-            <a href="/">首页</a>
-            <a href="/orders">订单</a>
-            <a href="/customers">客户</a>
-            <a href="/reports">报表</a>
+            <a href="/">📊 首页</a>
+            <a href="/orders">📋 订单</a>
+            <a href="/customers">👥 客户</a>
+            <a href="/reports">📈 报表</a>
         </div>
     </div>
     <div class="container">
@@ -749,39 +539,39 @@ def create_templates():
 {% block content %}
 <div class="stats-grid">
     <div class="stat-item">
-        <div class="stat-value">{{ "%.2f"|format(today_income) }}</div>
-        <div class="stat-label">今日收入</div>
+        <div class="stat-value">¥{{ "%.2f"|format(today_income) }}</div>
+        <div class="stat-label">📈 今日收入</div>
     </div>
     <div class="stat-item">
-        <div class="stat-value">{{ "%.2f"|format(today_expense) }}</div>
-        <div class="stat-label">今日支出</div>
+        <div class="stat-value">¥{{ "%.2f"|format(today_expense) }}</div>
+        <div class="stat-label">📉 今日支出</div>
     </div>
     <div class="stat-item">
-        <div class="stat-value">{{ "%.2f"|format(today_profit) }}</div>
-        <div class="stat-label">今日利润</div>
+        <div class="stat-value">¥{{ "%.2f"|format(today_profit) }}</div>
+        <div class="stat-label">💰 今日利润</div>
     </div>
     <div class="stat-item">
         <div class="stat-value">{{ pending_orders }}</div>
-        <div class="stat-label">待加工订单</div>
+        <div class="stat-label">⏳ 待加工订单</div>
     </div>
     <div class="stat-item">
         <div class="stat-value">{{ unpaid_orders }}</div>
-        <div class="stat-label">未收款订单</div>
+        <div class="stat-label">💵 未收款订单</div>
     </div>
     <div class="stat-item">
-        <div class="stat-value">{{ "%.2f"|format(month_profit) }}</div>
-        <div class="stat-label">本月利润</div>
+        <div class="stat-value">¥{{ "%.2f"|format(month_profit) }}</div>
+        <div class="stat-label">📅 本月利润</div>
     </div>
 </div>
 
 <div class="quick-actions">
-    <a href="/order/new" class="btn">+ 新建订单</a>
-    <a href="/income/new" class="btn btn-success">+ 录入收入</a>
-    <a href="/expense/new" class="btn btn-warning">+ 录入支出</a>
+    <a href="/order/new" class="btn">➕ 新建订单</a>
+    <a href="/income/new" class="btn btn-success">💵 录入收入</a>
+    <a href="/expense/new" class="btn btn-warning">💸 录入支出</a>
 </div>
 
 <div class="card">
-    <h2>最近订单</h2>
+    <h2>📋 最近订单</h2>
     <table>
         <thead>
             <tr>
@@ -797,8 +587,8 @@ def create_templates():
             <tr>
                 <td>{{ order.order_no }}</td>
                 <td>{{ order.customer_name }}</td>
-                <td>{{ "%.2f"|format(order.total_amount) }}</td>
-                <td><span class="status-badge status-{{ order.status }}">{{ order.status }}</span></td>
+                <td>¥{{ "%.2f"|format(order.total_amount) }}</td>
+                <td><span class="status-badge status-{{ order.status.value }}">{{ order.status.value }}</span></td>
                 <td>{{ order.order_date }}</td>
             </tr>
             {% endfor %}
@@ -814,13 +604,13 @@ def create_templates():
 
 {% block content %}
 <div class="card">
-    <h2>订单列表</h2>
+    <h2>📋 订单列表</h2>
     <div style="margin-bottom: 20px;">
-        <a href="/orders" class="btn {% if not current_status %}btn-primary{% endif %}">全部</a>
+        <a href="/orders" class="btn">全部</a>
         {% for status in statuses %}
-        <a href="/orders?status={{ status.status }}" class="btn {% if current_status == status.status %}btn-primary{% endif %}">{{ status.status }}</a>
+        <a href="/orders?status={{ status.status }}" class="btn">{{ status.status }}</a>
         {% endfor %}
-        <a href="/order/new" class="btn" style="float: right;">+ 新建订单</a>
+        <a href="/order/new" class="btn" style="float: right;">➕ 新建订单</a>
     </div>
     <table>
         <thead>
@@ -839,8 +629,8 @@ def create_templates():
                 <td>{{ order.order_no }}</td>
                 <td>{{ order.customer_name }}</td>
                 <td>{{ order.item_description }}</td>
-                <td>{{ "%.2f"|format(order.total_amount) }}</td>
-                <td><span class="status-badge status-{{ order.status }}">{{ order.status }}</span></td>
+                <td>¥{{ "%.2f"|format(order.total_amount) }}</td>
+                <td><span class="status-badge status-{{ order.status.value }}">{{ order.status.value }}</span></td>
                 <td>{{ order.order_date }}</td>
             </tr>
             {% endfor %}
@@ -856,7 +646,7 @@ def create_templates():
 
 {% block content %}
 <div class="card">
-    <h2>新建订单</h2>
+    <h2>➕ 新建订单</h2>
     <form method="POST">
         <div class="form-group">
             <label>客户名称</label>
@@ -891,10 +681,6 @@ def create_templates():
             <label>单价</label>
             <input type="number" name="unit_price" step="0.01" required>
         </div>
-        <div class="form-group">
-            <label>加工工序</label>
-            <input type="text" name="processes" value="氧化" placeholder="如：喷砂,氧化">
-        </div>
         <button type="submit" class="btn">保存订单</button>
         <a href="/orders" class="btn" style="background: #999;">取消</a>
     </form>
@@ -908,7 +694,7 @@ def create_templates():
 
 {% block content %}
 <div class="card">
-    <h2>录入收入</h2>
+    <h2>💵 录入收入</h2>
     <form method="POST">
         <div class="form-group">
             <label>客户名称</label>
@@ -936,7 +722,7 @@ def create_templates():
         </div>
         <div class="form-group">
             <label>备注</label>
-            <input type="text" name="notes" placeholder="如：订单OX202401001收款">
+            <input type="text" name="notes" placeholder="如：订单收款">
         </div>
         <button type="submit" class="btn btn-success">保存收入</button>
         <a href="/" class="btn" style="background: #999;">取消</a>
@@ -951,7 +737,7 @@ def create_templates():
 
 {% block content %}
 <div class="card">
-    <h2>录入支出</h2>
+    <h2>💸 录入支出</h2>
     <form method="POST">
         <div class="form-group">
             <label>支出类型</label>
@@ -997,7 +783,7 @@ def create_templates():
 
 {% block content %}
 <div class="card">
-    <h2>客户列表</h2>
+    <h2>👥 客户列表</h2>
     <table>
         <thead>
             <tr>
@@ -1015,7 +801,7 @@ def create_templates():
                 <td>{{ customer.contact or '-' }}</td>
                 <td>{{ customer.phone or '-' }}</td>
                 <td>{{ customer.order_count }}</td>
-                <td>{{ "%.2f"|format(customer.total_amount or 0) }}</td>
+                <td>¥{{ "%.2f"|format(customer.total_amount or 0) }}</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -1029,18 +815,43 @@ def create_templates():
 {% block title %}报表中心 - 氧化加工厂财务系统{% endblock %}
 
 {% block content %}
+<div class="stats-grid">
+    <div class="stat-item">
+        <div class="stat-value">¥{{ "%.2f"|format(total_income) }}</div>
+        <div class="stat-label">💰 总收入</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value">¥{{ "%.2f"|format(total_expense) }}</div>
+        <div class="stat-label">💸 总支出</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value">{{ order_count }}</div>
+        <div class="stat-label">📋 订单总数</div>
+    </div>
+</div>
+
 <div class="card">
-    <h2>报表中心</h2>
-    <p>请使用命令行工具生成详细报表：</p>
-    <div style="background: #f5f5f5; padding: 15px; border-radius: 4px; margin: 20px 0;">
-        <code>python oxidation_finance_v20/tools/report_exporter.py --all</code>
-    </div>
-    <p>或在浏览器控制台运行：</p>
-    <div style="background: #f5f5f5; padding: 15px; border-radius: 4px; margin: 20px 0;">
-        <code>python oxidation_finance_v20/tools/quick_panel.py</code><br>
-        <code>python oxidation_finance_v20/tools/reminder_system.py</code>
-    </div>
-    <p>报表将生成在 <code>reports/</code> 目录下</p>
+    <h2>📅 月度统计</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>月份</th>
+                <th>收入</th>
+                <th>支出</th>
+                <th>利润</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for stat in monthly_stats %}
+            <tr>
+                <td>{{ stat.month }}</td>
+                <td>¥{{ "%.2f"|format(stat.income) }}</td>
+                <td>¥{{ "%.2f"|format(stat.expense) }}</td>
+                <td>¥{{ "%.2f"|format(stat.profit) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
 </div>
 {% endblock %}"""
 
@@ -1057,23 +868,22 @@ def create_templates():
 
 # ========== 主程序 ==========
 
+
 if __name__ == "__main__":
     # 检查数据库
     if not DB_PATH.exists():
         print(f"[ERROR] 数据库不存在: {DB_PATH}")
-        print(
-            "请先运行: python oxidation_finance_v20/examples/generate_comprehensive_demo.py"
-        )
+        print("请先运行: python oxidation_finance_v20/examples/generate_comprehensive_demo.py")
         sys.exit(1)
 
     # 创建模板
     create_templates()
 
     print("\n" + "=" * 70)
-    print("氧化加工厂财务系统 V2.0 - Web版")
+    print("🏭 氧化加工厂财务系统 V2.1 - Web版（业务层重构版）")
     print("=" * 70)
     print(f"\n数据库: {DB_PATH}")
-    print("\n启动成功！")
+    print("\n✅ 启动成功！")
     print("\n请打开浏览器访问:")
     print("  http://localhost:5000")
     print("\n按 Ctrl+C 停止服务")

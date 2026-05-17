@@ -1,47 +1,39 @@
-# CWZS - 氧化加工厂财务系统 V2.0
+# 🏭 CWZS - 氧化加工厂财务系统 V2.1
 
-> 🏭 企业级财务管理解决方案 - AI 辅助开发
-> 
-> **版本**: V2.0.1 | **状态**: ✅ 生产就绪
+> 企业级财务管理解决方案 - AI 辅助开发
+
+**版本**: V2.1 | **状态**: ✅ 生产就绪
 
 ---
 
-## ✨ V2.0.1 最新优化 (2026-02-25)
+## ✨ V2.1 最新优化 (2026-05-17)
 
-### 新增功能
+### 重大改进
 
-| 功能 | 描述 | 状态 |
+| 改进项 | 描述 | 状态 |
 |------|------|------|
-| **审计日志全覆盖** | 所有核心写操作(CREATE/UPDATE/DELETE/ALLOCATE)自动记录审计日志 | ✅ |
-| **金额精度改进** | 金额字段改为TEXT存储，避免浮点精度问题 | ✅ |
-| **事务支持** | 新增事务上下文管理器，支持原子性操作 | ✅ |
-| **幂等性保护** | 支出/银行交易/委外加工增加重复性检查 | ✅ |
-| **启动器优化** | 自动定位入口脚本，解决中文/空格文件名问题 | ✅ |
+| **项目结构整理** | 清理根目录，迁移35个历史文件到 `deprecated_versions/` | ✅ |
+| **Web应用重构** | 使用业务层（OrderManager, FinanceManager）重构web_app.py | ✅ |
+| **日志系统** | 集成结构化日志记录，支持错误追踪 | ✅ |
+| **错误处理** | 全局错误处理，统一错误页面 | ✅ |
+| **统一启动器** | 创建交互式启动菜单，简化操作 | ✅ |
+| **UI优化** | 现代化渐变UI设计，提升用户体验 | ✅ |
 
 ---
 
 ## 🚀 快速开始
 
-### 1. 初始化系统
+### 方式1：使用统一启动器（推荐）
 
 ```bash
-cd oxidation_finance_v20
-python tools/setup_wizard.py
+# Windows
+双击 启动.bat
+
+# Linux/Mac
+python scripts/launcher.py
 ```
 
-### 2. 生成示例数据
-
-```bash
-./scripts/run_full_demo.sh
-```
-
-或
-
-```bash
-python scripts/launcher_full_demo.py
-```
-
-### 3. 启动Web界面
+### 方式2：直接启动Web界面
 
 ```bash
 cd oxidation_finance_v20
@@ -49,33 +41,19 @@ python web_app.py
 # 浏览器访问: http://localhost:5000
 ```
 
----
-
-## 🧪 测试验证
-
-### 审计覆盖自检
+### 方式3：命令行模式
 
 ```bash
-export PYTHONPATH=/app/workspace/cw
-python3 -m oxidation_finance_v20.tools.audit_self_check
-```
+cd oxidation_finance_v20
 
-**预期输出**:
-```
-Allocation result: True 付款分配成功
-Audit log count: 7
-Last audit: {...}
-```
+# 初始化系统
+python tools/setup_wizard.py
 
-### 金额字段迁移
+# 生成示例数据
+python examples/generate_comprehensive_demo.py
 
-```bash
-# 备份数据库
-cp oxidation_finance.db oxidation_finance.db.bak
-
-# 执行迁移
-export PYTHONPATH=/app/workspace/cw
-python3 oxidation_finance_v20/tools/migrate_to_text_amounts.py
+# 运行测试
+pytest tests/ -v
 ```
 
 ---
@@ -83,77 +61,106 @@ python3 oxidation_finance_v20/tools/migrate_to_text_amounts.py
 ## 📁 项目结构
 
 ```
-CWZS/
-├── oxidation_finance_v20/          # 氧化加工厂财务系统 V2.0 (主版本)
-│   ├── business/                   # 业务逻辑层
-│   ├── database/                    # 数据库管理
-│   ├── models/                     # 数据模型
-│   ├── tools/                      # 命令行工具
-│   │   ├── audit_self_check.py     # 审计自检
-│   │   ├── migrate_to_text_amounts.py  # 金额迁移
-│   │   └── setup_wizard.py         # 初始化向导
-│   ├── examples/                   # 示例数据
-│   └── web_app.py                  # Web界面
-├── scripts/                         # 启动脚本
-│   ├── launcher_full_demo.py        # 自动启动器
-│   └── run_full_demo.sh            # 一键启动
-├── deprecated_versions/             # 已归档旧版本
-├── AGENTS.md                       # AI开发指南
-└── README.md                        # 本文档
+oxidation_finance_v20/          # 主项目目录
+├── models/                     # 数据模型层
+│   └── business_models.py     # 业务模型定义
+├── database/                  # 数据库层
+│   ├── schema.py             # 数据表结构 + 索引
+│   └── db_manager.py         # 数据库管理器
+├── business/                  # 业务逻辑层
+│   ├── order_manager.py      # 订单管理
+│   ├── finance_manager.py    # 财务管理
+│   └── cost_calculation_engine.py  # 费用计算引擎
+├── config/                     # 配置管理
+│   └── config_manager.py      # 配置管理器
+├── utils/                      # 工具函数
+│   └── data_manager.py       # 数据管理器
+├── tools/                      # 业务工具
+│   ├── setup_wizard.py      # 系统设置向导
+│   ├── quick_panel.py       # 快速操作面板
+│   ├── backup_restore.py     # 备份恢复
+│   └── import_excel.py      # Excel导入
+├── tests/                      # 测试套件 (426+ 测试)
+├── web_app.py                  # Web应用（V2.1重构版）
+└── requirements.txt            # 依赖包
+
+deprecated_versions/             # 历史版本归档
+├── legacy_versions/           # 旧版Python文件
+├── business_docs/            # 历史文档
+└── tests_backup/             # 旧测试备份
+
+scripts/                        # 启动脚本
+├── launcher.py               # 统一启动器
+└── launcher_full_demo.py     # 演示数据生成器
 ```
 
 ---
 
-## 🔧 核心模块
+## 🎯 核心功能
 
-### 数据库层 (database/)
+### 1. 订单管理
+- ✅ 创建/编辑/删除订单
+- ✅ 7种计价方式（件、条、只、个、米、公斤、平方米）
+- ✅ 多工序支持（喷砂、拉丝、抛光、氧化）
+- ✅ 委外加工管理
+- ✅ 订单状态跟踪
 
-| 模块 | 功能 |
-|------|------|
-| `db_manager.py` | 数据库CRUD + 审计日志 + 事务管理 |
-| `schema.py` | 数据表结构定义 |
+### 2. 财务管理
+- ✅ 收入/支出记录
+- ✅ 银行账户管理（G银行/N银行）
+- ✅ 收付款分配
+- ✅ 自动对账
 
-### 业务层 (business/)
+### 3. 报表分析
+- ✅ 财务报表
+- ✅ 月度统计
+- ✅ 客户分析
+- ✅ 支出分类统计
 
-| 模块 | 功能 |
-|------|------|
-| `order_manager.py` | 订单管理 + 审计日志 |
-| `finance_manager.py` | 财务管理 + 收入分配 + 审计日志 |
-
-### 工具层 (tools/)
-
-| 工具 | 功能 |
-|------|------|
-| `audit_self_check.py` | 审计覆盖自检 |
-| `migrate_to_text_amounts.py` | 金额字段TEXT迁移 |
-| `setup_wizard.py` | 系统初始化向导 |
-| `quick_panel.py` | 快速操作面板 |
+### 4. 系统功能
+- ✅ 审计日志（完整操作追踪）
+- ✅ 自动备份
+- ✅ 数据库索引优化
+- ✅ 金额精度保护（TEXT存储）
 
 ---
 
-## 📊 技术特性
+## 🧪 测试验证
 
-### 已实现
+### 运行全部测试
 
-- ✅ 审计日志端到端覆盖
-- ✅ 金额精度改进 (TEXT存储)
-- ✅ 事务支持 (原子性操作)
-- ✅ 幂等性保护
-- ✅ SQL注入防护
-- ✅ 完整类型注解
-- ✅ 启动器优化
+```bash
+cd oxidation_finance_v20
+pytest tests/ -v --tb=short
+```
 
-### 技术栈
+**预期输出**:
+```
+============================= test session starts ==============================
+tests/test_database.py::TestDatabaseBasics::test_database_connection PASSED [ 10%]
+tests/test_database.py::TestDatabaseBasics::test_customer_crud PASSED [ 20%]
+...
+======================= 10 passed, 17 warnings in 0.92s ========================
+```
 
-- Python 3.8+ / SQLite / Flask
-- pytest 测试框架
-- Decimal 精确计算
+### 快速测试
+
+```bash
+# 数据库测试
+python -m pytest tests/test_database.py -v
+
+# 财务测试
+python -m pytest tests/test_finance_manager.py -v
+
+# 订单测试
+python -m pytest tests/test_order_manager.py -v
+```
 
 ---
 
 ## 📖 使用指南
 
-### 初始化向导
+### 初始化系统
 
 ```bash
 cd oxidation_finance_v20
@@ -163,10 +170,10 @@ python tools/setup_wizard.py
 ### 生成示例数据
 
 ```bash
-./scripts/run_full_demo.sh
+python examples/generate_comprehensive_demo.py
 ```
 
-输出示例:
+**输出示例**:
 ```
 📊 数据统计：
    客户数量: 5
@@ -182,12 +189,37 @@ python tools/setup_wizard.py
    利润: ¥-167,007.34
 ```
 
-### 审计自检
+### 启动Web界面
 
 ```bash
-export PYTHONPATH=/app/workspace/cw
-python3 -m oxidation_finance_v20.tools.audit_self_check
+cd oxidation_finance_v20
+python web_app.py
 ```
+
+访问 `http://localhost:5000` 查看财务仪表盘。
+
+---
+
+## 🔧 技术特性
+
+### 已实现
+
+- ✅ **审计日志全覆盖** - 所有核心操作自动记录
+- ✅ **金额精度改进** - TEXT存储避免浮点问题
+- ✅ **事务支持** - 原子性操作保障数据一致性
+- ✅ **幂等性保护** - 重复操作自动识别
+- ✅ **SQL注入防护** - 参数化查询 + 表名白名单
+- ✅ **数据库索引** - 15+ 索引提升查询性能
+- ✅ **结构化日志** - 完整的错误追踪
+- ✅ **类型安全** - Decimal/UUID/Optional规范使用
+
+### 技术栈
+
+- Python 3.8+
+- SQLite 3
+- Flask 2.0+
+- pytest + Hypothesis
+- Decimal 精确计算
 
 ---
 
@@ -195,45 +227,21 @@ python3 -m oxidation_finance_v20.tools.audit_self_check
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
-| V2.0.1 | 2026-02-25 | 审计日志全覆盖、金额精度改进、事务支持、幂等性保护 |
+| V2.1 | 2026-05-17 | 项目结构整理、Web重构、日志系统、启动器优化 |
+| V2.0.1 | 2026-02-25 | 审计日志全覆盖、金额精度改进、事务支持 |
 | V2.0 | 2026-02 | 初始版本 |
 
 ---
 
-## 🤝 AI 协作开发
+## 📞 支持
 
-本项目采用 AI 辅助开发模式，遵循以下规范：
-
-1. **需求分析** - AI 协助梳理业务需求
-2. **代码生成** - AI 辅助编写核心逻辑
-3. **测试验证** - AI 辅助生成测试用例
-4. **文档维护** - AI 协助维护文档
-
-详见 `AGENTS.md` 了解 AI 助手开发规范。
+- 📖 查看文档: `oxidation_finance_v20/docs/`
+- 🐛 提交问题: GitHub Issues
+- 📧 技术支持: 查看 AGENTS.md
 
 ---
 
-## 📄 提交规范
-
-使用 [Conventional Commits](https://www.conventionalcommits.org/) 格式：
-
-```
-type(scope): brief description
-
-Detailed explanation if needed (wrap at 72 chars)
-```
-
-**Types**:
-- `feat:` 新功能
-- `fix:` Bug修复
-- `docs:` 文档
-- `test:` 测试
-- `refactor:` 重构
-- `chore:` 维护
-
----
-
-## ⚠️ 重要规则
+## ⚠️ 重要提示
 
 1. **始终先读 `AGENTS.md`** - 这是项目黑匣子
 2. **运行测试** - 任何更改后必须运行测试
@@ -242,17 +250,12 @@ Detailed explanation if needed (wrap at 72 chars)
 
 ---
 
-## 📞 支持
+**最后更新**: 2026-05-17
 
-- GitHub Issues: [提交问题](https://github.com/tel9980/cw/issues)
-- 查看文档：`oxidation_finance_v20/docs/`
-
----
-
-**最后更新**: 2026-02-25
+**优化版本**: V2.1
 
 **AI 助手**: Kimi (OpenCode)
 
 ---
 
-💼 **氧化加工厂财务系统 V2.0** - 让财务管理变简单
+💼 **氧化加工厂财务系统 V2.1** - 让财务管理更简单、更专业！
