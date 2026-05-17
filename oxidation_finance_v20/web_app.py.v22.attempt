@@ -1,0 +1,542 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Web版财务系统 V2.2 - 使用业务层重构 + 性能监控 + API文档
+
+功能：
+- 今日概览仪表盘
+- 快速录入（订单/收入/支出）
+- 数据查看与搜索
+- 报表中心
+- 自动备份
+
+优化：
+- 使用业务层（OrderManager, FinanceManager）
+- 更好的错误处理
+- 结构化日志记录
+- 独立的HTML模板文件
+- 性能监控中间件
+- API文档页面
+
+使用方法：
+    python web_app.py
+    然后打开浏览器访问: http://localhost:5000
+"""
+
+import sys
+import logging
+import time
+from pathlib import Path
+from datetime import date
+from decimal import Decimal
+from collections import defaultdict
+
+try:
+    from flask import Flask, render_template, request, jsonify, redirect, url_for, g
+except ImportError:
+    print("[ERROR] 需要先安装Flask:")
+    print("  pip install flask")
+    sys.exit(1)
+
+# 设置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+app = Flask(__name__, 
+            template_folder=Path(__file__).resolve().parent / "templates",
+            static_folder=Path(__file__).resolve().parent / "static")
+app.jinja_env.auto_reload = True
+app.config["TEMPLATES_AUTO_RELOAD"] = True
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
+
+# 性能统计
+request_stats = defaultdict(list)
+
+# 数据库路径
+DB_PATH = Path(__file__).resolve().parent / "oxidation_finance_demo_ready.db"
+if not DB_PATH.exists():
+    DB_PATH = Path(__file__).resolve().parent / "oxidation_finance_demo.db"
+
+# 业务层组件
+try:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from database.db_manager import DatabaseManager
+    from business.order_manager import OrderManager
+    from business.finance_manager import FinanceManager
+    from models.business_models import (
+        Customer, ProcessingOrder, Income, Expense, BankType,
+        PricingUnit, ProcessType, OrderStatus, ExpenseType
+    )
+    logger.info("✅ 业务层组件加载成功")
+except ImportError as e:
+    logger.error(f"❌ 无法导入业务层组件: {e}")
+    print("[ERROR] 无法导入业务层组件:")
+    print("  请确保项目结构正确")
+    sys.exit(1)
+
+
+# ========== 性能监控中间件 ==========
+
+@app.before_request
+def before_request():
+    """请求开始前记录时间"""
+    g.start_time = time.time()
+
+
+@app.after_request
+def after_request(response):
+    """请求结束后记录性能"""
+    if hasattr(g, 'start_time'):
+        duration = (time.time() - g.start_time) * 1000  # 毫秒
+        endpoint = request.endpoint or 'unknown'
+        
+        # 记录到日志
+        if duration > 500:  # 超过500ms的请求
+            logger.warning(f"⚠️ 慢请求: {endpoint} - {duration:.2f}ms")
+        else:
+            logger.info(f"📊 请求完成: {endpoint} - {duration:.2f}ms")
+        
+        # 记录统计
+        request_stats[endpoint].append(duration)
+    
+    return response
+
+
+# ========== API 文档路由 ==========
+
+@app.route('/api-docs')
+def api_docs():
+    """API 文档页面"""
+    # 统计信息
+    stats_summary = {}
+    for endpoint, times in request_stats.items():
+        if times:
+            stats_summary[endpoint] = {
+                'count': len(times),
+                'avg': sum(times) / len(times),
+                'max': max(times),
+                'min': min(times)
+            }
+    
+    return render_template('api_docs.html', stats=stats_summary)
+
+
+# ========== 数据库连接 ==========
+
+def get_db():
+    """获取数据库连接"""
+    try:
+        db = DatabaseManager(str(DB_PATH))
+        db.connect()
+        return db
+    except Exception as e:
+        logger.error(f"数据库连接失败: {e}")
+        raise
+
+
+def init_business_managers():
+    """初始化业务管理器"""
+    db = get_db()
+    order_mgr = OrderManager(db)
+    finance_mgr = FinanceManager(db)
+    return db, order_mgr, finance_mgr
+
+
+# ========== 页面路由 ==========
+
+
+@app.route("/")
+def index():
+    """首页 - 仪表盘"""
+    logger.info("访问首页仪表盘")
+
+    try:
+        db, order_mgr, finance_mgr = init_business_managers()
+        today = date.today().isoformat()
+
+        # 今日统计
+        today_income = finance_mgr.get_today_income(today)
+        today_expense = finance_mgr.get_today_expense(today)
+
+        # 待处理订单
+        pending_orders = order_mgr.count_pending_orders()
+        unpaid_orders = order_mgr.count_unpaid_orders()
+
+        # 本月统计
+        month_start = date.today().replace(day=1).isoformat()
+        month_income = finance_mgr.get_income_by_period(month_start)
+        month_expense = finance_mgr.get_expense_by_period(month_start)
+
+        # 最近记录
+        recent_orders = order_mgr.list_orders(limit=5)
+        recent_incomes = finance_mgr.list_incomes(limit=5)
+        recent_expenses = finance_mgr.list_expenses(limit=5)
+
+        db.close()
+
+        return render_template(
+            "index.html",
+            today_income=today_income,
+            today_expense=today_expense,
+            today_profit=today_income - today_expense,
+            pending_orders=pending_orders,
+            unpaid_orders=unpaid_orders,
+            month_income=month_income,
+            month_expense=month_expense,
+            month_profit=month_income - month_expense,
+            recent_orders=recent_orders,
+            recent_incomes=recent_incomes,
+            recent_expenses=recent_expenses,
+        )
+    except Exception as e:
+        logger.error(f"首页加载失败: {e}")
+        return render_template("error.html", error=str(e)), 500
+
+
+@app.route("/orders")
+def orders():
+    """订单列表"""
+    logger.info("访问订单列表")
+
+    try:
+        db, order_mgr, _ = init_business_managers()
+        status_filter = request.args.get("status", "")
+
+        if status_filter:
+            orders_list = order_mgr.list_orders(status=OrderStatus(status_filter))
+        else:
+            orders_list = order_mgr.list_orders(limit=50)
+
+        statuses = [{'status': s.value} for s in OrderStatus]
+        db.close()
+
+        return render_template(
+            "orders.html",
+            orders=orders_list,
+            statuses=statuses,
+            current_status=status_filter
+        )
+    except Exception as e:
+        logger.error(f"订单列表加载失败: {e}")
+        return render_template("error.html", error=str(e)), 500
+
+
+@app.route("/order/new", methods=["GET", "POST"])
+def new_order():
+    """新建订单"""
+    logger.info("访问新建订单页面")
+
+    try:
+        db, order_mgr, _ = init_business_managers()
+
+        if request.method == "POST":
+            # 从表单获取数据
+            customer_name = request.form["customer_name"]
+            quantity = Decimal(request.form["quantity"])
+            unit_price = Decimal(request.form["unit_price"])
+            total_amount = quantity * unit_price
+
+            # 获取或创建客户
+            customers_list = db.list_customers()
+            customer = next((c for c in customers_list if c.name == customer_name), None)
+
+            if not customer:
+                customer = Customer(name=customer_name)
+                db.save_customer(customer)
+
+            # 创建订单
+            order = ProcessingOrder(
+                order_no=order_mgr.generate_order_no(),
+                customer_id=customer.id,
+                customer_name=customer_name,
+                item_description=request.form.get("item_description", ""),
+                quantity=quantity,
+                pricing_unit=PricingUnit(request.form["pricing_unit"]),
+                unit_price=unit_price,
+                total_amount=total_amount,
+                processes=[ProcessType.OXIDATION],
+                status=OrderStatus.PENDING,
+                order_date=date.today(),
+            )
+
+            order_mgr.save_order(order)
+            db.close()
+
+            logger.info(f"✅ 新建订单成功: {order.order_no}")
+            return redirect(url_for("orders"))
+
+        # GET请求
+        customers_list = db.list_customers()
+        db.close()
+
+        return render_template(
+            "order_form.html", 
+            customers=[{'name': c.name} for c in customers_list],
+            today=date.today().isoformat()
+        )
+
+    except Exception as e:
+        logger.error(f"新建订单失败: {e}")
+        return render_template("error.html", error=str(e)), 500
+
+
+@app.route("/income/new", methods=["GET", "POST"])
+def new_income():
+    """录入收入"""
+    logger.info("访问录入收入页面")
+
+    try:
+        db, _, finance_mgr = init_business_managers()
+
+        if request.method == "POST":
+            income = Income(
+                customer_name=request.form["customer_name"],
+                amount=Decimal(request.form["amount"]),
+                bank_type=BankType(request.form["bank_type"]),
+                income_date=date.fromisoformat(request.form.get("income_date", date.today().isoformat())),
+                notes=request.form.get("notes", ""),
+            )
+
+            finance_mgr.record_income(income)
+            db.close()
+
+            logger.info(f"✅ 录入收入成功: ¥{income.amount}")
+            return redirect(url_for("index"))
+
+        # GET请求
+        customers_list = db.list_customers()
+        db.close()
+
+        return render_template(
+            "income_form.html", 
+            customers=[{'name': c.name} for c in customers_list],
+            today=date.today().isoformat()
+        )
+
+    except Exception as e:
+        logger.error(f"录入收入失败: {e}")
+        return render_template("error.html", error=str(e)), 500
+
+
+@app.route("/expense/new", methods=["GET", "POST"])
+def new_expense():
+    """录入支出"""
+    logger.info("访问录入支出页面")
+
+    try:
+        db, _, finance_mgr = init_business_managers()
+
+        if request.method == "POST":
+            expense = Expense(
+                expense_type=ExpenseType(request.form["expense_type"]),
+                supplier_name=request.form.get("supplier_name", ""),
+                amount=Decimal(request.form["amount"]),
+                bank_type=BankType(request.form["bank_type"]),
+                expense_date=date.fromisoformat(request.form.get("expense_date", date.today().isoformat())),
+                description=request.form.get("description", ""),
+            )
+
+            finance_mgr.record_expense(expense)
+            db.close()
+
+            logger.info(f"✅ 录入支出成功: ¥{expense.amount}")
+            return redirect(url_for("index"))
+
+        # GET请求
+        db.close()
+        expense_types = [et.value for et in ExpenseType]
+
+        return render_template(
+            "expense_form.html", 
+            expense_types=expense_types,
+            today=date.today().isoformat()
+        )
+
+    except Exception as e:
+        logger.error(f"录入支出失败: {e}")
+        return render_template("error.html", error=str(e)), 500
+
+
+@app.route("/customers")
+def customers():
+    """客户列表"""
+    logger.info("访问客户列表")
+
+    try:
+        db, _, _ = init_business_managers()
+        customers_list = db.list_customers()
+        db.close()
+
+        # 增强客户信息（添加订单统计）
+        customers_data = []
+        for c in customers_list:
+            customers_data.append({
+                'name': c.name,
+                'contact': c.contact,
+                'phone': c.phone,
+                'order_count': 0,
+                'total_amount': 0
+            })
+
+        return render_template("customers.html", customers=customers_data)
+
+    except Exception as e:
+        logger.error(f"客户列表加载失败: {e}")
+        return render_template("error.html", error=str(e)), 500
+
+
+@app.route("/reports")
+def reports():
+    """报表中心"""
+    logger.info("访问报表中心")
+
+    try:
+        db, _, finance_mgr = init_business_managers()
+
+        # 获取财务统计
+        stats = finance_mgr.get_financial_summary()
+        monthly_stats = finance_mgr.get_monthly_stats(limit=12)
+        top_customers = finance_mgr.get_top_customers(limit=10)
+        expense_by_type = finance_mgr.get_expense_by_type()
+
+        db.close()
+
+        return render_template(
+            "reports.html",
+            total_income=stats.get('total_income', 0),
+            total_expense=stats.get('total_expense', 0),
+            order_count=stats.get('order_count', 0),
+            monthly_stats=monthly_stats,
+            top_customers=top_customers,
+            expense_by_type=expense_by_type,
+        )
+    except Exception as e:
+        logger.error(f"报表中心加载失败: {e}")
+        return render_template("error.html", error=str(e)), 500
+
+
+# ========== API 路由 ==========
+
+
+@app.route("/api/search")
+def api_search():
+    """搜索API
+    
+    搜索客户和订单信息
+    
+    参数:
+        q: 搜索关键词
+    
+    返回:
+        JSON格式的搜索结果
+    """
+    keyword = request.args.get("q", "")
+    if not keyword:
+        return jsonify({"results": []})
+
+    logger.info(f"搜索: {keyword}")
+
+    try:
+        db, order_mgr, _ = init_business_managers()
+
+        # 搜索客户
+        customers_list = db.list_customers()
+        matched_customers = [
+            {"name": c.name, "contact": c.contact}
+            for c in customers_list
+            if keyword.lower() in c.name.lower()
+        ][:5]
+
+        # 搜索订单
+        orders_list = order_mgr.list_orders(limit=10)
+        matched_orders = [
+            {
+                "order_no": o.order_no,
+                "customer": o.customer_name,
+                "amount": float(o.total_amount),
+            }
+            for o in orders_list
+            if keyword.lower() in o.order_no.lower() or keyword.lower() in o.customer_name.lower()
+        ][:5]
+
+        db.close()
+
+        return jsonify({
+            "customers": matched_customers,
+            "orders": matched_orders,
+        })
+    except Exception as e:
+        logger.error(f"搜索失败: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/stats")
+def api_stats():
+    """统计数据API
+    
+    获取今日统计和待处理订单数
+    
+    返回:
+        JSON格式的统计数据
+    """
+    try:
+        db, order_mgr, finance_mgr = init_business_managers()
+        today = date.today().isoformat()
+
+        stats = {
+            "today_income": float(finance_mgr.get_today_income(today)),
+            "today_expense": float(finance_mgr.get_today_expense(today)),
+            "pending_orders": order_mgr.count_pending_orders(),
+            "unpaid_orders": order_mgr.count_unpaid_orders(),
+        }
+
+        db.close()
+        return jsonify(stats)
+    except Exception as e:
+        logger.error(f"统计API失败: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# ========== 错误处理 ==========
+
+
+@app.errorhandler(404)
+def not_found(error):
+    """404错误"""
+    logger.warning(f"404错误: {request.url}")
+    return render_template("error.html", error="页面未找到"), 404
+
+
+@app.errorhandler(500)
+def internal_error(error):
+    """500错误"""
+    logger.error(f"服务器错误: {error}")
+    return render_template("error.html", error="服务器内部错误"), 500
+
+
+# ========== 主程序 ==========
+
+
+if __name__ == "__main__":
+    # 检查数据库
+    if not DB_PATH.exists():
+        print(f"[ERROR] 数据库不存在: {DB_PATH}")
+        print("请先运行: python oxidation_finance_v20/examples/generate_comprehensive_demo.py")
+        sys.exit(1)
+
+    print("\n" + "=" * 70)
+    print("🏭 氧化加工厂财务系统 V2.2 - Web版（业务层重构 + 性能监控 + API文档）")
+    print("=" * 70)
+    print(f"\n数据库: {DB_PATH}")
+    print("\n✅ 启动成功！")
+    print("\n请打开浏览器访问:")
+    print("  http://localhost:5000")
+    print("\nAPI文档: http://localhost:5000/api-docs")
+    print("\n按 Ctrl+C 停止服务")
+    print("=" * 70 + "\n")
+
+    # 启动服务
+    app.run(host="0.0.0.0", port=5000, debug=False)
