@@ -162,7 +162,7 @@ scripts/                        # 启动脚本
 
 ## 📚 API文档
 
-访问 `http://localhost:5000/api-docs 查看完整的API文档。
+访问 `http://localhost:5000/api-docs` 查看完整的API文档。
 
 ### 主要API接口
 
