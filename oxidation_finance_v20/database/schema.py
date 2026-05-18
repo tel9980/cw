@@ -195,6 +195,47 @@ def create_tables(conn: sqlite3.Connection):
             updated_at TEXT NOT NULL
         )
     """)
+    
+    # 11. 会计凭证表
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS accounting_vouchers (
+            id TEXT PRIMARY KEY,
+            voucher_no TEXT NOT NULL,
+            voucher_date TEXT NOT NULL,
+            accounting_period TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            total_debit TEXT NOT NULL,
+            total_credit TEXT NOT NULL,
+            created_by TEXT NOT NULL,
+            reviewed_by TEXT,
+            posted_by TEXT,
+            reviewed_at TEXT,
+            posted_at TEXT,
+            status TEXT NOT NULL DEFAULT '草稿',
+            source_type TEXT,
+            source_id TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(voucher_no)
+        )
+    """)
+    
+    # 12. 凭证明细表
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS voucher_lines (
+            id TEXT PRIMARY KEY,
+            voucher_id TEXT NOT NULL,
+            account_code TEXT NOT NULL,
+            account_name TEXT NOT NULL,
+            debit TEXT NOT NULL DEFAULT '0',
+            credit TEXT NOT NULL DEFAULT '0',
+            summary TEXT,
+            related_entity_type TEXT,
+            related_entity_id TEXT,
+            FOREIGN KEY (voucher_id) REFERENCES accounting_vouchers(id)
+        )
+    """)
 
     # 创建索引以提高查询性能
     cursor.execute(
@@ -251,6 +292,28 @@ def create_tables(conn: sqlite3.Connection):
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_period_status ON accounting_periods(status)"
     )
+    # 会计凭证相关索引
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_voucher_period ON accounting_vouchers(accounting_period)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_voucher_date ON accounting_vouchers(voucher_date)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_voucher_status ON accounting_vouchers(status)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_voucher_no ON accounting_vouchers(voucher_no)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_voucher_source ON accounting_vouchers(source_type, source_id)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_voucher_line_voucher ON voucher_lines(voucher_id)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_voucher_line_account ON voucher_lines(account_code)"
+    )
 
     conn.commit()
 
@@ -270,9 +333,13 @@ def drop_tables(conn: sqlite3.Connection):
         "suppliers",
         "customers",
         "bank_accounts",
+        "accounting_vouchers",
+        "voucher_lines",
     }
 
     tables = [
+        "voucher_lines",
+        "accounting_vouchers",
         "accounting_periods",
         "audit_logs",
         "bank_transactions",
