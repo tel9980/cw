@@ -99,19 +99,23 @@ def index():
     conn = get_db()
     today = date.today().isoformat()
 
+    # 辅助函数：转换字符串为浮点数
+    def to_float(s):
+        try:
+            return float(s) if s else 0.0
+        except (ValueError, TypeError):
+            return 0.0
+
     # 今日统计
-    today_income = (
-        conn.execute(
-            "SELECT SUM(amount) FROM incomes WHERE income_date = ?", (today,)
-        ).fetchone()[0]
-        or 0
-    )
-    today_expense = (
-        conn.execute(
-            "SELECT SUM(amount) FROM expenses WHERE expense_date = ?", (today,)
-        ).fetchone()[0]
-        or 0
-    )
+    today_income_row = conn.execute(
+        "SELECT SUM(CAST(amount AS REAL)) FROM incomes WHERE income_date = ?", (today,)
+    ).fetchone()[0]
+    today_income = to_float(today_income_row)
+    
+    today_expense_row = conn.execute(
+        "SELECT SUM(CAST(amount AS REAL)) FROM expenses WHERE expense_date = ?", (today,)
+    ).fetchone()[0]
+    today_expense = to_float(today_expense_row)
 
     # 待处理
     pending_orders = (
@@ -122,49 +126,72 @@ def index():
     )
     unpaid_orders = (
         conn.execute(
-            "SELECT COUNT(*) FROM processing_orders WHERE received_amount < total_amount"
+            "SELECT COUNT(*) FROM processing_orders WHERE CAST(received_amount AS REAL) < CAST(total_amount AS REAL)"
         ).fetchone()[0]
         or 0
     )
 
     # 本月统计
     month_start = date.today().replace(day=1).isoformat()
-    month_income = (
-        conn.execute(
-            "SELECT SUM(amount) FROM incomes WHERE income_date >= ?", (month_start,)
-        ).fetchone()[0]
-        or 0
-    )
-    month_expense = (
-        conn.execute(
-            "SELECT SUM(amount) FROM expenses WHERE expense_date >= ?", (month_start,)
-        ).fetchone()[0]
-        or 0
-    )
+    month_income_row = conn.execute(
+        "SELECT SUM(CAST(amount AS REAL)) FROM incomes WHERE income_date >= ?", (month_start,)
+    ).fetchone()[0]
+    month_income = to_float(month_income_row)
+    
+    month_expense_row = conn.execute(
+        "SELECT SUM(CAST(amount AS REAL)) FROM expenses WHERE expense_date >= ?", (month_start,)
+    ).fetchone()[0]
+    month_expense = to_float(month_expense_row)
 
-    # 最近订单
-    recent_orders = conn.execute("""
+    # 最近订单 - 转换金额为浮点数
+    recent_orders_raw = conn.execute("""
         SELECT order_no, customer_name, total_amount, status, order_date
         FROM processing_orders
         ORDER BY order_date DESC
         LIMIT 5
     """).fetchall()
+    recent_orders = []
+    for row in recent_orders_raw:
+        recent_orders.append({
+            'order_no': row[0],
+            'customer_name': row[1],
+            'total_amount': to_float(row[2]),
+            'status': row[3],
+            'order_date': row[4]
+        })
 
-    # 最近收入
-    recent_incomes = conn.execute("""
+    # 最近收入 - 转换金额为浮点数
+    recent_incomes_raw = conn.execute("""
         SELECT customer_name, amount, bank_type, income_date
         FROM incomes
         ORDER BY income_date DESC
         LIMIT 5
     """).fetchall()
+    recent_incomes = []
+    for row in recent_incomes_raw:
+        recent_incomes.append({
+            'customer_name': row[0],
+            'amount': to_float(row[1]),
+            'bank_type': row[2],
+            'income_date': row[3]
+        })
 
-    # 最近支出
-    recent_expenses = conn.execute("""
+    # 最近支出 - 转换金额为浮点数
+    recent_expenses_raw = conn.execute("""
         SELECT expense_type, supplier_name, amount, bank_type, expense_date
         FROM expenses
         ORDER BY expense_date DESC
         LIMIT 5
     """).fetchall()
+    recent_expenses = []
+    for row in recent_expenses_raw:
+        recent_expenses.append({
+            'expense_type': row[0],
+            'supplier_name': row[1],
+            'amount': to_float(row[2]),
+            'bank_type': row[3],
+            'expense_date': row[4]
+        })
 
     conn.close()
 
@@ -634,6 +661,171 @@ def reports():
         top_customers=top_customers,
         expense_by_type=expense_by_type,
     )
+
+
+# ========== 小会计助手路由 ==========
+
+
+@app.route("/assistant")
+def assistant():
+    """小会计助手 - 每日工作检查"""
+    conn = get_db()
+    
+    today = date.today().isoformat()
+    
+    # 辅助函数：转换字符串为浮点数
+    def to_float(s):
+        try:
+            return float(s) if s else 0.0
+        except (ValueError, TypeError):
+            return 0.0
+    
+    # 今日统计
+    today_income_row = conn.execute(
+        "SELECT SUM(CAST(amount AS REAL)) FROM incomes WHERE income_date = ?", (today,)
+    ).fetchone()[0]
+    today_income = to_float(today_income_row)
+    
+    today_expense_row = conn.execute(
+        "SELECT SUM(CAST(amount AS REAL)) FROM expenses WHERE expense_date = ?", (today,)
+    ).fetchone()[0]
+    today_expense = to_float(today_expense_row)
+    
+    # 今日订单 - 转换金额为浮点数
+    today_orders_raw = conn.execute("""
+        SELECT order_no, customer_name, total_amount, status
+        FROM processing_orders
+        WHERE order_date = ?
+    """, (today,)).fetchall()
+    today_orders = []
+    for row in today_orders_raw:
+        today_orders.append({
+            'order_no': row[0],
+            'customer_name': row[1],
+            'total_amount': to_float(row[2]),
+            'status': row[3]
+        })
+    
+    # 未付款订单 - 转换金额为浮点数
+    unpaid_orders_raw = conn.execute("""
+        SELECT order_no, customer_name, CAST(total_amount AS REAL) - CAST(received_amount AS REAL) as unpaid
+        FROM processing_orders
+        WHERE CAST(received_amount AS REAL) < CAST(total_amount AS REAL)
+        ORDER BY order_date DESC
+        LIMIT 10
+    """).fetchall()
+    unpaid_orders = []
+    for row in unpaid_orders_raw:
+        unpaid_orders.append({
+            'order_no': row[0],
+            'customer_name': row[1],
+            'unpaid': to_float(row[2])
+        })
+    
+    # 智能提醒
+    reminders = []
+    if int(today[-2:]) >= 25:
+        reminders.append({"type": "月末提醒", "content": "月末将至，请准备结账工作", "priority": "高"})
+    
+    # 检查大额支出
+    seven_days_ago = (date.today() - timedelta(days=7)).isoformat()
+    large_expenses = conn.execute("""
+        SELECT expense_type, amount, expense_date, supplier_name
+        FROM expenses
+        WHERE CAST(amount AS REAL) > 5000 AND expense_date >= ?
+    """, (seven_days_ago,)).fetchall()
+    
+    if large_expenses:
+        reminders.append({"type": "大额支出提醒", "content": f"近7天有{len(large_expenses)}笔大额支出", "priority": "中"})
+    
+    conn.close()
+    
+    return render_template(
+        "assistant.html",
+        today=today,
+        today_income=today_income,
+        today_expense=today_expense,
+        today_orders=today_orders,
+        unpaid_orders=unpaid_orders,
+        reminders=reminders
+    )
+
+
+@app.route("/quick-income", methods=["GET", "POST"])
+def quick_income():
+    """快速记录收入"""
+    if request.method == "POST":
+        customer_name = request.form["customer_name"]
+        amount = Decimal(request.form["amount"])
+        has_invoice = request.form.get("has_invoice") == "on"
+        is_n_bank = request.form.get("is_n_bank") == "on"
+        notes = request.form.get("notes", "")
+        
+        # 简单直接记录到数据库
+        conn = get_db()
+        bank_type = "N银行" if is_n_bank else "G银行"
+        
+        # 查找客户
+        customer = conn.execute("SELECT * FROM customers WHERE name = ?", 
+                              (customer_name,)).fetchone()
+        
+        if not customer:
+            # 创建客户
+            conn.execute("""
+                INSERT INTO customers (id, name, contact, phone, credit_limit, notes, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (f"cust_{int(time.time())}", customer_name, "", "", "0", "", datetime.now().isoformat()))
+            conn.commit()
+        
+        customer = conn.execute("SELECT * FROM customers WHERE name = ?", 
+                              (customer_name,)).fetchone()
+        
+        # 记录收入
+        income_id = f"income_{int(time.time())}"
+        conn.execute("""
+            INSERT INTO incomes (id, customer_id, customer_name, amount, bank_type, 
+                               has_invoice, related_orders, allocation, income_date, notes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (income_id, customer["id"], customer_name, str(amount), bank_type, 
+              has_invoice, "[]", "{}", date.today().isoformat(), notes, datetime.now().isoformat()))
+        conn.commit()
+        conn.close()
+        
+        return redirect(url_for("assistant"))
+    
+    # GET请求 - 显示表单
+    return render_template("quick_income.html")
+
+
+@app.route("/quick-expense", methods=["GET", "POST"])
+def quick_expense():
+    """快速记录支出"""
+    if request.method == "POST":
+        expense_type = request.form["expense_type"]
+        supplier_name = request.form.get("supplier_name", "")
+        amount = Decimal(request.form["amount"])
+        has_invoice = request.form.get("has_invoice") == "on"
+        is_n_bank = request.form.get("is_n_bank") == "on"
+        description = request.form.get("description", "")
+        
+        conn = get_db()
+        bank_type = "N银行" if is_n_bank else "G银行"
+        
+        expense_id = f"expense_{int(time.time())}"
+        conn.execute("""
+            INSERT INTO expenses (id, expense_type, supplier_id, supplier_name, amount,
+                               bank_type, has_invoice, related_order_id, expense_date,
+                               description, notes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (expense_id, expense_type, None, supplier_name, str(amount), bank_type,
+              has_invoice, None, date.today().isoformat(), description, "", datetime.now().isoformat()))
+        conn.commit()
+        conn.close()
+        
+        return redirect(url_for("assistant"))
+    
+    # GET请求
+    return render_template("quick_expense.html")
 
 
 @app.route("/api/search")

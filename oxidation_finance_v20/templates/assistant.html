@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+
+{% block title %}小会计助手 - 氧化加工厂财务系统{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>🤖 小会计助手</h2>
+    <p>今日工作检查和快速操作</p>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-item">
+        <div class="stat-value">{{ "%.2f"|format(today_income) }}</div>
+        <div class="stat-label">今日收入</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value">{{ "%.2f"|format(today_expense) }}</div>
+        <div class="stat-label">今日支出</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value">{{ today_orders|length }}</div>
+        <div class="stat-label">今日订单</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value">{{ unpaid_orders|length }}</div>
+        <div class="stat-label">未收款订单</div>
+    </div>
+</div>
+
+<div class="quick-actions">
+    <a href="{{ url_for('quick_income') }}" class="btn btn-success">💰 快速记录收入</a>
+    <a href="{{ url_for('quick_expense') }}" class="btn btn-warning">💸 快速记录支出</a>
+    <a href="{{ url_for('index') }}" class="btn">🏠 返回首页</a>
+</div>
+
+{% if reminders %}
+<div class="card">
+    <div class="card-header">
+        <h3>🔔 智能提醒</h3>
+    </div>
+    <div class="card-body">
+        <div class="reminder-list">
+            {% for reminder in reminders %}
+            <div class="reminder-item reminder-{{ reminder.priority }}">
+                <strong>{{ reminder.type }}:</strong> {{ reminder.content }}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if today_orders %}
+<div class="card">
+    <div class="card-header">
+        <h3>📋 今日订单</h3>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>订单号</th>
+                        <th>客户</th>
+                        <th>金额</th>
+                        <th>状态</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for order in today_orders %}
+                    <tr>
+                        <td>{{ order.order_no }}</td>
+                        <td>{{ order.customer_name }}</td>
+                        <td>{{ "%.2f"|format(order.total_amount) }}</td>
+                        <td><span class="status-badge status-{{ order.status }}">{{ order.status }}</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if unpaid_orders %}
+<div class="card">
+    <div class="card-header">
+        <h3>⚠️ 未收款订单</h3>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>订单号</th>
+                        <th>客户</th>
+                        <th>未收金额</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for order in unpaid_orders %}
+                    <tr>
+                        <td>{{ order.order_no }}</td>
+                        <td>{{ order.customer_name }}</td>
+                        <td class="text-danger">{{ "%.2f"|format(order.unpaid) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_head %}
+<style>
+.reminder-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.reminder-item {
+    padding: 12px 16px;
+    border-radius: 6px;
+    border-left: 4px solid;
+}
+
+.reminder-高 {
+    background: #fff2f0;
+    border-color: #ff4d4f;
+    color: #cf1322;
+}
+
+.reminder-中 {
+    background: #fffbe6;
+    border-color: #faad14;
+    color: #ad6800;
+}
+
+.reminder-低 {
+    background: #f6ffed;
+    border-color: #52c41a;
+    color: #389e0d;
+}
+</style>
+{% endblock %}

@@ -1,187 +1,62 @@
 {% extends "base.html" %}
 
-{% block title %}首页 - 氧化加工厂财务系统{% endblock %}
-
 {% block content %}
-<div class="page-header">
-    <h2>📊 今日概览</h2>
-    <p>查看今天的财务状况和业务数据</p>
-</div>
-
 <div class="stats-grid">
-    <div class="stat-card stat-card-income">
-        <div class="stat-icon">💰</div>
-        <div class="stat-content">
-            <div class="stat-value">¥{{ "%.2f"|format(today_income) }}</div>
-            <div class="stat-label">今日收入</div>
-        </div>
+    <div class="stat-item">
+        <div class="stat-value">{{ "%.2f"|format(today_income) }}</div>
+        <div class="stat-label">今日收入</div>
     </div>
-    
-    <div class="stat-card stat-card-expense">
-        <div class="stat-icon">💸</div>
-        <div class="stat-content">
-            <div class="stat-value">¥{{ "%.2f"|format(today_expense) }}</div>
-            <div class="stat-label">今日支出</div>
-        </div>
+    <div class="stat-item">
+        <div class="stat-value">{{ "%.2f"|format(today_expense) }}</div>
+        <div class="stat-label">今日支出</div>
     </div>
-    
-    <div class="stat-card stat-card-profit">
-        <div class="stat-icon">📈</div>
-        <div class="stat-content">
-            <div class="stat-value">¥{{ "%.2f"|format(today_profit) }}</div>
-            <div class="stat-label">今日利润</div>
-        </div>
+    <div class="stat-item">
+        <div class="stat-value">{{ "%.2f"|format(today_profit) }}</div>
+        <div class="stat-label">今日利润</div>
     </div>
-    
-    <div class="stat-card stat-card-pending">
-        <div class="stat-icon">⏳</div>
-        <div class="stat-content">
-            <div class="stat-value">{{ pending_orders }}</div>
-            <div class="stat-label">待处理订单</div>
-        </div>
+    <div class="stat-item">
+        <div class="stat-value">{{ pending_orders }}</div>
+        <div class="stat-label">待加工订单</div>
     </div>
-    
-    <div class="stat-card stat-card-unpaid">
-        <div class="stat-icon">💵</div>
-        <div class="stat-content">
-            <div class="stat-value">{{ unpaid_orders }}</div>
-            <div class="stat-label">未收款订单</div>
-        </div>
+    <div class="stat-item">
+        <div class="stat-value">{{ unpaid_orders }}</div>
+        <div class="stat-label">未收款订单</div>
     </div>
-    
-    <div class="stat-card stat-card-month">
-        <div class="stat-icon">📅</div>
-        <div class="stat-content">
-            <div class="stat-value">¥{{ "%.2f"|format(month_profit) }}</div>
-            <div class="stat-label">本月利润</div>
-        </div>
+    <div class="stat-item">
+        <div class="stat-value">{{ "%.2f"|format(month_profit) }}</div>
+        <div class="stat-label">本月利润</div>
     </div>
 </div>
 
 <div class="quick-actions">
-    <a href="{{ url_for('new_order') }}" class="btn btn-primary">
-        ➕ 新建订单
-    </a>
-    <a href="{{ url_for('new_income') }}" class="btn btn-success">
-        💵 录入收入
-    </a>
-    <a href="{{ url_for('new_expense') }}" class="btn btn-warning">
-        💸 录入支出
-    </a>
+    <a href="/order/new" class="btn">+ 新建订单</a>
+    <a href="/income/new" class="btn btn-success">+ 录入收入</a>
+    <a href="/expense/new" class="btn btn-warning">+ 录入支出</a>
 </div>
 
 <div class="card">
-    <div class="card-header">
-        <h3>📋 最近订单</h3>
-        <a href="{{ url_for('orders') }}" class="btn btn-link">查看全部</a>
-    </div>
-    <div class="card-body">
-        <div class="table-responsive">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>订单号</th>
-                        <th>客户</th>
-                        <th>金额</th>
-                        <th>状态</th>
-                        <th>日期</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for order in recent_orders %}
-                    <tr>
-                        <td><strong>{{ order.order_no }}</strong></td>
-                        <td>{{ order.customer_name }}</td>
-                        <td class="text-right text-success">
-                            ¥{{ "%.2f"|format(order.total_amount) }}
-                        </td>
-                        <td>
-                            <span class="status-badge status-{{ order.status.value }}">
-                                {{ order.status.value }}
-                            </span>
-                        </td>
-                        <td>{{ order.order_date }}</td>
-                    </tr>
-                    {% else %}
-                    <tr>
-                        <td colspan="5" class="text-center">暂无订单</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-</div>
-
-<div class="card">
-    <div class="card-header">
-        <h3>💵 最近收入</h3>
-    </div>
-    <div class="card-body">
-        <div class="table-responsive">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>客户</th>
-                        <th>金额</th>
-                        <th>日期</th>
-                        <th>备注</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for income in recent_incomes %}
-                    <tr>
-                        <td>{{ income.customer_name }}</td>
-                        <td class="text-right text-success">
-                            ¥{{ "%.2f"|format(income.amount) }}
-                        </td>
-                        <td>{{ income.income_date }}</td>
-                        <td>{{ income.notes or '-' }}</td>
-                    </tr>
-                    {% else %}
-                    <tr>
-                        <td colspan="4" class="text-center">暂无收入记录</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-</div>
-
-<div class="card">
-    <div class="card-header">
-        <h3>💸 最近支出</h3>
-    </div>
-    <div class="card-body">
-        <div class="table-responsive">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>类型</th>
-                        <th>供应商</th>
-                        <th>金额</th>
-                        <th>日期</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for expense in recent_expenses %}
-                    <tr>
-                        <td>{{ expense.expense_type.value }}</td>
-                        <td>{{ expense.supplier_name or '-' }}</td>
-                        <td class="text-right text-danger">
-                            ¥{{ "%.2f"|format(expense.amount) }}
-                        </td>
-                        <td>{{ expense.expense_date }}</td>
-                    </tr>
-                    {% else %}
-                    <tr>
-                        <td colspan="4" class="text-center">暂无支出记录</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
+    <h2>最近订单</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>订单号</th>
+                <th>客户</th>
+                <th>金额</th>
+                <th>状态</th>
+                <th>日期</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for order in recent_orders %}
+            <tr>
+                <td>{{ order.order_no }}</td>
+                <td>{{ order.customer_name }}</td>
+                <td>{{ "%.2f"|format(order.total_amount) }}</td>
+                <td><span class="status-badge status-{{ order.status }}">{{ order.status }}</span></td>
+                <td>{{ order.order_date }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
 </div>
 {% endblock %}
