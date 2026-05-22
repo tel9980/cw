@@ -90,6 +90,32 @@ def get_db():
     return conn
 
 
+def to_float(value):
+    """辅助函数：将字符串转换为浮点数"""
+    try:
+        return float(value) if value else 0.0
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def convert_row_to_dict(row):
+    """将 SQLite Row 转换为字典，并转换金额字段"""
+    if not row:
+        return None
+    data = dict(row)
+    # 转换常用的金额字段
+    amount_fields = ['total_amount', 'received_amount', 'amount', 'outsourcing_cost', 'unit_price', 'quantity']
+    for field in amount_fields:
+        if field in data:
+            data[field] = to_float(data[field])
+    return data
+
+
+def convert_rows_to_dicts(rows):
+    """将多行转换为字典列表"""
+    return [convert_row_to_dict(row) for row in rows]
+
+
 # ========== 页面路由 ==========
 
 
@@ -233,6 +259,9 @@ def orders():
             LIMIT 50
         """).fetchall()
 
+    # 转换金额字段
+    orders = convert_rows_to_dicts(orders)
+    
     # 获取所有状态
     statuses = conn.execute("SELECT DISTINCT status FROM processing_orders").fetchall()
     conn.close()
@@ -325,16 +354,35 @@ def new_income():
         conn = get_db()
         import uuid
 
+        # 获取或创建客户
+        customer_name = request.form["customer_name"]
+        customer = conn.execute(
+            "SELECT id FROM customers WHERE name = ?", (customer_name,)
+        ).fetchone()
+        
+        if not customer:
+            customer_id = str(uuid.uuid4())
+            conn.execute(
+                "INSERT INTO customers (id, name, created_at) VALUES (?, ?, ?)",
+                (customer_id, customer_name, datetime.now().isoformat()),
+            )
+        else:
+            customer_id = customer["id"]
+
+        has_invoice = request.form.get("has_invoice") == "on"
+        
         conn.execute(
             """
-            INSERT INTO incomes (id, customer_name, amount, bank_type, income_date, notes, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO incomes (id, customer_id, customer_name, amount, bank_type, has_invoice, income_date, notes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 str(uuid.uuid4()),
-                request.form["customer_name"],
-                float(request.form["amount"]),
+                customer_id,
+                customer_name,
+                str(request.form["amount"]),
                 request.form["bank_type"],
+                1 if has_invoice else 0,
                 request.form.get("income_date", date.today().isoformat()),
                 request.form.get("notes", ""),
                 datetime.now().isoformat(),
@@ -358,18 +406,21 @@ def new_expense():
         conn = get_db()
         import uuid
 
+        has_invoice = request.form.get("has_invoice") == "on"
+        
         conn.execute(
             """
             INSERT INTO expenses (id, expense_type, supplier_name, amount, bank_type, 
-                                expense_date, description, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                has_invoice, expense_date, description, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 str(uuid.uuid4()),
                 request.form["expense_type"],
                 request.form.get("supplier_name", ""),
-                float(request.form["amount"]),
+                str(request.form["amount"]),
                 request.form["bank_type"],
+                1 if has_invoice else 0,
                 request.form.get("expense_date", date.today().isoformat()),
                 request.form.get("description", ""),
                 datetime.now().isoformat(),

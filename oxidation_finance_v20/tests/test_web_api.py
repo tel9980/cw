@@ -240,6 +240,38 @@ class TestStaticFiles:
         pass
 
 
+class TestAccountantAssistant:
+    """测试小会计助手功能"""
+
+    def test_assistant_page(self, client):
+        """测试小会计助手页面"""
+        response = client.get("/assistant")
+        assert response.status_code == 200
+        html = response.data.decode("utf-8")
+        assert "小会计助手" in html
+
+    def test_quick_income_page(self, client):
+        """测试快速记录收入页面"""
+        response = client.get("/quick-income")
+        assert response.status_code == 200
+        html = response.data.decode("utf-8")
+        assert "快速记录收入" in html
+
+    def test_quick_expense_page(self, client):
+        """测试快速记录支出页面"""
+        response = client.get("/quick-expense")
+        assert response.status_code == 200
+        html = response.data.decode("utf-8")
+        assert "快速记录支出" in html
+
+    def test_assistant_has_quick_actions(self, client):
+        """测试助手页面有快速操作按钮"""
+        response = client.get("/assistant")
+        html = response.data.decode("utf-8")
+        assert "快速记录收入" in html or "quick-income" in html
+        assert "快速记录支出" in html or "quick-expense" in html
+
+
 # 测试数据准备工具函数
 def create_test_order_data():
     """生成测试订单数据"""
