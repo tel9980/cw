@@ -2,6 +2,54 @@
 
 专为小型氧化加工企业设计的财务管理解决方案，支持非一一对应收付款、权责发生制记账，以及双银行账户管理。
 
+## 🚀 快速开始
+
+### 方式一：一键初始化（推荐）
+
+只需一条命令，自动完成所有初始化工作：
+
+```bash
+cd oxidation_finance_v20
+python init.py
+```
+
+初始化脚本会自动完成以下工作：
+- ✅ 检查Python环境
+- ✅ 安装所需依赖包
+- ✅ 生成完整的小企业模拟数据
+- ✅ 验证系统配置
+- ✅ 提供详细的使用说明
+
+### 方式二：快速启动
+
+如果已经初始化过，直接运行：
+
+**Linux/Mac:**
+```bash
+./start.sh
+```
+
+**Windows:**
+```cmd
+start.bat
+```
+
+### 方式三：手动启动
+
+```bash
+# 1. 安装依赖
+pip install -r requirements.txt
+pip install flask
+
+# 2. 生成演示数据（可选）
+python examples/generate_small_business_demo.py
+
+# 3. 启动Web应用
+python web_app.py
+```
+
+然后访问：http://localhost:5000
+
 ## 项目结构
 
 ```
