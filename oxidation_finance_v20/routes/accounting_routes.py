@@ -1913,6 +1913,120 @@ def unclose_period(period_name):
     return redirect("/accounting-books?type=periods")
 
 
+# ========== 凭证断号检测 / 序号重排 ==========
+
+@accounting_bp.route("/vouchers/check-gaps", methods=["GET", "POST"])
+def check_voucher_gaps():
+    """检测凭证编号断号"""
+    conn = get_db()
+    period = request.args.get("period", "")
+    message = None
+    gaps = []
+    
+    if request.method == "POST" or period:
+        period = request.form.get("period", period)
+        if period:
+            # 获取该期间所有凭证编号，按 voucher_no 排序
+            vouchers = conn.execute(
+                "SELECT id, voucher_no, voucher_date FROM accounting_vouchers WHERE accounting_period=? ORDER BY voucher_date, voucher_no",
+                (period,)
+            ).fetchall()
+            
+            # 尝试从凭证编号中解析序号
+            prev_seq = 0
+            for v in vouchers:
+                vno = v["voucher_no"]
+                # 提取编号中的数字序列（取最后一段连续数字）
+                import re
+                match = re.findall(r'(\d+)', vno)
+                if match:
+                    seq = int(match[-1])
+                    if prev_seq > 0 and seq != prev_seq + 1:
+                        for g in range(prev_seq + 1, seq):
+                            gaps.append({"missing_seq": g, "after_voucher": prev_vno, "after_date": prev_date})
+                    prev_seq = seq
+                    prev_vno = vno
+                    prev_date = v["voucher_date"]
+            
+            if not gaps:
+                message = f"期间 {period} 凭证编号连续，无断号。"
+    
+    periods = [dict(p) for p in conn.execute(
+        "SELECT period_name FROM accounting_periods ORDER BY period_name"
+    ).fetchall()]
+    conn.close()
+    return render_template("voucher_gaps.html", periods=periods, period=period, gaps=gaps, message=message)
+
+
+@accounting_bp.route("/vouchers/renumber", methods=["POST"])
+def renumber_vouchers():
+    """重排凭证序号"""
+    conn = get_db()
+    period = request.form.get("period", "")
+    error = None
+    
+    if not period:
+        conn.close()
+        return redirect("/vouchers")
+    
+    # 检查期间是否锁定
+    conn.execute("CREATE TABLE IF NOT EXISTS period_locks (id TEXT PRIMARY KEY, period TEXT NOT NULL UNIQUE, locked_by TEXT, locked_at TEXT, is_locked INTEGER DEFAULT 1)")
+    lock = conn.execute("SELECT * FROM period_locks WHERE period=? AND is_locked=1", (period,)).fetchone()
+    if lock:
+        conn.close()
+        return render_template("error.html", error=f"会计期间 {period} 已锁定，无法重排凭证序号")
+    
+    # 读取规则
+    rule = conn.execute("SELECT value FROM system_settings WHERE key='voucher_number_rule'").fetchone()
+    if not rule:
+        conn.close()
+        return render_template("error.html", error="请先在系统设置中配置凭证编号规则")
+    
+    rule_str = rule["value"]
+    parts = {}
+    for p in rule_str.split("|"):
+        if "=" in p:
+            k, v = p.split("=", 1)
+            parts[k] = v
+    
+    prefix = parts.get("prefix", "记")
+    date_fmt = parts.get("date_fmt", "%Y%m%d")
+    num_digits = int(parts.get("num_digits", "3"))
+    reset_mode = parts.get("reset", "monthly")
+    
+    # 按日期排序获取该期间凭证
+    vouchers = conn.execute(
+        "SELECT id, voucher_no, voucher_date FROM accounting_vouchers WHERE accounting_period=? ORDER BY voucher_date, id",
+        (period,)
+    ).fetchall()
+    
+    if not vouchers:
+        conn.close()
+        return redirect("/vouchers")
+    
+    now = datetime.now().isoformat()
+    seq = 1
+    for v in vouchers:
+        vdate = v["voucher_date"]
+        if reset_mode == "daily":
+            seq = 1  # 每天重置
+        
+        seq_str = str(seq).zfill(num_digits)
+        date_part = datetime.strptime(vdate, "%Y-%m-%d").strftime(date_fmt) if "%" in date_fmt else vdate.replace("-", "")
+        new_no = f"{prefix}-{date_part}-{seq_str}" if date_part else f"{prefix}-{seq_str}"
+        
+        conn.execute("UPDATE accounting_vouchers SET voucher_no=? WHERE id=?", (new_no, v["id"]))
+        seq += 1
+    
+    now_iso = datetime.now().isoformat()
+    conn.execute(
+        "INSERT INTO audit_logs (id, operation_type, entity_type, entity_id, operation_description, operator, operation_time) VALUES (?, '重排序号', 'voucher', ?, ?, ?, ?)",
+        (str(uuid.uuid4()), period, f"重排凭证序号: 期间 {period}, 共 {len(vouchers)} 张凭证", request.form.get("operator", "管理员"), now_iso))
+    conn.commit()
+    conn.close()
+    return redirect("/vouchers?period=" + period)
+
+
 # ========== 凭证模板 ==========
 
 @accounting_bp.route("/copy-voucher/<voucher_id>", methods=["POST"])

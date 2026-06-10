@@ -182,6 +182,62 @@ def index():
         recent_orders=recent_orders, home_shortcuts=home_shortcuts)
 
 
+# ========== 全局搜索 ==========
+
+@main_bp.route("/global-search")
+def global_search():
+    """全局搜索：跨模块查找"""
+    q = request.args.get("q", "").strip()
+    results = {}
+
+    if q:
+        conn = get_db()
+        like = f"%{q}%"
+
+        # 搜索会计科目
+        results["accounts"] = [dict(r) for r in conn.execute(
+            "SELECT code, name, account_type, balance_direction FROM chart_of_accounts WHERE code LIKE ? OR name LIKE ? LIMIT 10",
+            (like, like)
+        ).fetchall()]
+
+        # 搜索会计凭证
+        results["vouchers"] = [dict(r) for r in conn.execute(
+            "SELECT id, voucher_no, accounting_period, summary, status, voucher_date FROM accounting_vouchers WHERE voucher_no LIKE ? OR summary LIKE ? LIMIT 10",
+            (like, like)
+        ).fetchall()]
+
+        # 搜索客户
+        try:
+            results["customers"] = [dict(r) for r in conn.execute(
+                "SELECT id, name, phone FROM customers WHERE name LIKE ? OR phone LIKE ? LIMIT 10",
+                (like, like)
+            ).fetchall()]
+        except Exception:
+            results["customers"] = []
+
+        # 搜索供应商
+        try:
+            results["suppliers"] = [dict(r) for r in conn.execute(
+                "SELECT id, name, phone FROM suppliers WHERE name LIKE ? OR phone LIKE ? LIMIT 10",
+                (like, like)
+            ).fetchall()]
+        except Exception:
+            results["suppliers"] = []
+
+        # 搜索订单
+        try:
+            results["orders"] = [dict(r) for r in conn.execute(
+                "SELECT id, order_no, customer_name, status, amount FROM orders WHERE order_no LIKE ? OR customer_name LIKE ? LIMIT 10",
+                (like, like)
+            ).fetchall()]
+        except Exception:
+            results["orders"] = []
+
+        conn.close()
+
+    return render_template("search_results.html", q=q, results=results)
+
+
 @main_bp.route("/orders")
 def orders():
     """订单列表"""

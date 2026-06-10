@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}凭证断号检测 - 氧化加工厂财务系统{% endblock %}
+
+{% block breadcrumb %}
+<div class="breadcrumb"><a href="/">首页</a><span class="sep">/</span><a href="/vouchers">会计凭证</a><span class="sep">/</span><span>断号检测</span></div>
+{% endblock %}
+
+{% block content %}
+<style>
+    .gap-table { margin-top: 12px; }
+    .gap-table td.num { font-family: "SF Mono", Monaco, monospace; color: #f5222d; font-weight: 600; }
+    .renumber-btn { margin-left: 12px; }
+    .warning-box { background: #fff7e6; border: 1px solid #ffd591; padding: 12px 16px; border-radius: 4px; margin-bottom: 16px; font-size: 13px; color: #d46b08; }
+</style>
+
+<div class="card">
+    <div class="flex-row">
+        <h2>凭证断号检测</h2>
+        <a href="/vouchers" class="btn btn-outline">&larr; 返回凭证列表</a>
+    </div>
+
+    <form method="POST" style="margin-bottom: 20px;">
+        <div style="display:flex; gap:12px; align-items:flex-end;">
+            <div class="form-group" style="margin-bottom:0;">
+                <label>选择会计期间</label>
+                <select name="period" style="width:200px;">
+                    <option value="">-- 请选择 --</option>
+                    {% for p in periods %}
+                    <option value="{{ p.period_name }}" {% if p.period_name == period %}selected{% endif %}>{{ p.period_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="btn">检测断号</button>
+        </div>
+    </form>
+
+    {% if message %}
+    <div class="message message-success">{{ message }}</div>
+    {% endif %}
+
+    {% if gaps %}
+    <div class="warning-box">
+        检测到 <strong>{{ gaps|length }}</strong> 处断号。可使用下方"重排序号"按钮按凭证编号规则重新生成连续序号。
+    </div>
+    <table class="gap-table">
+        <thead>
+            <tr><th>缺失序号</th><th>前一凭证编号</th><th>前一凭证日期</th></tr>
+        </thead>
+        <tbody>
+            {% for g in gaps %}
+            <tr>
+                <td class="num">{{ g.missing_seq }}</td>
+                <td>{{ g.after_voucher }}</td>
+                <td>{{ g.after_date }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div style="margin-top:16px;">
+        <form method="POST" action="/vouchers/renumber" onsubmit="return confirm('确定要重排期间 {{ period }} 的所有凭证序号吗？此操作不可撤销。');">
+            <input type="hidden" name="period" value="{{ period }}">
+            <button type="submit" class="btn btn-warning renumber-btn">一键重排序号</button>
+        </form>
+        <div style="margin-top:8px; font-size:12px; color:#999;">
+            重排将按凭证日期顺序、遵循系统设置的凭证编号规则重新生成连续序号，操作会记录审计日志。
+        </div>
+    </div>
+    {% endif %}
+
+    {% if not message and not gaps and period %}
+    <p style="color:#999;">正在检测...</p>
+    {% endif %}
+</div>
+{% endblock %}

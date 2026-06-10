@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}搜索结果 - 氧化加工厂财务系统{% endblock %}
+
+{% block breadcrumb %}
+<div class="breadcrumb"><a href="/">首页</a><span class="sep">/</span><span>搜索结果</span></div>
+{% endblock %}
+
+{% block content %}
+<style>
+    .search-header { margin-bottom: 20px; }
+    .search-header h2 { font-size: 18px; color: #333; }
+    .search-header .query { color: #f5222d; }
+    .result-section { margin-bottom: 24px; }
+    .result-section h3 { font-size: 15px; color: #666; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #eee; }
+    .result-empty { color: #999; font-size: 13px; padding: 8px 0; }
+    .result-table td a { color: #1890ff; text-decoration: none; font-weight: 500; }
+    .result-table td a:hover { text-decoration: underline; }
+    .total-count { font-size: 13px; color: #999; margin-left: 8px; }
+</style>
+
+<div class="card">
+    <div class="search-header">
+        {% if q %}
+        <h2>搜索 "<span class="query">{{ q }}</span>" 的结果</h2>
+        {% else %}
+        <h2>全局搜索</h2>
+        <form action="/global-search" method="GET" style="margin-top:16px;">
+            <div style="display:flex; gap:8px;">
+                <input type="text" name="q" placeholder="输入关键词搜索科目/凭证/客户/供应商/订单..." 
+                       style="flex:1; padding:10px 16px; border:1px solid #d9d9d9; border-radius:4px; font-size:15px;" autofocus>
+                <button type="submit" class="btn" style="font-size:15px;">搜索</button>
+            </div>
+        </form>
+        {% endif %}
+    </div>
+
+    {% if results %}
+    <!-- 会计科目 -->
+    {% if results.accounts %}
+    <div class="result-section">
+        <h3>会计科目 <span class="total-count">共 {{ results.accounts|length }} 条</span></h3>
+        <table class="result-table">
+            <thead><tr><th>科目编码</th><th>科目名称</th><th>类别</th><th>余额方向</th></tr></thead>
+            <tbody>
+                {% for a in results.accounts %}
+                <tr>
+                    <td><a href="/chart-of-accounts">{{ a.code }}</a></td>
+                    <td>{{ a.name }}</td>
+                    <td>{{ a.account_type }}</td>
+                    <td>{{ a.balance_direction }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- 会计凭证 -->
+    {% if results.vouchers %}
+    <div class="result-section">
+        <h3>会计凭证 <span class="total-count">共 {{ results.vouchers|length }} 条</span></h3>
+        <table class="result-table">
+            <thead><tr><th>凭证编号</th><th>期间</th><th>摘要</th><th>日期</th><th>状态</th></tr></thead>
+            <tbody>
+                {% for v in results.vouchers %}
+                <tr>
+                    <td><a href="/vouchers/{{ v.id }}">{{ v.voucher_no }}</a></td>
+                    <td>{{ v.accounting_period }}</td>
+                    <td>{{ v.summary }}</td>
+                    <td>{{ v.voucher_date }}</td>
+                    <td><span class="status-badge status-{{ '已完工' if v.status == '已记账' else '加工中' if v.status == '已审核' else '待加工' }}">{{ v.status }}</span></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- 客户 -->
+    {% if results.customers %}
+    <div class="result-section">
+        <h3>客户 <span class="total-count">共 {{ results.customers|length }} 条</span></h3>
+        <table class="result-table">
+            <thead><tr><th>客户名称</th><th>电话</th></tr></thead>
+            <tbody>
+                {% for c in results.customers %}
+                <tr>
+                    <td><a href="/customers">{{ c.name }}</a></td>
+                    <td>{{ c.phone or '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- 供应商 -->
+    {% if results.suppliers %}
+    <div class="result-section">
+        <h3>供应商 <span class="total-count">共 {{ results.suppliers|length }} 条</span></h3>
+        <table class="result-table">
+            <thead><tr><th>供应商名称</th><th>电话</th></tr></thead>
+            <tbody>
+                {% for s in results.suppliers %}
+                <tr>
+                    <td><a href="/suppliers">{{ s.name }}</a></td>
+                    <td>{{ s.phone or '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- 订单 -->
+    {% if results.orders %}
+    <div class="result-section">
+        <h3>加工订单 <span class="total-count">共 {{ results.orders|length }} 条</span></h3>
+        <table class="result-table">
+            <thead><tr><th>订单编号</th><th>客户</th><th>金额</th><th>状态</th></tr></thead>
+            <tbody>
+                {% for o in results.orders %}
+                <tr>
+                    <td><a href="/orders">{{ o.order_no }}</a></td>
+                    <td>{{ o.customer_name }}</td>
+                    <td>{{ "%.2f"|format(o.amount or 0) }}</td>
+                    <td><span class="status-badge status-{{ o.status or '待加工' }}">{{ o.status or '待加工' }}</span></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- 无结果 -->
+    {% set total = results.accounts|length + results.vouchers|length + results.customers|length + results.suppliers|length + results.orders|length %}
+    {% if total == 0 %}
+    <p style="color:#999; text-align:center; padding:40px;">未找到与 "{{ q }}" 相关的结果</p>
+    {% endif %}
+
+    {% elif q %}
+    <p style="color:#999; text-align:center; padding:40px;">未找到与 "{{ q }}" 相关的结果</p>
+    {% endif %}
+</div>
+{% endblock %}

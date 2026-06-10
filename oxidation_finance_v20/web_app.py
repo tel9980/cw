@@ -66,6 +66,21 @@ def teardown_request(exception=None):
         conn.close()
 
 
+@app.context_processor
+def inject_current_period():
+    """注入当前会计期间到所有模板"""
+    try:
+        conn = get_db()
+        row = conn.execute(
+            "SELECT period_name FROM accounting_periods WHERE status='打开' ORDER BY period_name DESC LIMIT 1"
+        ).fetchone()
+        if row:
+            return {"current_period": row["period_name"]}
+    except Exception:
+        pass
+    return {"current_period": date.today().strftime("%Y-%m")}
+
+
 # ========== 错误处理 ==========
 
 @app.errorhandler(404)
@@ -95,99 +110,121 @@ def create_templates():
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
-        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-        .header { background: #1890ff; color: white; padding: 20px; margin-bottom: 20px; }
-        .header h1 { font-size: 24px; }
-        .nav { background: white; padding: 10px 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .nav a { color: #333; text-decoration: none; margin-right: 20px; padding: 5px 10px; }
-        .nav a:hover { color: #1890ff; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+        .header { background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%); color: white; padding: 20px 0; }
+        .header .container { display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 22px; }
+        .header .period-tag { background: rgba(255,255,255,0.2); padding: 4px 12px; border-radius: 12px; font-size: 13px; }
+        .nav { background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.08); position: sticky; top: 0; z-index: 100; }
+        .nav .container { display: flex; justify-content: space-between; align-items: center; }
+        .nav-group { display: flex; align-items: center; }
+        .nav-item { position: relative; display: inline-block; }
+        .nav-item > a, .nav-item > span { display: inline-block; padding: 14px 16px; color: #333; text-decoration: none; font-size: 14px; cursor: pointer; white-space: nowrap; }
+        .nav-item > a:hover, .nav-item > span:hover { color: #1890ff; background: #f0f5ff; }
+        .nav-item > a.active, .nav-item > span.active { color: #1890ff; font-weight: 600; border-bottom: 2px solid #1890ff; }
+        .dropdown { display: none; position: absolute; top: 100%; left: 0; background: white; min-width: 180px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border-radius: 0 0 6px 6px; z-index: 200; }
+        .nav-item:hover .dropdown { display: block; }
+        .dropdown a { display: block; padding: 10px 16px; color: #333; text-decoration: none; font-size: 13px; border-bottom: 1px solid #f0f0f0; }
+        .dropdown a:last-child { border-bottom: none; }
+        .dropdown a:hover { background: #f0f5ff; color: #1890ff; }
+        .nav-right { display: flex; align-items: center; gap: 12px; }
+        .search-box { position: relative; display: flex; align-items: center; }
+        .search-box input { padding: 6px 12px; border: 1px solid #d9d9d9; border-radius: 16px; font-size: 13px; width: 180px; outline: none; transition: all 0.3s; }
+        .search-box input:focus { border-color: #1890ff; width: 240px; }
+        .search-box button { position: absolute; right: 4px; background: none; border: none; cursor: pointer; color: #999; padding: 4px 8px; font-size: 14px; }
+        .user-info { font-size: 13px; color: #666; }
+        .user-info strong { color: #333; }
+        .role-tag { background: #e6f7ff; color: #1890ff; padding: 2px 8px; border-radius: 10px; font-size: 11px; margin-left: 4px; }
+        .logout-link { color: #f5222d; font-size: 13px; text-decoration: none; }
+        .logout-link:hover { text-decoration: underline; }
+        .content-wrapper { padding: 20px 0; }
         .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         .card h2 { font-size: 18px; margin-bottom: 15px; color: #333; }
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
         .stat-item { background: #f8f9fa; padding: 15px; border-radius: 6px; text-align: center; }
         .stat-value { font-size: 24px; font-weight: bold; color: #1890ff; }
         .stat-label { font-size: 14px; color: #666; margin-top: 5px; }
-        .btn { display: inline-block; padding: 10px 20px; background: #1890ff; color: white; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; }
+        .btn { display: inline-block; padding: 10px 20px; background: #1890ff; color: white; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; font-size: 14px; }
         .btn:hover { background: #40a9ff; }
         .btn-success { background: #52c41a; }
-        .btn-warning { background: #faad14; }
+        .btn-warning { background: #faad14; color: #fff; }
+        .btn-danger { background: #f5222d; color: #fff; }
+        .btn-outline { background: white; color: #1890ff; border: 1px solid #1890ff; }
+        .btn-sm { padding: 5px 12px; font-size: 12px; }
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
         th { background: #fafafa; font-weight: 600; }
         tr:hover { background: #f5f5f5; }
         .form-group { margin-bottom: 15px; }
         .form-group label { display: block; margin-bottom: 5px; font-weight: 500; }
-        .form-group input, .form-group select { width: 100%; padding: 10px; border: 1px solid #d9d9d9; border-radius: 4px; }
+        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 10px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; }
         .status-badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; }
-        .status-待加工 { background: #fff7e6; color: #fa8c16; }
-        .status-加工中 { background: #e6f7ff; color: #1890ff; }
-        .status-已完工 { background: #f6ffed; color: #52c41a; }
-        .status-已交付 { background: #f9f0ff; color: #722ed1; }
         .quick-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 20px; }
-        .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-        /* ===== 移动端响应式 ===== */
+        .table-wrap { overflow-x: auto; }
         @media (max-width: 768px) {
-            .container { padding: 10px; }
-            .header { padding: 12px; }
-            .header h1 { font-size: 18px; }
-            .nav { padding: 5px 10px; overflow-x: auto; white-space: nowrap; }
-            .nav .container { flex-direction: column; gap: 8px; }
-            .nav a { padding: 8px 12px; font-size: 13px; margin-right: 0; display: inline-block; }
-            .card { padding: 12px; margin-bottom: 12px; }
+            .container { padding: 0 10px; }
+            .nav .container { flex-direction: column; gap: 4px; padding: 4px 0; }
+            .nav-group { flex-wrap: wrap; justify-content: center; }
+            .nav-item > a, .nav-item > span { padding: 8px 10px; font-size: 12px; }
+            .search-box input { width: 120px; }
+            .card { padding: 12px; }
             .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
-            .stat-item { padding: 10px; }
-            .stat-value { font-size: 18px; }
-            .stat-label { font-size: 12px; }
-            .kpi-row { grid-template-columns: repeat(2, 1fr); }
-            .kpi .val { font-size: 18px; }
-            .grid2, .grid3 { grid-template-columns: 1fr; }
-            .kpi-list { grid-template-columns: repeat(2, 1fr); }
-            table { font-size: 12px; }
-            th, td { padding: 6px 8px; }
-            .btn { padding: 8px 14px; font-size: 13px; }
-            .form-group input, .form-group select { font-size: 16px; padding: 10px 12px; }
-            .quick-actions { grid-template-columns: repeat(2, 1fr); gap: 6px; }
-            .summary-row { grid-template-columns: repeat(2, 1fr) !important; }
-            .filter-bar { flex-direction: column; }
-            .modal { width: 95% !important; padding: 16px !important; }
-        }
-        @media (max-width: 480px) {
-            .stats-grid { grid-template-columns: 1fr 1fr; gap: 6px; }
-            .kpi-row { grid-template-columns: 1fr; }
-            .kpi-list { grid-template-columns: 1fr 1fr; }
+            .dropdown { position: static; box-shadow: none; min-width: auto; padding-left: 16px; }
         }
     </style>
 </head>
 <body>
     <div class="header">
         <div class="container">
-            <h1>氧化加工厂财务系统 V3.0</h1>
+            <div style="display:flex; align-items:center; gap:16px;">
+                <h1>氧化加工厂财务系统 V3.8</h1>
+                {% if current_period %}
+                <span class="period-tag">{{ current_period }}</span>
+                {% endif %}
+            </div>
+            {% if session.user %}
+            <div class="user-info">
+                <strong>{{ session.user.display_name }}</strong>
+                <span class="role-tag">{{ session.user.role }}</span>
+            </div>
+            {% endif %}
         </div>
     </div>
     <div class="nav">
-        <div class="container" style="display:flex; justify-content:space-between; align-items:center;">
-            <div>
-                <a href="/">首页</a>
-                <a href="/orders">订单</a>
-                <a href="/customers">客户</a>
-                <a href="/reports">报表</a>
-                <a href="/chart-of-accounts">会计科目</a>
-                <a href="/vouchers">会计凭证</a>
-                <a href="/accounting-books">会计账簿</a>
+        <div class="container">
+            <div class="nav-group">
+                <div class="nav-item"><a href="/">首页</a></div>
+                <div class="nav-item">
+                    <span>业务</span><div class="dropdown">
+                        <a href="/orders">加工订单</a><a href="/customers">客户管理</a>
+                        <a href="/income/new">录入收入</a><a href="/expense/new">录入支出</a>
+                    </div></div>
+                <div class="nav-item">
+                    <span>会计</span><div class="dropdown">
+                        <a href="/chart-of-accounts">会计科目</a><a href="/vouchers">会计凭证</a>
+                        <a href="/accounting-books">会计账簿</a><a href="/fixed-assets">固定资产</a>
+                        <a href="/cash-journal">出纳日记账</a><a href="/voucher-approval">凭证审批</a>
+                        <a href="/auto-voucher">自动凭证</a><a href="/check-before-close">期末结账</a>
+                    </div></div>
+                <div class="nav-item"><a href="/reports">报表</a></div>
+                <div class="nav-item">
+                    <span>系统</span><div class="dropdown">
+                        <a href="/system-settings">系统设置</a><a href="/user-management">用户管理</a>
+                        <a href="/data-backup">数据备份</a><a href="/audit-log">审计日志</a>
+                        <a href="/setup-wizard">初始化向导</a>
+                    </div></div>
             </div>
-            <div style="display:flex; align-items:center; gap:15px;">
-                {% if session.user %}
-                <span style="color:#666; font-size:14px;">
-                    当前用户: <strong>{{ session.user.display_name }}</strong>
-                    <span style="background:#e6f7ff; color:#1890ff; padding:2px 8px; border-radius:10px; font-size:12px; margin-left:4px;">{{ session.user.role }}</span>
-                </span>
-                <a href="/logout" style="color:#f5222d; font-size:14px;">退出登录</a>
-                {% endif %}
+            <div class="nav-right">
+                <form class="search-box" action="/global-search" method="GET">
+                    <input type="text" name="q" placeholder="搜索科目/凭证/客户..." autocomplete="off">
+                    <button type="submit">&#128269;</button>
+                </form>
+                {% if session.user %}<a href="/logout" class="logout-link">退出</a>{% endif %}
             </div>
         </div>
     </div>
     <div class="container">
-        {% block content %}{% endblock %}
+        <div class="content-wrapper">{% block content %}{% endblock %}</div>
     </div>
 </body>
 </html>"""
