@@ -53,8 +53,8 @@ th { background:#fafafa; font-weight:600; color:#555; }
 <h2>备份历史</h2>
 {% if backups %}
 <table>
-<thead><tr><th>文件名</th><th>大小</th><th>时间</th></tr></thead>
-<tbody>{% for b in backups[:10] %}<tr><td>{{ b.name }}</td><td>{{ b.size }}</td><td>{{ b.time }}</td></tr>{% endfor %}</tbody>
+<thead><tr><th>文件名</th><th>大小</th><th>时间</th><th>操作</th></tr></thead>
+<tbody>{% for b in backups[:10] %}<tr><td>{{ b.name }}</td><td>{{ b.size }}</td><td>{{ b.time }}</td><td><a href="/backup/download/{{ b.name }}" class="btn btn-sm">下载</a></td></tr>{% endfor %}</tbody>
 </table>
 {% else %}<div style="color:#999;text-align:center;padding:20px;">暂无备份记录</div>{% endif %}
 </div>

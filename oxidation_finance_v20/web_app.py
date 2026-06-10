@@ -32,7 +32,7 @@ register_all_blueprints(app)
 # ========== 中间件 ==========
 
 # 不需要登录的公开路由
-PUBLIC_ROUTES = {"main.login", "main.logout", "static"}
+PUBLIC_ROUTES = {"main.login", "main.logout", "static", "accounting.setup_wizard"}
 
 
 @app.before_request

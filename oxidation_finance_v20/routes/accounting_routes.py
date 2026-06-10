@@ -7,8 +7,8 @@ import hashlib
 import io
 import os
 import uuid
-from datetime import date, datetime
-from flask import Blueprint, Response, render_template, request, redirect
+from datetime import date, datetime, timedelta
+from flask import Blueprint, Response, render_template, request, redirect, send_file
 
 from routes.helpers import get_db, to_float
 
@@ -918,6 +918,15 @@ def get_setting(conn, key):
     """获取系统参数值"""
     row = conn.execute("SELECT value FROM system_settings WHERE key=?", (key,)).fetchone()
     return row["value"] if row else DEFAULT_SETTINGS.get(key, "")
+
+
+def set_setting(conn, key, value):
+    """设置系统参数值"""
+    now = datetime.now().isoformat()
+    conn.execute(
+        "INSERT INTO system_settings (key, value, description, updated_at) VALUES (?, ?, '', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=?, updated_at=?",
+        (key, value, now, value, now))
 
 
 def ensure_default_settings(conn):
@@ -1843,7 +1852,68 @@ def batch_vouchers():
     return redirect("/vouchers")
 
 
-# ========== 凭证复制 ==========
+# ========== 反记账 / 反结账 ==========
+
+@accounting_bp.route("/voucher/unpost/<voucher_id>", methods=["POST"])
+def unpost_voucher(voucher_id):
+    """反记账：将已记账凭证回退到已审核状态"""
+    conn = get_db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS period_locks (
+            id TEXT PRIMARY KEY, period TEXT NOT NULL UNIQUE,
+            locked_by TEXT, locked_at TEXT, is_locked INTEGER DEFAULT 1
+        )
+    """)
+    voucher = conn.execute("SELECT * FROM accounting_vouchers WHERE id=?", (voucher_id,)).fetchone()
+    if not voucher or voucher["status"] != "已记账":
+        conn.close()
+        return redirect(f"/vouchers/{voucher_id}")
+    
+    period = dict(voucher)["accounting_period"]
+    lock = conn.execute("SELECT * FROM period_locks WHERE period=? AND is_locked=1", (period,)).fetchone()
+    if lock:
+        conn.close()
+        return render_template("error.html", error=f"会计期间 {period} 已锁定，无法反记账")
+    
+    now = datetime.now().isoformat()
+    conn.execute("UPDATE accounting_vouchers SET status='已审核', posted_by=NULL, updated_at=? WHERE id=?", (now, voucher_id))
+    conn.execute("INSERT INTO audit_logs (id, operation_type, entity_type, entity_id, operation_description, operator, operation_time) VALUES (?, '反记账', 'voucher', ?, ?, ?, ?)",
+                 (str(uuid.uuid4()), voucher_id, f"反记账: {voucher['voucher_no']}", request.form.get("operator", "管理员"), now))
+    conn.commit()
+    conn.close()
+    return redirect(f"/vouchers/{voucher_id}")
+
+
+@accounting_bp.route("/period/unclose/<period_name>", methods=["POST"])
+def unclose_period(period_name):
+    """反结账：将已结转/已结账期间回退到打开状态"""
+    conn = get_db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS period_locks (
+            id TEXT PRIMARY KEY, period TEXT NOT NULL UNIQUE,
+            locked_by TEXT, locked_at TEXT, is_locked INTEGER DEFAULT 1
+        )
+    """)
+    period = conn.execute("SELECT * FROM accounting_periods WHERE period_name=?", (period_name,)).fetchone()
+    if not period or period["status"] not in ("已结转", "已结账"):
+        conn.close()
+        return redirect("/accounting-books?type=periods")
+    
+    lock = conn.execute("SELECT * FROM period_locks WHERE period=? AND is_locked=1", (period_name,)).fetchone()
+    if lock:
+        conn.close()
+        return render_template("error.html", error=f"会计期间 {period_name} 已锁定，无法反结账")
+    
+    conn.execute("UPDATE accounting_periods SET status='打开' WHERE period_name=?", (period_name,))
+    now = datetime.now().isoformat()
+    conn.execute("INSERT INTO audit_logs (id, operation_type, entity_type, entity_id, operation_description, operator, operation_time) VALUES (?, '反结账', 'period', ?, ?, ?, ?)",
+                 (str(uuid.uuid4()), period_name, f"反结账: {period_name}", request.form.get("operator", "管理员"), now))
+    conn.commit()
+    conn.close()
+    return redirect("/accounting-books?type=periods")
+
+
+# ========== 凭证模板 ==========
 
 @accounting_bp.route("/copy-voucher/<voucher_id>", methods=["POST"])
 def copy_voucher(voucher_id):
@@ -2475,6 +2545,17 @@ def data_backup():
                                "time": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")})
 
     return render_template("data_backup.html", backups=backups, message=message, error=error)
+
+
+@accounting_bp.route("/backup/download/<filename>")
+def backup_download(filename):
+    """下载备份文件"""
+    BACKUP_DIR = "/workspace/oxidation_finance_v20/backups"
+    filepath = os.path.join(BACKUP_DIR, filename)
+    if not os.path.exists(filepath) or not filename.endswith('.db'):
+        return "文件不存在", 404
+    return send_file(filepath, as_attachment=True, download_name=filename,
+                     mimetype='application/octet-stream')
 
 
 # ========== 用户管理 ==========
@@ -3147,7 +3228,333 @@ def cash_flow_projects():
         message=message, error=error)
 
 
-# ========== 摊销与预提 ==========
+# ========== 系统初始化向导 ==========
+
+@accounting_bp.route("/setup-wizard", methods=["GET", "POST"])
+def setup_wizard():
+    """系统初始化向导：5步完成新账套创建"""
+    from datetime import datetime
+    now = datetime.now()
+    conn = get_db()
+    
+    # 检查是否已初始化
+    has_accounts = conn.execute("SELECT COUNT(*) FROM chart_of_accounts").fetchone()[0]
+    if has_accounts > 0 and request.method == "GET":
+        # 已初始化直接跳首页
+        conn.close()
+        return redirect("/")
+    
+    step = int(request.args.get("step", "1"))
+    error = None
+    
+    if request.method == "GET":
+        if step == 1:
+            years = list(range(now.year - 2, now.year + 2))
+            months = list(range(1, 13))
+            conn.close()
+            return render_template("setup_wizard.html", step=1,
+                years=years, months=months,
+                current_year=now.year, current_month=now.month,
+                default={"company_name": ""}, error=error)
+    
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        if step == 1:
+            # Step 1: 基础信息提交 → 跳转到 step 2
+            company_name = request.form.get("company_name", "")
+            tax_id = request.form.get("tax_id", "")
+            accounting_standard = request.form.get("accounting_standard", "小企业会计准则")
+            start_year = int(request.form.get("start_year", str(now.year)))
+            start_month = int(request.form.get("start_month", str(now.month)))
+            # 生成预览期间列表
+            periods_preview = []
+            y = start_year
+            m = start_month
+            for i in range(12):
+                periods_preview.append(f"{y}-{m:02d}")
+                m += 1
+                if m > 12:
+                    y += 1
+                    m = 1
+            conn.close()
+            return render_template("setup_wizard.html", step=2,
+                company_name=company_name, tax_id=tax_id,
+                accounting_standard=accounting_standard,
+                start_year=start_year, start_month=start_month,
+                periods_preview=periods_preview)
+        
+        elif action == "create-periods":
+            # Step 2: 创建会计期间
+            company_name = request.form.get("company_name", "")
+            tax_id = request.form.get("tax_id", "")
+            accounting_standard = request.form.get("accounting_standard", "小企业会计准则")
+            start_year = int(request.form.get("start_year", str(now.year)))
+            start_month = int(request.form.get("start_month", str(now.month)))
+            
+            # 保存公司名称到系统设置
+            set_setting(conn, "company_name", company_name)
+            set_setting(conn, "vat_tax_id", tax_id)
+            set_setting(conn, "accounting_standard", accounting_standard)
+            
+            # 创建12个会计期间
+            y = start_year
+            m = start_month
+            for i in range(12):
+                period_name = f"{y}-{m:02d}"
+                start_date = f"{y}-{m:02d}-01"
+                if m == 12:
+                    end_date = f"{y}-12-31"
+                else:
+                    end_date = f"{y}-{(m+1):02d}-01"
+                    end_date = (datetime(y, m+1, 1) - timedelta(days=1)).strftime("%Y-%m-%d")
+                conn.execute("""
+                    INSERT INTO accounting_periods (period_name, start_date, end_date, status, created_at)
+                    VALUES (?, ?, ?, '打开', ?)
+                """, (period_name, start_date, end_date, now.isoformat()))
+                m += 1
+                if m > 12:
+                    y += 1
+                    m = 1
+            conn.commit()
+            periods_count = 12
+            conn.close()
+            return render_template("setup_wizard.html", step=3,
+                company_name=company_name, tax_id=tax_id,
+                accounting_standard=accounting_standard,
+                start_year=start_year, start_month=start_month,
+                preset_count=85, periods_count=periods_count)
+        
+        elif action == "import-chart":
+            company_name = request.form.get("company_name", "")
+            tax_id = request.form.get("tax_id", "")
+            accounting_standard = request.form.get("accounting_standard", "小企业会计准则")
+            start_year = int(request.form.get("start_year", str(now.year)))
+            start_month = int(request.form.get("start_month", str(now.month)))
+            
+            # 导入预设小企业会计准则科目表
+            # 标准科目列表（简化版，保留一级科目）
+            preset_chart = [
+                ("1001", "库存现金", "资产"),
+                ("1002", "银行存款", "资产"),
+                ("1012", "其他货币资金", "资产"),
+                ("1101", "交易性金融资产", "资产"),
+                ("1121", "应收票据", "资产"),
+                ("1122", "应收账款", "资产"),
+                ("1123", "预付账款", "资产"),
+                ("1131", "应收股利", "资产"),
+                ("1132", "应收利息", "资产"),
+                ("1221", "其他应收款", "资产"),
+                ("1231", "坏账准备", "资产"),
+                ("1401", "材料采购", "资产"),
+                ("1402", "在途物资", "资产"),
+                ("1403", "原材料", "资产"),
+                ("1404", "材料成本差异", "资产"),
+                ("1405", "库存商品", "资产"),
+                ("1411", "周转材料", "资产"),
+                ("1501", "长期债券投资", "资产"),
+                ("1511", "长期股权投资", "资产"),
+                ("1601", "固定资产", "资产"),
+                ("1602", "累计折旧", "资产"),
+                ("1603", "固定资产清理", "资产"),
+                ("1604", "在建工程", "资产"),
+                ("1605", "工程物资", "资产"),
+                ("1606", "固定资产清理", "资产"),
+                ("1701", "无形资产", "资产"),
+                ("1702", "累计摊销", "资产"),
+                ("1801", "长期待摊费用", "资产"),
+                ("1901", "待处理财产损溢", "资产"),
+                ("2001", "短期借款", "负债"),
+                ("2002", "应付票据", "负债"),
+                ("2003", "应付账款", "负债"),
+                ("2004", "预收账款", "负债"),
+                ("2211", "应付职工薪酬", "负债"),
+                ("2221", "应交税费", "负债"),
+                ("2231", "应付利息", "负债"),
+                ("2232", "应付利润", "负债"),
+                ("2241", "其他应付款", "负债"),
+                ("2501", "长期借款", "负债"),
+                ("2701", "长期应付款", "负债"),
+                ("3001", "实收资本", "权益"),
+                ("3002", "资本公积", "权益"),
+                ("3101", "盈余公积", "权益"),
+                ("3103", "本年利润", "权益"),
+                ("3104", "利润分配", "权益"),
+                ("4001", "生产成本", "成本"),
+                ("4101", "制造费用", "成本"),
+                ("5001", "主营业务收入", "损益"),
+                ("5051", "其他业务收入", "损益"),
+                ("5111", "投资收益", "损益"),
+                ("5301", "营业外收入", "损益"),
+                ("5401", "主营业务成本", "损益"),
+                ("5402", "营业税金及附加", "损益"),
+                ("5403", "其他业务成本", "损益"),
+                ("5601", "销售费用", "损益"),
+                ("5602", "管理费用", "损益"),
+                ("5603", "财务费用", "损益"),
+                ("5711", "营业外支出", "损益"),
+                ("5801", "所得税费用", "损益"),
+            ]
+            for code, name, category in preset_chart:
+                # 确定借贷方向
+                direction = '借' if category in ('资产', '成本') else '贷'
+                conn.execute("""
+                    INSERT INTO chart_of_accounts (id, code, name, account_type, balance_direction, is_active, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+                """, (str(uuid.uuid4()), code, name, category + '类', direction, now.isoformat(), now.isoformat()))
+            conn.commit()
+            # 获取所有非损益科目供期初余额录入
+            accounts = [dict(a) for a in conn.execute(
+                "SELECT code, name FROM chart_of_accounts WHERE account_type IN ('资产类','负债类','权益类','成本类') ORDER BY code"
+            ).fetchall()]
+            accounts_count = len(accounts)
+            conn.close()
+            return render_template("setup_wizard.html", step=4,
+                company_name=company_name, tax_id=tax_id,
+                accounting_standard=accounting_standard,
+                start_year=start_year, start_month=start_month,
+                accounts=accounts, accounts_count=accounts_count,
+                total_debit=0, total_credit=0, diff=0, is_balanced=False)
+        
+        elif action == "save-opening":
+            company_name = request.form.get("company_name", "")
+            tax_id = request.form.get("tax_id", "")
+            accounting_standard = request.form.get("accounting_standard", "小企业会计准则")
+            start_year = int(request.form.get("start_year", str(now.year)))
+            start_month = int(request.form.get("start_month", str(now.month)))
+            
+            period_name = f"{start_year}-{start_month:02d}"
+            # 获取所有非损益科目
+            accounts = [dict(a) for a in conn.execute(
+                "SELECT code, name, balance_direction FROM chart_of_accounts WHERE account_type IN ('资产类','负债类','权益类','成本类') ORDER BY code"
+            ).fetchall()]
+            total_debit = 0.0
+            total_credit = 0.0
+            for acc in accounts:
+                code = acc["code"]
+                debit_val = float(request.form.get(f"debit_{code}", "0") or 0)
+                credit_val = float(request.form.get(f"credit_{code}", "0") or 0)
+                total_debit += debit_val
+                total_credit += credit_val
+                opening_balance = debit_val if acc["balance_direction"] == '借' else -credit_val
+                if debit_val > 0 or credit_val > 0:
+                    conn.execute("""
+                        INSERT INTO account_balances (id, account_code, period_id, opening_balance, debit_amount, credit_amount, closing_balance, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?)
+                    """, (str(uuid.uuid4()), code, period_name, opening_balance, opening_balance, now.isoformat(), now.isoformat()))
+            diff = abs(total_debit - total_credit)
+            is_balanced = diff < 0.01
+            if not is_balanced:
+                error = f"试算不平衡！借方合计 {total_debit:.2f}，贷方合计 {total_credit:.2f}，差额 {diff:.2f}，请检查余额输入。"
+                accounts_count = len(accounts)
+                conn.close()
+                return render_template("setup_wizard.html", step=4,
+                    company_name=company_name, tax_id=tax_id,
+                    accounting_standard=accounting_standard,
+                    start_year=start_year, start_month=start_month,
+                    accounts=accounts, accounts_count=accounts_count,
+                    total_debit=total_debit, total_credit=total_credit,
+                    diff=diff, is_balanced=is_balanced, error=error)
+            conn.commit()
+            periods_count = conn.execute("SELECT COUNT(*) FROM accounting_periods").fetchone()[0]
+            accounts_count = conn.execute("SELECT COUNT(*) FROM chart_of_accounts").fetchone()[0]
+            conn.close()
+            return render_template("setup_wizard.html", step=5,
+                company_name=company_name, periods_count=periods_count,
+                accounts_count=accounts_count)
+    
+    conn.close()
+    return render_template("setup_wizard.html", step=1, error=error)
+
+
+# ========== 期初余额录入 ==========
+
+@accounting_bp.route("/opening-balances", methods=["GET", "POST"])
+def opening_balances_page():
+    """期初余额批量录入"""
+    conn = get_db()
+    message = None
+    error = None
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+
+    if request.method == "POST":
+        accounts = [dict(a) for a in conn.execute(
+            "SELECT code, name, balance_direction FROM chart_of_accounts WHERE account_type IN ('资产类','负债类','权益类','成本类') ORDER BY code"
+        ).fetchall()]
+        total_debit = 0.0
+        total_credit = 0.0
+        now = datetime.now().isoformat()
+        for acc in accounts:
+            code = acc["code"]
+            debit_val = float(request.form.get(f"debit_{code}", "0") or 0)
+            credit_val = float(request.form.get(f"credit_{code}", "0") or 0)
+            total_debit += debit_val
+            total_credit += credit_val
+            if debit_val > 0 or credit_val > 0:
+                opening_balance = debit_val if acc["balance_direction"] == '借' else -credit_val
+                exist = conn.execute(
+                    "SELECT id FROM account_balances WHERE account_code=? AND period_id=?", (code, period)
+                ).fetchone()
+                if exist:
+                    conn.execute(
+                        "UPDATE account_balances SET opening_balance=?, updated_at=? WHERE id=?",
+                        (opening_balance, now, exist["id"]))
+                else:
+                    conn.execute("""
+                        INSERT INTO account_balances (id, account_code, period_id, opening_balance, debit_amount, credit_amount, closing_balance, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?)
+                    """, (str(uuid.uuid4()), code, period, opening_balance, opening_balance, now, now))
+        diff = abs(total_debit - total_credit)
+        if diff < 0.01:
+            conn.commit()
+            message = f"期初余额保存成功，借方 {total_debit:.2f} = 贷方 {total_credit:.2f}"
+        else:
+            conn.rollback()
+            error = f"保存失败！试算不平衡：借方 {total_debit:.2f}，贷方 {total_credit:.2f}，差额 {diff:.2f}"
+
+    # 读取当前期初余额
+    accounts = [dict(a) for a in conn.execute(
+        "SELECT code, name, balance_direction, account_type FROM chart_of_accounts ORDER BY code"
+    ).fetchall()]
+    balances = {}
+    for b in conn.execute("SELECT account_code, opening_balance FROM account_balances WHERE period_id=?", (period,)).fetchall():
+        balances[b["account_code"]] = float(b["opening_balance"] or 0)
+
+    total_debit = 0.0
+    total_credit = 0.0
+    for a in accounts:
+        code = a["code"]
+        bal = balances.get(code, 0)
+        is_debit = a["balance_direction"] == '借'
+        if is_debit and bal > 0:
+            a["opening_debit"] = "%.2f" % bal
+            a["opening_credit"] = ""
+            total_debit += bal
+        elif not is_debit and bal < 0:
+            a["opening_debit"] = ""
+            a["opening_credit"] = "%.2f" % (-bal)
+            total_credit += (-bal)
+        elif is_debit and bal < 0:
+            a["opening_debit"] = ""
+            a["opening_credit"] = "%.2f" % (-bal)
+            total_credit += (-bal)
+        elif not is_debit and bal > 0:
+            a["opening_debit"] = "%.2f" % bal
+            a["opening_credit"] = ""
+            total_debit += bal
+        else:
+            a["opening_debit"] = ""
+            a["opening_credit"] = ""
+
+    diff = abs(total_debit - total_credit)
+    is_balanced = diff < 0.01
+
+    conn.close()
+    return render_template("opening_balances.html",
+        accounts=accounts, total_debit=total_debit, total_credit=total_credit,
+        diff=diff, is_balanced=is_balanced, message=message, error=error)
+
+
+# ========== 增量导出 ==========
 
 @accounting_bp.route("/amortization", methods=["GET", "POST"])
 def amortization():

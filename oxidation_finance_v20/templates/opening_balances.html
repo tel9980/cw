@@ -7,7 +7,7 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
-        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .container { max-width: 1000px; margin: 0 auto; padding: 20px; }
         .header { background: #1890ff; color: white; padding: 20px; margin-bottom: 20px; }
         .header h1 { font-size: 24px; }
         .nav { background: white; padding: 10px 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
@@ -15,141 +15,100 @@
         .nav a:hover { color: #1890ff; }
         .nav a.active { color: #1890ff; font-weight: 600; border-bottom: 2px solid #1890ff; }
         .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .card h2 { font-size: 18px; margin-bottom: 15px; color: #333; }
-        .btn { display: inline-block; padding: 8px 16px; background: #1890ff; color: white; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; font-size: 14px; }
-        .btn:hover { background: #40a9ff; }
-        .btn-success { background: #52c41a; }
-        .btn-warning { background: #faad14; }
-        .btn-sm { padding: 6px 12px; font-size: 12px; }
-        .flash { padding: 12px 15px; border-radius: 4px; margin-bottom: 15px; }
+        .card h2 { font-size: 18px; margin-bottom: 15px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { padding: 6px 8px; border-bottom: 1px solid #eee; }
+        th { background: #fafafa; font-weight: 600; position: sticky; top: 0; }
+        td input { width: 110px; padding: 5px; border: 1px solid #d9d9d9; border-radius: 3px; font-size: 13px; text-align: right; font-family: "SF Mono", Monaco, monospace; }
+        td input:focus { outline: none; border-color: #1890ff; }
+        .btn { display: inline-block; padding: 10px 20px; border-radius: 4px; border: none; cursor: pointer; font-size: 14px; }
+        .btn-primary { background: #1890ff; color: white; }
+        .btn-primary:hover { background: #40a9ff; }
+        .btn-success { background: #52c41a; color: white; }
+        .btn-success:hover { background: #73d13d; }
+        .btn-default { background: #fff; color: #333; border: 1px solid #d9d9d9; text-decoration: none; }
+        .btn-default:hover { background: #fafafa; }
+        .flash { padding: 12px 15px; border-radius: 4px; margin-bottom: 15px; font-size: 14px; }
         .flash-success { background: #f6ffed; border: 1px solid #b7eb8f; color: #52c41a; }
         .flash-error { background: #fff1f0; border: 1px solid #ffa39e; color: #f5222d; }
-        .flash-info { background: #e6f7ff; border: 1px solid #91d5ff; color: #1890ff; }
-        table { width: 100%; border-collapse: collapse; font-size: 14px; }
-        th, td { padding: 10px 12px; border-bottom: 1px solid #eee; }
-        th { background: #fafafa; font-weight: 600; text-align: left; }
-        td input { width: 140px; padding: 6px 8px; border: 1px solid #d9d9d9; border-radius: 4px; text-align: right; font-family: "SF Mono", Monaco, monospace; }
-        td input:focus { outline: none; border-color: #1890ff; }
-        .type-资产类 { border-left: 3px solid #1890ff; }
-        .type-负债类 { border-left: 3px solid #f5222d; }
-        .type-权益类 { border-left: 3px solid #52c41a; }
-        .type-成本类 { border-left: 3px solid #faad14; }
-        .type-损益类 { border-left: 3px solid #722ed1; }
-        .filter-bar { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
-        .filter-bar select, .filter-bar input { padding: 8px 12px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; }
-        .summary-bar { background: #f8f9fa; padding: 15px; border-radius: 6px; margin-bottom: 15px; display: flex; gap: 30px; font-size: 15px; }
-        .summary-item { text-align: center; }
-        .summary-item .val { font-size: 22px; font-weight: bold; }
-        .summary-item .lbl { font-size: 12px; color: #666; }
-        .balanced { color: #52c41a; }
-        .unbalanced { color: #f5222d; }
+        .summary { display: flex; gap: 20px; margin-bottom: 20px; }
+        .sum-card { flex: 1; padding: 15px; border-radius: 6px; text-align: center; }
+        .sum-card.dr { background: #fff1f0; border: 1px solid #ffa39e; }
+        .sum-card.cr { background: #f6ffed; border: 1px solid #b7eb8f; }
+        .sum-card.diff { background: #e6f7ff; border: 1px solid #91d5ff; }
+        .sum-label { font-size: 12px; color: #666; }
+        .sum-value { font-size: 22px; font-weight: bold; margin-top: 4px; }
+        .table-wrapper { max-height: 500px; overflow-y: auto; border: 1px solid #e8e8e8; border-radius: 4px; }
+        .actions { display: flex; gap: 10px; margin-top: 20px; }
     </style>
 </head>
 <body>
     <div class="header"><div class="container"><h1>期初余额录入</h1></div></div>
     <div class="nav"><div class="container">
-        <a href="/">首页</a><a href="/orders">订单</a><a href="/customers">客户</a>
-        <a href="/reports">报表</a><a href="/chart-of-accounts" class="active">会计科目</a>
+        <a href="/">首页</a><a href="/chart-of-accounts">会计科目</a>
         <a href="/vouchers">会计凭证</a><a href="/accounting-books">会计账簿</a>
+        <a href="/opening-balances" class="active">期初余额</a>
     </div></div>
     <div class="container">
         {% if message %}<div class="flash flash-success">{{ message }}</div>{% endif %}
         {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
-        <div class="flash flash-info">
-            <strong>说明：</strong>期初余额应在建账时一次性录入。录入后借贷必须平衡（借方合计=贷方合计）。如需修改，重新保存即可。
-        </div>
 
         <div class="card">
-            <div class="filter-bar">
-                <form method="GET" style="display:contents;">
-                    <label><strong>会计期间：</strong></label>
-                    <input type="text" name="period" value="{{ period }}" placeholder="如: 2024-01" onchange="this.form.submit()">
-                    <button type="submit" class="btn btn-sm">切换期间</button>
-                </form>
-                <a href="/chart-of-accounts" class="btn btn-sm" style="background:#999;">← 返回科目管理</a>
-            </div>
-
-            <form method="POST">
-                <!-- 汇总栏 -->
-                <div class="summary-bar">
-                    <div class="summary-item">
-                        <div class="val">{{ '%.2f'|format(total_debit) }}</div>
-                        <div class="lbl">借方期初合计</div>
-                    </div>
-                    <div class="summary-item">
-                        <div class="val">{{ '%.2f'|format(total_credit) }}</div>
-                        <div class="lbl">贷方期初合计</div>
-                    </div>
-                    <div class="summary-item">
-                        <div class="val {% if (total_debit - total_credit)|abs < 0.01 %}balanced{% else %}unbalanced{% endif %}">
-                            {{ '%.2f'|format(total_debit - total_credit) }}
-                        </div>
-                        <div class="lbl {% if (total_debit - total_credit)|abs < 0.01 %}balanced{% else %}unbalanced{% endif %}">
-                            {% if (total_debit - total_credit)|abs < 0.01 %}平衡{% else %}不平行{% endif %}
-                        </div>
+            <div class="summary">
+                <div class="sum-card dr"><div class="sum-label">借方合计</div><div class="sum-value">{{ "%.2f"|format(total_debit) }}</div></div>
+                <div class="sum-card cr"><div class="sum-label">贷方合计</div><div class="sum-value">{{ "%.2f"|format(total_credit) }}</div></div>
+                <div class="sum-card diff"><div class="sum-label">{% if is_balanced %}状态{% else %}差额{% endif %}</div>
+                    <div class="sum-value" style="color:{% if is_balanced %}#52c41a{% else %}#f5222d{% endif %};">
+                        {% if is_balanced %}试算平衡 ✓{% else %}{{ "%.2f"|format(diff) }}{% endif %}
                     </div>
                 </div>
+            </div>
 
-                <div style="max-height: 60vh; overflow-y: auto;">
+            <form method="POST" id="openingForm">
+                <div class="table-wrapper">
                 <table>
-                    <thead>
-                        <tr>
-                            <th style="width:100px;">科目编码</th>
-                            <th>科目名称</th>
-                            <th style="width:60px;">方向</th>
-                            <th style="width:150px;">期初余额</th>
-                        </tr>
-                    </thead>
+                    <thead><tr><th>科目编码</th><th>科目名称</th><th>类别</th><th>期初借方</th><th>期初贷方</th></tr></thead>
                     <tbody>
-                        {% for acc in accounts %}
-                        <tr class="type-{{ acc.account_type }}">
-                            <input type="hidden" name="account_code[]" value="{{ acc.code }}">
-                            <td><strong>{{ acc.code }}</strong></td>
-                            <td>{{ acc.name }} <span style="color:#999;font-size:11px;">({{ acc.account_type }})</span></td>
-                            <td><span style="color:{% if acc.balance_direction=='借' %}#1890ff{% else %}#f5222d{% endif %};">{{ acc.balance_direction }}</span></td>
-                            <td><input type="number" step="0.01" name="balance[]"
-                                 value="{{ saved_balances.get(acc.code, '') }}"
-                                 placeholder="0.00"
-                                 oninput="updateTotals()"></td>
+                        {% for a in accounts %}
+                        <tr>
+                            <td style="font-weight:600;">{{ a.code }}</td>
+                            <td>{{ a.name }}</td>
+                            <td>{{ a.account_type }}</td>
+                            <td><input type="number" step="0.01" name="debit_{{ a.code }}" value="{{ a.opening_debit|default('') }}"></td>
+                            <td><input type="number" step="0.01" name="credit_{{ a.code }}" value="{{ a.opening_credit|default('') }}"></td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
                 </div>
-
-                <div style="margin-top:20px; display:flex; gap:10px; justify-content:flex-end;">
-                    <a href="/chart-of-accounts" class="btn" style="background:#999;">取消</a>
-                    <button type="submit" class="btn btn-success" onclick="return confirmSave();">保存期初余额</button>
+                <div class="actions">
+                    <button type="submit" class="btn btn-success">保存期初余额</button>
+                    <a href="/accounting-books" class="btn btn-default">返回账簿</a>
                 </div>
             </form>
         </div>
     </div>
+
     <script>
-        function updateTotals() {
-            let dr = 0, cr = 0;
-            document.querySelectorAll('input[name="balance[]"]').forEach((inp, i) => {
-                const val = parseFloat(inp.value) || 0;
-                const direction = '{{ accounts|tojson }}' ? JSON.parse('{{ accounts|tojson|safe }}')[i]?.balance_direction : null;
-                if (!direction) {
-                    const row = inp.closest('tr');
-                    const dirCell = row?.querySelector('td:nth-child(3) span');
-                    if (dirCell && dirCell.textContent === '借') dr += val; else cr += val;
-                }
-            });
-            document.querySelectorAll('.summary-item .val')[0].textContent = dr.toFixed(2);
-            document.querySelectorAll('.summary-item .val')[1].textContent = cr.toFixed(2);
-            const diff = dr - cr;
-            const diffEl = document.querySelectorAll('.summary-item .val')[2];
-            diffEl.textContent = diff.toFixed(2);
-            diffEl.className = 'val ' + (Math.abs(diff) < 0.01 ? 'balanced' : 'unbalanced');
-        }
-        function confirmSave() {
-            const dr = parseFloat(document.querySelectorAll('.summary-item .val')[0].textContent);
-            const cr = parseFloat(document.querySelectorAll('.summary-item .val')[1].textContent);
-            if (Math.abs(dr - cr) > 0.01) {
-                return confirm('借贷不平衡（差额'+(dr-cr).toFixed(2)+'），是否仍要保存？');
+        // 实时计算借贷合计
+        document.querySelectorAll('input[type="number"]').forEach(function(el) {
+            el.addEventListener('input', updateSummary);
+        });
+        function updateSummary() {
+            var dr = 0, cr = 0;
+            document.querySelectorAll('input[name^="debit_"]').forEach(function(el) { dr += parseFloat(el.value) || 0; });
+            document.querySelectorAll('input[name^="credit_"]').forEach(function(el) { cr += parseFloat(el.value) || 0; });
+            var diff = Math.abs(dr - cr);
+            document.querySelector('.sum-card.dr .sum-value').textContent = dr.toFixed(2);
+            document.querySelector('.sum-card.cr .sum-value').textContent = cr.toFixed(2);
+            var diffEl = document.querySelector('.sum-card.diff');
+            if (diff < 0.01) {
+                diffEl.querySelector('.sum-value').innerHTML = '试算平衡 ✓';
+                diffEl.querySelector('.sum-value').style.color = '#52c41a';
+            } else {
+                diffEl.querySelector('.sum-value').innerHTML = diff.toFixed(2);
+                diffEl.querySelector('.sum-value').style.color = '#f5222d';
             }
-            return true;
         }
     </script>
 </body>

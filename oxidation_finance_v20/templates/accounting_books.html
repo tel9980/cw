@@ -593,7 +593,13 @@
                         {% for pr in period_records %}
                         <tr><td><strong>{{ pr.period_name }}</strong></td><td>{{ pr.start_date }}</td><td>{{ pr.end_date }}</td>
                             <td><span class="{% if pr.status=='打开' %}type-tag type-权益类{% else %}type-tag type-负债类{% endif %}">{{ pr.status }}</span></td>
-                            <td><a href="/accounting-books?type=balance&period={{ pr.period_name }}" class="btn btn-sm btn-default">查看</a></td></tr>
+                            <td><a href="/accounting-books?type=balance&period={{ pr.period_name }}" class="btn btn-sm btn-default">查看</a>
+                            {% if pr.status in ('已结转','已结账') %}
+                            <form method="POST" action="/period/unclose/{{ pr.period_name }}" style="display:inline;" onsubmit="return confirm('确定要反结账吗？\n\n期间将回退到"打开"状态，结转凭证不会被自动删除。')">
+                                <button type="submit" class="btn btn-sm" style="background:#faad14;color:#fff;margin-left:5px;">↩ 反结账</button>
+                            </form>
+                            {% endif %}
+                            </td></tr>
                         {% endfor %}
                     </tbody>
                 </table>

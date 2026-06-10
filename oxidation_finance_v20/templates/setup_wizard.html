@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>系统初始化向导 - 氧化加工厂财务系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f0f2f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+        .wizard-container { max-width: 700px; width: 95%; background: white; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.1); overflow: hidden; }
+        .wizard-header { background: linear-gradient(135deg, #1890ff, #0050b3); color: white; padding: 30px; text-align: center; }
+        .wizard-header h1 { font-size: 28px; margin-bottom: 8px; }
+        .wizard-header p { opacity: 0.9; font-size: 14px; }
+        .steps { display: flex; padding: 20px 30px; background: #fafafa; }
+        .step { flex: 1; text-align: center; position: relative; }
+        .step-circle { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; background: #e8e8e8; color: #999; font-size: 14px; font-weight: 600; }
+        .step.active .step-circle { background: #1890ff; color: white; }
+        .step.done .step-circle { background: #52c41a; color: white; }
+        .step-label { display: block; margin-top: 5px; font-size: 12px; color: #666; }
+        .step.active .step-label { color: #1890ff; font-weight: 600; }
+        .step.done .step-label { color: #52c41a; }
+        .content { padding: 30px; }
+        .step-content { display: none; }
+        .step-content.active { display: block; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 8px; font-weight: 500; color: #333; }
+        .form-group input, .form-group select { width: 100%; padding: 12px 14px; border: 1px solid #d9d9d9; border-radius: 6px; font-size: 14px; }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: #1890ff; }
+        .card { border: 1px solid #e8e8e8; border-radius: 6px; padding: 16px; margin-bottom: 15px; background: #fafafa; }
+        .card-title { font-weight: 600; margin-bottom: 8px; }
+        .actions { display: flex; justify-content: space-between; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; }
+        .btn { display: inline-block; padding: 12px 30px; border-radius: 6px; font-size: 15px; border: none; cursor: pointer; text-decoration: none; }
+        .btn-primary { background: #1890ff; color: white; }
+        .btn-primary:hover { background: #40a9ff; }
+        .btn-success { background: #52c41a; color: white; }
+        .btn-success:hover { background: #73d13d; }
+        .btn-default { background: #f5f5f5; color: #666; border: 1px solid #d9d9d9; }
+        .btn-default:hover { background: #e8e8e8; }
+        .check-item { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid #e8e8e8; border-radius: 4px; margin-bottom: 8px; }
+        .check-list { margin: 15px 0; }
+        .balance-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 15px 0; }
+        .balance-card { padding: 15px; border-radius: 6px; border: 1px solid #e8e8e8; text-align: center; }
+        .balance-card.total-debit { background: #fff1f0; border-color: #ffa39e; }
+        .balance-card.total-credit { background: #f6ffed; border-color: #b7eb8f; }
+        .balance-card.diff { background: #e6f7ff; border-color: #91d5ff; }
+        .balance-label { font-size: 13px; color: #666; }
+        .balance-value { font-size: 24px; font-weight: bold; margin-top: 5px; }
+        .diff-good { color: #52c41a; }
+        .diff-bad { color: #f5222d; }
+        .progress { height: 8px; background: #e8e8e8; border-radius: 4px; overflow: hidden; margin-bottom: 15px; }
+        .progress-bar { height: 100%; background: #52c41a; width: 0%; transition: width 0.3s; }
+        .check-list li { list-style: none; padding: 6px 0; font-size: 13px; }
+        .check-list li::before { content: '✓ '; color: #52c41a; font-weight: bold; }
+        .flash { padding: 12px 15px; border-radius: 4px; margin-bottom: 15px; font-size: 14px; }
+        .flash-error { background: #fff1f0; border: 1px solid #ffa39e; color: #f5222d; }
+        .flash-success { background: #f6ffed; border: 1px solid #b7eb8f; color: #52c41a; }
+    </style>
+</head>
+<body>
+    <div class="wizard-container">
+        <div class="wizard-header">
+            <h1>系统初始化向导</h1>
+            <p>欢迎使用氧化加工厂财务管理系统，跟随向导完成初始化设置</p>
+        </div>
+        <div class="steps">
+            <div class="step {% if step==1 %}active{% elif step>1 %}done{% endif %}">
+                <span class="step-circle">1</span>
+                <span class="step-label">基础信息</span>
+            </div>
+            <div class="step {% if step==2 %}active{% elif step>2 %}done{% endif %}">
+                <span class="step-circle">2</span>
+                <span class="step-label">创建期间</span>
+            </div>
+            <div class="step {% if step==3 %}active{% elif step>3 %}done{% endif %}">
+                <span class="step-circle">3</span>
+                <span class="step-label">导入科目</span>
+            </div>
+            <div class="step {% if step==4 %}active{% elif step>4 %}done{% endif %}">
+                <span class="step-circle">4</span>
+                <span class="step-label">期初余额</span>
+            </div>
+            <div class="step {% if step==5 %}active{% elif step>5 %}done{% endif %}">
+                <span class="step-circle">5</span>
+                <span class="step-label">完成</span>
+            </div>
+        </div>
+
+        <div class="content">
+            {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+
+            <!-- Step 1: 基础信息 -->
+            {% if step == 1 %}
+            <div class="step-content active">
+                <div class="card">
+                    <div class="card-title">公司基本信息</div>
+                    <form method="POST" data-step="1">
+                        <div class="form-group">
+                            <label>公司名称 <span style="color:#f5222d;">*</span></label>
+                            <input type="text" name="company_name" placeholder="请输入公司全称" value="{{ default.company_name }}" required>
+                        </div>
+                        <div class="form-group">
+                            <label>纳税人识别号</label>
+                            <input type="text" name="tax_id" placeholder="请输入纳税人识别号">
+                        </div>
+                        <div class="form-group">
+                            <label>会计制度 <span style="color:#f5222d;">*</span></label>
+                            <select name="accounting_standard">
+                                <option value="小企业会计准则">小企业会计准则</option>
+                                <option value="企业会计准则">企业会计准则</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>启用年份 <span style="color:#f5222d;">*</span></label>
+                            <select name="start_year">
+                                {% for y in years %}
+                                <option value="{{ y }}" {% if y == current_year %}selected{% endif %}>{{ y }}年</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>启用月份 <span style="color:#f5222d;">*</span></label>
+                            <select name="start_month">
+                                {% for m in months %}
+                                <option value="{{ '%02d'|format(m) }}" {% if m == current_month %}selected{% endif %}>{{ m }}月</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="actions">
+                            <div></div>
+                            <button type="submit" class="btn btn-primary">下一步 →</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Step 2: 创建期间 -->
+            {% elif step == 2 %}
+            <div class="step-content active">
+                <div class="card">
+                    <div class="card-title">创建会计期间</div>
+                    <p style="margin-bottom:15px;color:#666;font-size:14px;">
+                        系统将自动从 {{ start_year }} 年 {{ start_month }} 月开始创建 12 个连续会计期间。
+                    </p>
+                    <div class="check-list">
+                        {% for p in periods_preview %}
+                        <li>{{ p }}</li>
+                        {% endfor %}
+                    </div>
+                    <div class="actions">
+                        <a href="/setup-wizard?step=1" class="btn btn-default">← 上一步</a>
+                        <form method="POST" style="display:inline;">
+                            <input type="hidden" name="action" value="create-periods">
+                            <input type="hidden" name="company_name" value="{{ company_name }}">
+                            <input type="hidden" name="tax_id" value="{{ tax_id }}">
+                            <input type="hidden" name="accounting_standard" value="{{ accounting_standard }}">
+                            <input type="hidden" name="start_year" value="{{ start_year }}">
+                            <input type="hidden" name="start_month" value="{{ start_month }}">
+                            <button type="submit" class="btn btn-primary">下一步 →</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3: 导入科目 -->
+            {% elif step == 3 %}
+            <div class="step-content active">
+                <div class="card">
+                    <div class="card-title">导入预设会计科目</div>
+                    <p style="margin-bottom:15px;color:#666;font-size:14px;">
+                        根据您选择的 <strong>{{ accounting_standard }}</strong>，系统将导入一套完整的预设会计科目。您可以后续再修改。
+                    </p>
+                    <div class="balance-summary">
+                        <div class="balance-card">
+                            <div class="balance-label">预设科目数</div>
+                            <div class="balance-value">{{ preset_count }}</div>
+                        </div>
+                        <div class="balance-card">
+                            <div class="balance-label">分类</div>
+                            <div class="balance-value">6大类</div>
+                        </div>
+                    </div>
+                    <div class="actions">
+                        <a href="/setup-wizard?step=2&company_name={{ company_name }}&tax_id={{ tax_id }}&accounting_standard={{ accounting_standard }}&start_year={{ start_year }}&start_month={{ start_month }}" class="btn btn-default">← 上一步</a>
+                        <form method="POST" style="display:inline;">
+                            <input type="hidden" name="action" value="import-chart">
+                            <input type="hidden" name="company_name" value="{{ company_name }}">
+                            <input type="hidden" name="tax_id" value="{{ tax_id }}">
+                            <input type="hidden" name="accounting_standard" value="{{ accounting_standard }}">
+                            <input type="hidden" name="start_year" value="{{ start_year }}">
+                            <input type="hidden" name="start_month" value="{{ start_month }}">
+                            <button type="submit" class="btn btn-primary">导入科目 →</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 4: 期初余额 -->
+            {% elif step == 4 %}
+            <div class="step-content active">
+                <div class="card">
+                    <div class="card-title">录入期初余额</div>
+                    <p style="margin-bottom:15px;color:#666;font-size:14px;">
+                        请录入资产/负债/权益类科目的期初余额。收入费用类科目期初余额应为 0。
+                    </p>
+                    <div class="balance-summary">
+                        <div class="balance-card total-debit">
+                            <div class="balance-label">借方合计</div>
+                            <div class="balance-value">{{ "%.2f"|format(total_debit) }}</div>
+                        </div>
+                        <div class="balance-card total-credit">
+                            <div class="balance-label">贷方合计</div>
+                            <div class="balance-value">{{ "%.2f"|format(total_credit) }}</div>
+                        </div>
+                    </div>
+                    <div class="balance-summary">
+                        <div class="balance-card diff {% if is_balanced %}total-credit{% else %}total-debit{% endif %}">
+                            <div class="balance-label">差额</div>
+                            <div class="balance-value {{ 'diff-good' if is_balanced else 'diff-bad' }}">{{ "%.2f"|format(diff) }}</div>
+                        </div>
+                        <div class="balance-card">
+                            <div class="balance-label">状态</div>
+                            <div class="balance-value">
+                                {% if is_balanced %}<span style="color:#52c41a;">试算平衡 ✓</span>{% else %}<span style="color:#f5222d;">不平衡 ✗</span>{% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    <form method="POST">
+                        <input type="hidden" name="action" value="save-opening">
+                        <input type="hidden" name="company_name" value="{{ company_name }}">
+                        <input type="hidden" name="tax_id" value="{{ tax_id }}">
+                        <input type="hidden" name="accounting_standard" value="{{ accounting_standard }}">
+                        <input type="hidden" name="start_year" value="{{ start_year }}">
+                        <input type="hidden" name="start_month" value="{{ start_month }}">
+                        <table style="width:100%;border-collapse:collapse;margin-top:15px;">
+                            <thead><tr><th>科目编码</th><th>科目名称</th><th>期初借方</th><th>期初贷方</th></tr></thead>
+                            <tbody>
+                                {% for acc in accounts %}
+                                <tr style="border-bottom:1px solid #eee;">
+                                    <td style="padding:8px;font-weight:600;">{{ acc.code }}</td>
+                                    <td style="padding:8px;">{{ acc.name }}</td>
+                                    <td style="padding:8px;"><input type="number" step="0.01" name="debit_{{ acc.code }}" placeholder="0.00" style="width:120px;padding:6px;"></td>
+                                    <td style="padding:8px;"><input type="number" step="0.01" name="credit_{{ acc.code }}" placeholder="0.00" style="width:120px;padding:6px;"></td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        <div class="actions">
+                            <a href="/setup-wizard?step=3&company_name={{ company_name }}&tax_id={{ tax_id }}&accounting_standard={{ accounting_standard }}&start_year={{ start_year }}&start_month={{ start_month }}" class="btn btn-default">← 上一步</a>
+                            <button type="submit" class="btn {% if is_balanced %}btn-success{% else %}btn-primary{% endif %}">完成初始化 →</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Step 5: 完成 -->
+            {% elif step == 5 %}
+            <div class="step-content active">
+                <div class="card">
+                    <div class="card-title" style="text-align:center;font-size:20px;color:#52c41a;">✅ 初始化完成！</div>
+                    <div style="margin:20px 0;">
+                        <ul class="check-list">
+                            <li>公司信息已保存：<strong>{{ company_name }}</strong></li>
+                            <li>会计期间已创建：共 {{ periods_count }} 个期间</li>
+                            <li>预设会计科目已导入：共 {{ accounts_count }} 个科目</li>
+                            <li>期初余额已录入：试算平衡</li>
+                        </ul>
+                    </div>
+                    <div style="text-align:center;margin-top:30px;">
+                        <a href="/" class="btn btn-success btn-lg">进入系统首页 →</a>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
