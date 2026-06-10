@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>会计科目管理 - 氧化加工厂财务系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .header { background: #1890ff; color: white; padding: 20px; margin-bottom: 20px; }
+        .header h1 { font-size: 24px; }
+        .nav { background: white; padding: 10px 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .nav a { color: #333; text-decoration: none; margin-right: 20px; padding: 5px 10px; font-size: 14px; }
+        .nav a:hover { color: #1890ff; }
+        .nav a.active { color: #1890ff; font-weight: 600; border-bottom: 2px solid #1890ff; }
+        .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .card h2 { font-size: 18px; margin-bottom: 15px; color: #333; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; }
+        .stat-item { background: #f8f9fa; padding: 15px; border-radius: 6px; text-align: center; border-left: 4px solid #1890ff; }
+        .stat-item.asset { border-left-color: #1890ff; }
+        .stat-item.liability { border-left-color: #f5222d; }
+        .stat-item.equity { border-left-color: #52c41a; }
+        .stat-item.cost { border-left-color: #faad14; }
+        .stat-item.profit { border-left-color: #722ed1; }
+        .stat-value { font-size: 28px; font-weight: bold; color: #333; }
+        .stat-label { font-size: 13px; color: #666; margin-top: 5px; }
+        .btn { display: inline-block; padding: 8px 16px; background: #1890ff; color: white; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; font-size: 14px; }
+        .btn:hover { background: #40a9ff; }
+        .btn-sm { padding: 5px 12px; font-size: 12px; }
+        .btn-success { background: #52c41a; }
+        .btn-success:hover { background: #73d13d; }
+        .btn-warning { background: #faad14; }
+        .btn-warning:hover { background: #ffc53d; }
+        .btn-danger { background: #f5222d; }
+        .btn-danger:hover { background: #ff4d4f; }
+        .btn-default { background: #fff; color: #333; border: 1px solid #d9d9d9; }
+        .btn-default:hover { background: #fafafa; color: #1890ff; border-color: #1890ff; }
+        .filter-bar { display: flex; gap: 10px; margin-bottom: 15px; align-items: center; flex-wrap: wrap; }
+        .filter-bar select, .filter-bar input { padding: 6px 10px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #fafafa; font-weight: 600; color: #333; white-space: nowrap; }
+        tr:hover { background: #f5f5f5; }
+        td.num, th.num { text-align: right; font-family: "SF Mono", Monaco, monospace; }
+        tr.level-1 td:first-child { padding-left: 12px; font-weight: 600; background: #fafafa; }
+        tr.level-2 td:first-child { padding-left: 32px; }
+        tr.level-3 td:first-child { padding-left: 52px; }
+        tr.level-4 td:first-child { padding-left: 72px; }
+        .type-资产类 { border-left: 3px solid #1890ff; }
+        .type-负债类 { border-left: 3px solid #f5222d; }
+        .type-权益类 { border-left: 3px solid #52c41a; }
+        .type-成本类 { border-left: 3px solid #faad14; }
+        .type-损益类 { border-left: 3px solid #722ed1; }
+        .tag { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 11px; margin-right: 4px; }
+        .tag-dir-借 { background: #e6f7ff; color: #1890ff; }
+        .tag-dir-贷 { background: #fff1f0; color: #f5222d; }
+        .tag-controlled { background: #f6ffed; color: #52c41a; }
+        .tag-custom { background: #f9f0ff; color: #722ed1; }
+        .tag-aux { background: #fffbe6; color: #d48806; font-size: 10px; padding: 1px 4px; margin-right: 2px; }
+        .inactive { opacity: 0.5; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: 500; font-size: 14px; color: #333; }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%; padding: 8px 12px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px;
+        }
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline: none; border-color: #1890ff; }
+        .checkbox-group { display: flex; gap: 15px; flex-wrap: wrap; }
+        .checkbox-group label { display: flex; align-items: center; gap: 4px; font-weight: normal; cursor: pointer; }
+        .checkbox-group input[type="checkbox"] { width: auto; }
+        .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: none; z-index: 1000; }
+        .modal.show { display: flex; align-items: center; justify-content: center; }
+        .modal-content { background: white; padding: 25px; border-radius: 8px; max-width: 700px; width: 90%; max-height: 85vh; overflow-y: auto; }
+        .modal-content h3 { margin-bottom: 20px; font-size: 18px; }
+        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee; }
+        .flash { padding: 12px 15px; border-radius: 4px; margin-bottom: 15px; font-size: 14px; }
+        .flash-success { background: #f6ffed; border: 1px solid #b7eb8f; color: #52c41a; }
+        .flash-error { background: #fff1f0; border: 1px solid #ffa39e; color: #f5222d; }
+        .tree-toggle { display: inline-block; width: 14px; cursor: pointer; color: #999; user-select: none; }
+        .tree-toggle:hover { color: #1890ff; }
+        .tree-toggle.empty { visibility: hidden; }
+        .hidden-row { display: none; }
+        .tabs { display: flex; gap: 0; margin-bottom: 0; border-bottom: 2px solid #e8e8e8; }
+        .tab { padding: 10px 20px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; font-size: 14px; color: #666; }
+        .tab:hover { color: #1890ff; }
+        .tab.active { color: #1890ff; border-bottom-color: #1890ff; font-weight: 600; }
+        .tab-content { padding: 20px 0; }
+        .search-box { flex: 1; max-width: 300px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <h1>会计科目管理</h1>
+        </div>
+    </div>
+    <div class="nav">
+        <div class="container">
+            <a href="/">首页</a>
+            <a href="/orders">订单</a>
+            <a href="/customers">客户</a>
+            <a href="/reports">报表</a>
+            <a href="/chart-of-accounts" class="active">会计科目</a>
+            <a href="/vouchers">会计凭证</a>
+            <a href="/accounting-books">会计账簿</a>
+        </div>
+    </div>
+    <div class="container">
+
+        {% if message %}
+        <div class="flash flash-success">{{ message }}</div>
+        {% endif %}
+        {% if error %}
+        <div class="flash flash-error">{{ error }}</div>
+        {% endif %}
+
+        <!-- 科目统计 -->
+        <div class="card">
+            <h2>科目统计</h2>
+            <div class="stats-grid">
+                <div class="stat-item asset">
+                    <div class="stat-value">{{ stats.by_type.get('资产类', 0) }}</div>
+                    <div class="stat-label">资产类科目</div>
+                </div>
+                <div class="stat-item liability">
+                    <div class="stat-value">{{ stats.by_type.get('负债类', 0) }}</div>
+                    <div class="stat-label">负债类科目</div>
+                </div>
+                <div class="stat-item equity">
+                    <div class="stat-value">{{ stats.by_type.get('权益类', 0) }}</div>
+                    <div class="stat-label">权益类科目</div>
+                </div>
+                <div class="stat-item cost">
+                    <div class="stat-value">{{ stats.by_type.get('成本类', 0) }}</div>
+                    <div class="stat-label">成本类科目</div>
+                </div>
+                <div class="stat-item profit">
+                    <div class="stat-value">{{ stats.by_type.get('损益类', 0) }}</div>
+                    <div class="stat-label">损益类科目</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value">{{ stats.total_accounts }}</div>
+                    <div class="stat-label">总科目数</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 标签页 -->
+        <div class="card" style="padding-bottom: 0;">
+            <div class="tabs">
+                <div class="tab active" onclick="switchTab('accounts')">会计科目 ({{ stats.total_accounts }})</div>
+                <div class="tab" onclick="switchTab('departments')">部门 ({{ department_count }})</div>
+                <div class="tab" onclick="switchTab('projects')">项目 ({{ project_count }})</div>
+            </div>
+
+            <!-- 会计科目 -->
+            <div class="tab-content" id="tab-accounts">
+                <div class="filter-bar">
+                    <select id="typeFilter" onchange="filterTable()">
+                        <option value="">全部类型</option>
+                        <option value="资产类">资产类</option>
+                        <option value="负债类">负债类</option>
+                        <option value="权益类">权益类</option>
+                        <option value="成本类">成本类</option>
+                        <option value="损益类">损益类</option>
+                    </select>
+                    <input type="text" id="searchInput" class="search-box" placeholder="搜索科目编码或名称..." oninput="filterTable()">
+                    <button class="btn btn-success btn-sm" onclick="openAccountModal()">+ 新增科目</button>
+                </div>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 180px;">科目编码 / 名称</th>
+                            <th style="width: 100px;">科目类型</th>
+                            <th style="width: 80px;">级别</th>
+                            <th style="width: 80px;">余额方向</th>
+                            <th>辅助核算</th>
+                            <th style="width: 120px;">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="accountTableBody">
+                        {% for acc in accounts %}
+                        <tr class="level-{{ acc.level }} type-{{ acc.account_type }} {% if not acc.is_active %}inactive{% endif %}"
+                            data-type="{{ acc.account_type }}"
+                            data-search="{{ acc.code }} {{ acc.name }}">
+                            <td>
+                                <span class="tree-toggle empty">·</span>
+                                <strong>{{ acc.code }}</strong> - {{ acc.name }}
+                                {% if acc.is_controlled %}<span class="tag tag-controlled">系统</span>{% endif %}
+                            </td>
+                            <td>{{ acc.account_type }}</td>
+                            <td>{% if acc.level == 1 %}一级{% elif acc.level == 2 %}二级{% elif acc.level == 3 %}三级{% else %}四级{% endif %}</td>
+                            <td><span class="tag tag-dir-{{ acc.balance_direction }}">{{ acc.balance_direction }}</span></td>
+                            <td>
+                                {% if acc.aux_customer %}<span class="tag tag-aux">客户</span>{% endif %}
+                                {% if acc.aux_supplier %}<span class="tag tag-aux">供应商</span>{% endif %}
+                                {% if acc.aux_department %}<span class="tag tag-aux">部门</span>{% endif %}
+                                {% if acc.aux_project %}<span class="tag tag-aux">项目</span>{% endif %}
+                                {% if acc.aux_employee %}<span class="tag tag-aux">员工</span>{% endif %}
+                                {% if not acc.aux_customer and not acc.aux_supplier and not acc.aux_department and not acc.aux_project and not acc.aux_employee %}<span style="color:#999; font-size: 12px;">无</span>{% endif %}
+                            </td>
+                            <td>
+                                <button class="btn btn-sm btn-default" onclick="editAccount('{{ acc.id }}')">编辑</button>
+                                {% if not acc.is_controlled %}
+                                <button class="btn btn-sm btn-danger" onclick="deleteAccount('{{ acc.id }}', '{{ acc.code }} {{ acc.name }}')">删除</button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 部门 -->
+            <div class="tab-content" id="tab-departments" style="display: none;">
+                <div class="filter-bar">
+                    <button class="btn btn-success btn-sm" onclick="openDepartmentModal()">+ 新增部门</button>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 150px;">编码</th>
+                            <th>部门名称</th>
+                            <th style="width: 150px;">负责人</th>
+                            <th style="width: 100px;">状态</th>
+                            <th style="width: 120px;">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for d in departments %}
+                        <tr>
+                            <td>{{ d.code }}</td>
+                            <td>{{ d.name }}</td>
+                            <td>{{ d.manager or '-' }}</td>
+                            <td>{% if d.is_active %}<span class="tag tag-controlled">启用</span>{% else %}<span class="tag tag-dir-贷">停用</span>{% endif %}</td>
+                            <td>
+                                <button class="btn btn-sm btn-default" onclick="alert('编辑功能开发中')">编辑</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 项目 -->
+            <div class="tab-content" id="tab-projects" style="display: none;">
+                <div class="filter-bar">
+                    <button class="btn btn-success btn-sm" onclick="openProjectModal()">+ 新增项目</button>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 150px;">编码</th>
+                            <th>项目名称</th>
+                            <th style="width: 120px;">状态</th>
+                            <th style="width: 150px;">负责人</th>
+                            <th class="num">预算金额</th>
+                            <th style="width: 120px;">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in projects %}
+                        <tr>
+                            <td>{{ p.code }}</td>
+                            <td>{{ p.name }}</td>
+                            <td><span class="tag tag-custom">{{ p.status }}</span></td>
+                            <td>{{ p.manager or '-' }}</td>
+                            <td class="num">{{ '%.2f'|format(p.budget) }}</td>
+                            <td>
+                                <button class="btn btn-sm btn-default" onclick="alert('编辑功能开发中')">编辑</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 科目编辑弹窗 -->
+        <div class="modal" id="accountModal">
+            <div class="modal-content">
+                <h3 id="accountModalTitle">新增会计科目</h3>
+                <form id="accountForm" method="POST" action="/chart-of-accounts">
+                    <input type="hidden" id="accountId" name="account_id">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>科目编码 *</label>
+                            <input type="text" id="accountCode" name="code" required placeholder="例如: 1001">
+                        </div>
+                        <div class="form-group">
+                            <label>科目名称 *</label>
+                            <input type="text" id="accountName" name="name" required placeholder="例如: 库存现金">
+                        </div>
+                        <div class="form-group">
+                            <label>科目类型</label>
+                            <select id="accountType" name="account_type">
+                                <option value="资产类">资产类</option>
+                                <option value="负债类">负债类</option>
+                                <option value="权益类">所有者权益类</option>
+                                <option value="成本类">成本类</option>
+                                <option value="损益类">损益类</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>余额方向</label>
+                            <select id="accountDirection" name="balance_direction">
+                                <option value="借">借</option>
+                                <option value="贷">贷</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>辅助核算项</label>
+                        <div class="checkbox-group">
+                            <label><input type="checkbox" name="aux_customer" value="1"> 客户核算</label>
+                            <label><input type="checkbox" name="aux_supplier" value="1"> 供应商核算</label>
+                            <label><input type="checkbox" name="aux_department" value="1"> 部门核算</label>
+                            <label><input type="checkbox" name="aux_project" value="1"> 项目核算</label>
+                            <label><input type="checkbox" name="aux_employee" value="1"> 员工核算</label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>备注</label>
+                        <textarea name="notes" rows="2" placeholder="选填"></textarea>
+                    </div>
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn-default" onclick="closeAccountModal()">取消</button>
+                        <button type="submit" class="btn">保存</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- 部门弹窗 -->
+        <div class="modal" id="departmentModal">
+            <div class="modal-content">
+                <h3>新增部门</h3>
+                <form method="POST" action="/chart-of-accounts/department">
+                    <div class="form-group">
+                        <label>部门编码 *</label>
+                        <input type="text" name="code" required placeholder="例如: DEPT001">
+                    </div>
+                    <div class="form-group">
+                        <label>部门名称 *</label>
+                        <input type="text" name="name" required placeholder="例如: 生产部">
+                    </div>
+                    <div class="form-group">
+                        <label>负责人</label>
+                        <input type="text" name="manager" placeholder="选填">
+                    </div>
+                    <div class="form-group">
+                        <label>备注</label>
+                        <textarea name="notes" rows="2"></textarea>
+                    </div>
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn-default" onclick="document.getElementById('departmentModal').classList.remove('show')">取消</button>
+                        <button type="submit" class="btn btn-success">保存</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- 项目弹窗 -->
+        <div class="modal" id="projectModal">
+            <div class="modal-content">
+                <h3>新增项目</h3>
+                <form method="POST" action="/chart-of-accounts/project">
+                    <div class="form-group">
+                        <label>项目编码 *</label>
+                        <input type="text" name="code" required placeholder="例如: PROJ2024001">
+                    </div>
+                    <div class="form-group">
+                        <label>项目名称 *</label>
+                        <input type="text" name="name" required>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>状态</label>
+                            <select name="status">
+                                <option>进行中</option>
+                                <option>已完成</option>
+                                <option>已取消</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>负责人</label>
+                            <input type="text" name="manager">
+                        </div>
+                        <div class="form-group">
+                            <label>预算金额</label>
+                            <input type="number" step="0.01" name="budget" value="0">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>备注</label>
+                        <textarea name="notes" rows="2"></textarea>
+                    </div>
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn-default" onclick="document.getElementById('projectModal').classList.remove('show')">取消</button>
+                        <button type="submit" class="btn btn-success">保存</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // 标签切换
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+            event.target.classList.add('active');
+            document.getElementById('tab-' + tabName).style.display = 'block';
+        }
+
+        // 表格过滤
+        function filterTable() {
+            const type = document.getElementById('typeFilter').value;
+            const search = document.getElementById('searchInput').value.toLowerCase();
+            const rows = document.querySelectorAll('#accountTableBody tr');
+            rows.forEach(row => {
+                const matchType = !type || row.dataset.type === type;
+                const matchSearch = !search || row.dataset.search.toLowerCase().includes(search);
+                row.style.display = (matchType && matchSearch) ? '' : 'none';
+            });
+        }
+
+        // 科目弹窗
+        function openAccountModal() {
+            document.getElementById('accountModalTitle').textContent = '新增会计科目';
+            document.getElementById('accountForm').reset();
+            document.getElementById('accountId').value = '';
+            document.getElementById('accountModal').classList.add('show');
+        }
+
+        function editAccount(id) {
+            // 从当前表格行获取科目信息做简单回显
+            alert('编辑功能: 科目ID ' + id + '（请在后端实现编辑回显）');
+            // 实际项目中应该通过API获取详细信息再填充表单
+        }
+
+        function closeAccountModal() {
+            document.getElementById('accountModal').classList.remove('show');
+        }
+
+        function deleteAccount(id, name) {
+            if (confirm('确定要删除科目 [' + name + '] 吗？')) {
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '/chart-of-accounts/delete';
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'account_id';
+                input.value = id;
+                form.appendChild(input);
+                document.body.appendChild(form);
+                form.submit();
+            }
+        }
+
+        function openDepartmentModal() {
+            document.getElementById('departmentModal').classList.add('show');
+        }
+
+        function openProjectModal() {
+            document.getElementById('projectModal').classList.add('show');
+        }
+
+        // 点击弹窗外关闭
+        document.querySelectorAll('.modal').forEach(modal => {
+            modal.addEventListener('click', function(e) {
+                if (e.target === this) this.classList.remove('show');
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>会计凭证管理 - 氧化加工厂财务系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .header { background: #1890ff; color: white; padding: 20px; margin-bottom: 20px; }
+        .header h1 { font-size: 24px; }
+        .nav { background: white; padding: 10px 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .nav a { color: #333; text-decoration: none; margin-right: 20px; padding: 5px 10px; font-size: 14px; }
+        .nav a:hover { color: #1890ff; }
+        .nav a.active { color: #1890ff; font-weight: 600; border-bottom: 2px solid #1890ff; }
+        .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .card h2 { font-size: 18px; margin-bottom: 15px; color: #333; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; }
+        .stat-item { background: #f8f9fa; padding: 15px; border-radius: 6px; text-align: center; border-left: 4px solid #1890ff; }
+        .stat-value { font-size: 28px; font-weight: bold; color: #333; }
+        .stat-label { font-size: 13px; color: #666; margin-top: 5px; }
+        .btn { display: inline-block; padding: 8px 16px; background: #1890ff; color: white; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; font-size: 14px; }
+        .btn:hover { background: #40a9ff; }
+        .btn-sm { padding: 5px 12px; font-size: 12px; }
+        .btn-success { background: #52c41a; }
+        .btn-success:hover { background: #73d13d; }
+        .btn-warning { background: #faad14; }
+        .btn-warning:hover { background: #ffc53d; }
+        .btn-default { background: #fff; color: #333; border: 1px solid #d9d9d9; }
+        .btn-default:hover { background: #fafafa; color: #1890ff; border-color: #1890ff; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #fafafa; font-weight: 600; color: #333; }
+        tr:hover { background: #f5f5f5; }
+        td.num, th.num { text-align: right; font-family: "SF Mono", Monaco, monospace; }
+        .status-badge { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: 500; }
+        .status-草稿 { background: #fff7e6; color: #fa8c16; border: 1px solid #ffd591; }
+        .status-已审核 { background: #e6f7ff; color: #1890ff; border: 1px solid #91d5ff; }
+        .status-已记账 { background: #f6ffed; color: #52c41a; border: 1px solid #b7eb8f; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: 500; font-size: 14px; color: #333; }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%; padding: 8px 12px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px;
+        }
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline: none; border-color: #1890ff; }
+        .voucher-lines { width: 100%; margin-top: 10px; }
+        .voucher-lines th, .voucher-lines td { padding: 8px; }
+        .voucher-lines input { padding: 6px 8px; }
+        .remove-btn { background: #ff4d4f; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; }
+        .flash { padding: 12px 15px; border-radius: 4px; margin-bottom: 15px; font-size: 14px; }
+        .flash-success { background: #f6ffed; border: 1px solid #b7eb8f; color: #52c41a; }
+        .flash-error { background: #fff1f0; border: 1px solid #ffa39e; color: #f5222d; }
+        .tabs { display: flex; gap: 0; margin-bottom: 15px; border-bottom: 2px solid #e8e8e8; }
+        .tab { padding: 10px 20px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; font-size: 14px; color: #666; }
+        .tab:hover { color: #1890ff; }
+        .tab.active { color: #1890ff; border-bottom-color: #1890ff; font-weight: 600; }
+        .tab-content { padding: 10px 0; }
+        .action-btns { display: flex; gap: 8px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <h1>会计凭证管理</h1>
+        </div>
+    </div>
+    <div class="nav">
+        <div class="container">
+            <a href="/">首页</a>
+            <a href="/orders">订单</a>
+            <a href="/customers">客户</a>
+            <a href="/reports">报表</a>
+            <a href="/chart-of-accounts">会计科目</a>
+            <a href="/vouchers" class="active">会计凭证</a>
+            <a href="/accounting-books">会计账簿</a>
+        </div>
+    </div>
+    <div class="container">
+
+        {% if message %}<div class="flash flash-success">{{ message }}</div>{% endif %}
+        {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+
+        <!-- 统计 -->
+        <div class="card">
+            <h2>凭证统计</h2>
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <div class="stat-value">{{ stats.total }}</div>
+                    <div class="stat-label">凭证总数</div>
+                </div>
+                <div class="stat-item" style="border-left-color:#faad14;">
+                    <div class="stat-value">{{ stats.draft }}</div>
+                    <div class="stat-label">待审核（草稿）</div>
+                </div>
+                <div class="stat-item" style="border-left-color:#1890ff;">
+                    <div class="stat-value">{{ stats.reviewed }}</div>
+                    <div class="stat-label">已审核</div>
+                </div>
+                <div class="stat-item" style="border-left-color:#52c41a;">
+                    <div class="stat-value">{{ stats.posted }}</div>
+                    <div class="stat-label">已记账</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 标签页 -->
+        <div class="card" style="padding-bottom:0;">
+            <div class="tabs">
+                <div class="tab active" onclick="switchTab('list', event)">凭证列表</div>
+                <div class="tab" onclick="switchTab('create', event)">新建凭证</div>
+            </div>
+
+            <!-- 凭证列表 -->
+            <div class="tab-content" id="tab-list">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 140px;">凭证编号</th>
+                            <th style="width: 120px;">凭证日期</th>
+                            <th style="width: 100px;">会计期间</th>
+                            <th>摘要</th>
+                            <th class="num" style="width: 120px;">借方合计</th>
+                            <th class="num" style="width: 120px;">贷方合计</th>
+                            <th style="width: 100px;">状态</th>
+                            <th style="width: 200px;">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for v in vouchers %}
+                        <tr>
+                            <td><a href="/vouchers/{{ v.id }}" style="color:#1890ff;">{{ v.voucher_no }}</a></td>
+                            <td>{{ v.voucher_date }}</td>
+                            <td>{{ v.accounting_period }}</td>
+                            <td>{{ v.summary or '-' }}</td>
+                            <td class="num">{{ '%.2f'|format(v.total_debit|float) }}</td>
+                            <td class="num">{{ '%.2f'|format(v.total_credit|float) }}</td>
+                            <td><span class="status-badge status-{{ v.status }}">{{ v.status }}</span></td>
+                            <td>
+                                <div class="action-btns">
+                                    <a href="/vouchers/{{ v.id }}" class="btn btn-sm btn-default">查看</a>
+                                    {% if v.status == '草稿' %}
+                                    <form method="POST" style="display:inline;">
+                                        <input type="hidden" name="voucher_id" value="{{ v.id }}">
+                                        <input type="hidden" name="action" value="review">
+                                        <button type="submit" class="btn btn-sm btn-warning" onclick="return confirm('确定审核此凭证？')">审核</button>
+                                    </form>
+                                    {% elif v.status == '已审核' %}
+                                    <form method="POST" style="display:inline;">
+                                        <input type="hidden" name="voucher_id" value="{{ v.id }}">
+                                        <input type="hidden" name="action" value="post">
+                                        <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('确定记账此凭证？记账后不可修改。')">记账</button>
+                                    </form>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        {% if not vouchers %}
+                        <tr><td colspan="8" style="text-align:center; padding:40px; color:#999;">暂无凭证数据</td></tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 新建凭证 -->
+            <div class="tab-content" id="tab-create" style="display:none;">
+                <form method="POST" id="voucherForm">
+                    <input type="hidden" name="action" value="create">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>凭证日期</label>
+                            <input type="date" name="voucher_date" value="{{ today }}" required>
+                        </div>
+                        <div class="form-group">
+                            <label>会计期间</label>
+                            <input type="text" name="accounting_period" placeholder="2024-01" required>
+                        </div>
+                        <div class="form-group">
+                            <label>制单人</label>
+                            <input type="text" name="created_by" value="管理员">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>摘要</label>
+                        <textarea name="summary" rows="2" placeholder="凭证摘要" required></textarea>
+                    </div>
+
+                    <h3 style="font-size:16px; margin:20px 0 10px;">分录明细</h3>
+                    <table class="voucher-lines" id="voucherLinesTable">
+                        <thead>
+                            <tr>
+                                <th style="width:45%;">科目</th>
+                                <th style="width:25%;" class="num">借方金额</th>
+                                <th style="width:25%;" class="num">贷方金额</th>
+                                <th style="width:5%;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="voucherLinesBody">
+                            <!-- 动态添加行 -->
+                        </tbody>
+                        <tfoot>
+                            <tr style="background:#fafafa; font-weight:bold;">
+                                <td>合计</td>
+                                <td class="num" id="debitTotal">0.00</td>
+                                <td class="num" id="creditTotal">0.00</td>
+                                <td></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                    <div style="margin:15px 0;">
+                        <button type="button" class="btn btn-default btn-sm" onclick="addLine()">+ 添加分录行</button>
+                    </div>
+
+                    <div class="form-group" style="margin-top:20px;">
+                        <button type="submit" class="btn btn-success" onclick="return validateVoucher()">保存凭证</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const accounts_list = {{ accounts_list|tojson }};
+
+        function switchTab(name, event) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+            event.target.classList.add('active');
+            document.getElementById('tab-' + name).style.display = 'block';
+        }
+
+        function buildAccountOptions(selected) {
+            return accounts_list.map(a => {
+                const sel = (selected === a.code) ? 'selected' : '';
+                return `<option value="${a.code}" ${sel}>${a.code} - ${a.name}</option>`;
+            }).join('');
+        }
+
+        let lineCounter = 0;
+        function addLine() {
+            lineCounter++;
+            const tbody = document.getElementById('voucherLinesBody');
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>
+                    <select name="line_account[]" required style="width:100%; padding:6px; border:1px solid #d9d9d9; border-radius:4px;">
+                        <option value="">请选择科目</option>
+                        ${buildAccountOptions('')}
+                    </select>
+                </td>
+                <td><input type="number" step="0.01" name="line_debit[]" class="debit-input" style="width:100%;" placeholder="0.00" oninput="updateTotals()"></td>
+                <td><input type="number" step="0.01" name="line_credit[]" class="credit-input" style="width:100%;" placeholder="0.00" oninput="updateTotals()"></td>
+                <td><button type="button" class="remove-btn" onclick="removeLine(this)">删除</button></td>
+            `;
+            tbody.appendChild(tr);
+        }
+
+        function removeLine(btn) {
+            btn.closest('tr').remove();
+            updateTotals();
+        }
+
+        function updateTotals() {
+            let d = 0, c = 0;
+            document.querySelectorAll('.debit-input').forEach(i => d += parseFloat(i.value) || 0);
+            document.querySelectorAll('.credit-input').forEach(i => c += parseFloat(i.value) || 0);
+            document.getElementById('debitTotal').textContent = d.toFixed(2);
+            document.getElementById('creditTotal').textContent = c.toFixed(2);
+        }
+
+        function validateVoucher() {
+            const lines = document.querySelectorAll('#voucherLinesBody tr');
+            if (lines.length === 0) {
+                alert('至少需要一条分录');
+                return false;
+            }
+            let valid = false;
+            lines.forEach(tr => {
+                const d = parseFloat(tr.querySelector('.debit-input').value) || 0;
+                const c = parseFloat(tr.querySelector('.credit-input').value) || 0;
+                if (d > 0 || c > 0) valid = true;
+            });
+            if (!valid) {
+                alert('分录金额不能为空');
+                return false;
+            }
+            const dTotal = parseFloat(document.getElementById('debitTotal').textContent);
+            const cTotal = parseFloat(document.getElementById('creditTotal').textContent);
+            if (Math.abs(dTotal - cTotal) > 0.001) {
+                alert(`借贷不平衡：借方 ${dTotal.toFixed(2)} ≠ 贷方 ${cTotal.toFixed(2)}`);
+                return false;
+            }
+            return true;
+        }
+
+        // 初始化：添加两行默认分录
+        addLine();
+        addLine();
+    </script>
+</body>
+</html>

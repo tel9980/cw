@@ -81,16 +81,110 @@ class AccountCode(Enum):
 
 @dataclass
 class Account:
-    """会计科目"""
+    """会计科目（完整数据结构，支持多级科目树）"""
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    account_code: AccountCode = AccountCode.CASH_IN_HAND
-    account_name: str = ""
-    account_type: AccountType = AccountType.ASSET
+    code: str = ""  # 科目编码（如 1001）
+    name: str = ""  # 科目名称（如 库存现金）
+    account_type: str = "资产类"  # 资产类/负债类/权益类/成本类/损益类
     parent_id: Optional[str] = None  # 上级科目ID
-    level: int = 1  # 科目级别
-    balance: Decimal = Decimal("0")  # 余额
-    is_active: bool = True
+    parent_code: Optional[str] = None  # 上级科目编码
+    level: int = 1  # 科目级别（1-4级）
+    balance_direction: str = "借"  # 余额方向：借/贷
+    is_active: bool = True  # 是否启用
+    is_controlled: bool = False  # 是否为控制科目（系统预设，不可删除）
+    # 辅助核算项
+    aux_customer: bool = False  # 客户辅助核算
+    aux_supplier: bool = False  # 供应商辅助核算
+    aux_department: bool = False  # 部门辅助核算
+    aux_project: bool = False  # 项目辅助核算
+    aux_employee: bool = False  # 员工辅助核算
+    sort_order: int = 0  # 排序
+    notes: str = ""
     created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+
+    @property
+    def full_name(self) -> str:
+        """科目全名：编码-名称"""
+        return f"{self.code}-{self.name}"
+
+    @property
+    def is_leaf(self) -> bool:
+        """是否为末级科目（无子科目）"""
+        return True  # 实际判断需要查数据库
+
+    @property
+    def aux_flags_text(self) -> str:
+        """辅助核算项文本描述"""
+        flags = []
+        if self.aux_customer:
+            flags.append("客户")
+        if self.aux_supplier:
+            flags.append("供应商")
+        if self.aux_department:
+            flags.append("部门")
+        if self.aux_project:
+            flags.append("项目")
+        if self.aux_employee:
+            flags.append("员工")
+        return "、".join(flags) if flags else "无"
+
+
+@dataclass
+class AccountBalance:
+    """科目余额（按会计期间）"""
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    account_code: str = ""  # 科目编码
+    period_id: str = ""  # 会计期间ID（如 2024-06）
+    period_name: str = ""  # 期间名称
+    opening_balance: Decimal = Decimal("0")  # 期初余额
+    debit_amount: Decimal = Decimal("0")  # 本期借方发生额
+    credit_amount: Decimal = Decimal("0")  # 本期贷方发生额
+    closing_balance: Decimal = Decimal("0")  # 期末余额（自动计算或手动）
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+
+    def calculate_closing(self, balance_direction: str = "借"):
+        """根据余额方向计算期末余额"""
+        if balance_direction == "借":
+            self.closing_balance = self.opening_balance + self.debit_amount - self.credit_amount
+        else:  # 贷方
+            self.closing_balance = self.opening_balance + self.credit_amount - self.debit_amount
+
+    @property
+    def net_change(self) -> Decimal:
+        """本期净发生额"""
+        return self.debit_amount - self.credit_amount
+
+
+@dataclass
+class Department:
+    """部门（辅助核算）"""
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    code: str = ""
+    name: str = ""
+    manager: str = ""
+    is_active: bool = True
+    sort_order: int = 0
+    notes: str = ""
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class Project:
+    """项目（辅助核算）"""
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    code: str = ""
+    name: str = ""
+    status: str = "进行中"  # 进行中/已完成/已取消
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    budget: Decimal = Decimal("0")
+    manager: str = ""
+    notes: str = ""
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
 
 
 @dataclass

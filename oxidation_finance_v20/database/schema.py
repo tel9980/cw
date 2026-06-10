@@ -315,6 +315,97 @@ def create_tables(conn: sqlite3.Connection):
         "CREATE INDEX IF NOT EXISTS idx_voucher_line_account ON voucher_lines(account_code)"
     )
 
+    # 13. 会计科目表（核心骨架）
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS chart_of_accounts (
+            id TEXT PRIMARY KEY,
+            code TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            account_type TEXT NOT NULL,
+            parent_id TEXT,
+            level INTEGER DEFAULT 1,
+            balance_direction TEXT DEFAULT '借',
+            is_active INTEGER DEFAULT 1,
+            is_controlled INTEGER DEFAULT 0,
+            aux_customer INTEGER DEFAULT 0,
+            aux_supplier INTEGER DEFAULT 0,
+            aux_department INTEGER DEFAULT 0,
+            aux_project INTEGER DEFAULT 0,
+            aux_employee INTEGER DEFAULT 0,
+            sort_order INTEGER DEFAULT 0,
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (parent_id) REFERENCES chart_of_accounts(id)
+        )
+    """)
+
+    # 14. 科目余额表（按期间汇总）
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS account_balances (
+            id TEXT PRIMARY KEY,
+            account_code TEXT NOT NULL,
+            period_id TEXT NOT NULL,
+            opening_balance REAL DEFAULT 0,
+            debit_amount REAL DEFAULT 0,
+            credit_amount REAL DEFAULT 0,
+            closing_balance REAL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(account_code, period_id),
+            FOREIGN KEY (account_code) REFERENCES chart_of_accounts(code)
+        )
+    """)
+
+    # 15. 部门表（辅助核算）
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS departments (
+            id TEXT PRIMARY KEY,
+            code TEXT UNIQUE NOT NULL,
+            name TEXT NOT NULL,
+            manager TEXT,
+            is_active INTEGER DEFAULT 1,
+            sort_order INTEGER DEFAULT 0,
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
+    # 16. 项目表（辅助核算）
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            code TEXT UNIQUE NOT NULL,
+            name TEXT NOT NULL,
+            status TEXT DEFAULT '进行中',
+            start_date TEXT,
+            end_date TEXT,
+            budget REAL DEFAULT 0,
+            manager TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
+    # 新增表的索引
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_accounts_type ON chart_of_accounts(account_type)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_accounts_parent ON chart_of_accounts(parent_id)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_accounts_code ON chart_of_accounts(code)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_balance_period ON account_balances(period_id)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_balance_account ON account_balances(account_code)"
+    )
+
     conn.commit()
 
 
@@ -335,9 +426,17 @@ def drop_tables(conn: sqlite3.Connection):
         "bank_accounts",
         "accounting_vouchers",
         "voucher_lines",
+        "chart_of_accounts",
+        "account_balances",
+        "departments",
+        "projects",
     }
 
     tables = [
+        "account_balances",
+        "chart_of_accounts",
+        "departments",
+        "projects",
         "voucher_lines",
         "accounting_vouchers",
         "accounting_periods",

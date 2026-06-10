@@ -1627,6 +1627,416 @@ hr {
     (template_dir / "error.html").write_text(base_html.replace("{% block content %}{% endblock %}", "<h1>错误</h1><p>{{ error }}</p>"), encoding="utf-8")
 
 
+# ========== 会计科目管理路由 ==========
+
+@app.route("/chart-of-accounts", methods=["GET", "POST"])
+def chart_of_accounts():
+    """会计科目管理页面"""
+    conn = get_db()
+    message = None
+    error = None
+
+    if request.method == "POST":
+        # 处理表单提交 - 新增/编辑科目
+        code = request.form.get("code", "").strip()
+        name = request.form.get("name", "").strip()
+        account_type = request.form.get("account_type", "资产类")
+        balance_direction = request.form.get("balance_direction", "借")
+        aux_customer = request.form.get("aux_customer") == "1"
+        aux_supplier = request.form.get("aux_supplier") == "1"
+        aux_department = request.form.get("aux_department") == "1"
+        aux_project = request.form.get("aux_project") == "1"
+        aux_employee = request.form.get("aux_employee") == "1"
+        notes = request.form.get("notes", "")
+
+        if not code or not name:
+            error = "科目编码和名称不能为空"
+        else:
+            try:
+                from business.account_manager import AccountManager
+                am = AccountManager(conn=conn)
+                success, msg, _ = am.create_account(
+                    code=code, name=name, account_type=account_type,
+                    balance_direction=balance_direction,
+                    aux_customer=aux_customer, aux_supplier=aux_supplier,
+                    aux_department=aux_department, aux_project=aux_project,
+                    aux_employee=aux_employee, notes=notes
+                )
+                if success:
+                    message = msg
+                else:
+                    error = msg
+            except Exception as e:
+                error = f"保存失败: {e}"
+
+    # 获取科目列表
+    accounts_raw = conn.execute(
+        "SELECT * FROM chart_of_accounts ORDER BY code"
+    ).fetchall()
+    accounts = [dict(a) for a in accounts_raw]
+
+    # 获取统计信息
+    stats = {"total_accounts": len(accounts), "by_type": {}, "controlled_accounts": 0}
+    for acc in accounts:
+        t = acc["account_type"]
+        stats["by_type"][t] = stats["by_type"].get(t, 0) + 1
+        if acc.get("is_controlled"):
+            stats["controlled_accounts"] += 1
+
+    # 获取部门和项目
+    departments = [dict(d) for d in conn.execute(
+        "SELECT * FROM departments ORDER BY code"
+    ).fetchall()]
+    projects = [dict(p) for p in conn.execute(
+        "SELECT * FROM projects ORDER BY code"
+    ).fetchall()]
+
+    conn.close()
+
+    return render_template(
+        "chart_of_accounts.html",
+        accounts=accounts,
+        stats=stats,
+        departments=departments,
+        projects=projects,
+        department_count=len(departments),
+        project_count=len(projects),
+        message=message,
+        error=error,
+    )
+
+
+@app.route("/chart-of-accounts/delete", methods=["POST"])
+def delete_account_route():
+    """删除会计科目"""
+    account_id = request.form.get("account_id", "")
+    conn = get_db()
+    try:
+        from business.account_manager import AccountManager
+        am = AccountManager(conn=conn)
+        success, msg = am.delete_account(account_id)
+        if success:
+            conn.commit()
+    except Exception as e:
+        msg = f"删除失败: {e}"
+    conn.close()
+    return redirect("/chart-of-accounts")
+
+
+@app.route("/chart-of-accounts/department", methods=["POST"])
+def add_department():
+    """新增部门"""
+    code = request.form.get("code", "").strip()
+    name = request.form.get("name", "").strip()
+    manager = request.form.get("manager", "")
+    notes = request.form.get("notes", "")
+
+    conn = get_db()
+    try:
+        from business.account_manager import AccountManager
+        am = AccountManager(conn=conn)
+        success, msg, _ = am.create_department(code=code, name=name, manager=manager, notes=notes)
+        if success:
+            conn.commit()
+    except Exception as e:
+        msg = f"保存失败: {e}"
+    conn.close()
+    return redirect("/chart-of-accounts")
+
+
+@app.route("/chart-of-accounts/project", methods=["POST"])
+def add_project():
+    """新增项目"""
+    code = request.form.get("code", "").strip()
+    name = request.form.get("name", "").strip()
+    status = request.form.get("status", "进行中")
+    manager = request.form.get("manager", "")
+    budget = float(request.form.get("budget", "0") or 0)
+    notes = request.form.get("notes", "")
+
+    conn = get_db()
+    try:
+        from business.account_manager import AccountManager
+        am = AccountManager(conn=conn)
+        success, msg, _ = am.create_project(
+            code=code, name=name, status=status, manager=manager,
+            budget=budget, notes=notes
+        )
+        if success:
+            conn.commit()
+    except Exception as e:
+        msg = f"保存失败: {e}"
+    conn.close()
+    return redirect("/chart-of-accounts")
+
+
+# ========== 会计凭证管理路由 ==========
+
+@app.route("/vouchers", methods=["GET", "POST"])
+def vouchers_page():
+    """会计凭证管理页面"""
+    conn = get_db()
+    message = None
+    error = None
+
+    if request.method == "POST":
+        # 处理凭证审核/记账
+        voucher_id = request.form.get("voucher_id")
+        action = request.form.get("action", "")
+        operator = request.form.get("operator", "管理员")
+        now = datetime.now().isoformat()
+
+        if action == "review" and voucher_id:
+            conn.execute(
+                "UPDATE accounting_vouchers SET status='已审核', reviewed_by=?, reviewed_at=? WHERE id=?",
+                (operator, now, voucher_id)
+            )
+            conn.commit()
+            message = "凭证审核成功"
+        elif action == "post" and voucher_id:
+            conn.execute(
+                "UPDATE accounting_vouchers SET status='已记账', posted_by=?, posted_at=? WHERE id=?",
+                (operator, now, voucher_id)
+            )
+            conn.commit()
+            message = "凭证记账成功"
+        elif action == "create":
+            # 创建新凭证
+            try:
+                voucher_date = request.form.get("voucher_date", date.today().isoformat())
+                accounting_period = request.form.get("accounting_period", voucher_date[:7])
+                summary = request.form.get("summary", "")
+                created_by = request.form.get("created_by", "系统")
+
+                # 处理借贷分录行
+                accounts = request.form.getlist("line_account[]")
+                debits = request.form.getlist("line_debit[]")
+                credits = request.form.getlist("line_credit[]")
+
+                # 验证借贷平衡
+                total_debit = sum(float(d or 0) for d in debits)
+                total_credit = sum(float(c or 0) for c in credits)
+
+                if abs(total_debit - total_credit) > 0.001:
+                    error = f"借贷不平衡：借方 {total_debit:.2f} ≠ 贷方 {total_credit:.2f}"
+                elif not accounts:
+                    error = "至少需要一条分录"
+                else:
+                    # 生成凭证号
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT COUNT(*) FROM accounting_vouchers WHERE accounting_period=?",
+                        (accounting_period,)
+                    )
+                    seq = cursor.fetchone()[0] + 1
+                    voucher_no = f"{accounting_period}-{seq:03d}"
+                    voucher_id = None  # 将在下面生成
+
+                    import uuid
+                    voucher_id = str(uuid.uuid4())
+
+                    cursor.execute(
+                        """INSERT INTO accounting_vouchers
+                           (id, voucher_no, voucher_date, accounting_period, summary,
+                            total_debit, total_credit, created_by, status, created_at, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, '草稿', ?, ?)""",
+                        (voucher_id, voucher_no, voucher_date, accounting_period, summary,
+                         f"{total_debit:.2f}", f"{total_credit:.2f}", created_by, now, now)
+                    )
+
+                    # 保存分录行
+                    for i in range(len(accounts)):
+                        account_code = accounts[i]
+                        debit = float(debits[i] or 0)
+                        credit = float(credits[i] or 0)
+                        if debit > 0 or credit > 0:
+                            # 获取科目名称
+                            acc = conn.execute(
+                                "SELECT name FROM chart_of_accounts WHERE code=?",
+                                (account_code,)
+                            ).fetchone()
+                            acc_name = acc["name"] if acc else account_code
+
+                            cursor.execute(
+                                """INSERT INTO voucher_lines
+                                   (id, voucher_id, account_code, account_name, debit, credit, summary)
+                                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                                (str(uuid.uuid4()), voucher_id, account_code, acc_name,
+                                 f"{debit:.2f}", f"{credit:.2f}", summary)
+                            )
+
+                    conn.commit()
+                    message = f"凭证 {voucher_no} 创建成功"
+            except Exception as e:
+                error = f"创建凭证失败: {e}"
+
+    # 获取凭证列表
+    vouchers_raw = conn.execute(
+        """SELECT v.*,
+            (SELECT COUNT(*) FROM voucher_lines WHERE voucher_id=v.id) as line_count
+           FROM accounting_vouchers v
+           ORDER BY v.voucher_date DESC, v.voucher_no DESC
+           LIMIT 100"""
+    ).fetchall()
+    vouchers = [dict(v) for v in vouchers_raw]
+
+    # 获取科目列表（用于下拉选择）
+    accounts_list = [dict(a) for a in conn.execute(
+        "SELECT code, name, account_type FROM chart_of_accounts WHERE is_active=1 ORDER BY code"
+    ).fetchall()]
+
+    # 统计
+    stats = {
+        "total": len(vouchers),
+        "draft": sum(1 for v in vouchers if v.get("status") == "草稿"),
+        "reviewed": sum(1 for v in vouchers if v.get("status") == "已审核"),
+        "posted": sum(1 for v in vouchers if v.get("status") == "已记账"),
+    }
+
+    # 获取会计期间
+    periods = [dict(p) for p in conn.execute(
+        "SELECT DISTINCT accounting_period FROM accounting_vouchers ORDER BY accounting_period DESC"
+    ).fetchall()]
+
+    conn.close()
+
+    return render_template(
+        "vouchers.html",
+        vouchers=vouchers,
+        accounts_list=accounts_list,
+        stats=stats,
+        periods=periods,
+        message=message,
+        error=error,
+        today=date.today().isoformat(),
+    )
+
+
+@app.route("/vouchers/<voucher_id>", methods=["GET"])
+def voucher_detail(voucher_id):
+    """凭证详情页"""
+    conn = get_db()
+
+    # 获取凭证头
+    voucher = conn.execute(
+        "SELECT * FROM accounting_vouchers WHERE id=?", (voucher_id,)
+    ).fetchone()
+
+    if not voucher:
+        return render_template("error.html", error="凭证不存在")
+
+    voucher = dict(voucher)
+
+    # 获取分录行
+    lines = [dict(l) for l in conn.execute(
+        "SELECT * FROM voucher_lines WHERE voucher_id=? ORDER BY id",
+        (voucher_id,)
+    ).fetchall()]
+
+    conn.close()
+
+    return render_template(
+        "voucher_detail.html",
+        voucher=voucher,
+        lines=lines,
+    )
+
+
+@app.route("/accounting-books")
+def accounting_books():
+    """会计账簿查询页面（科目余额表、明细账）"""
+    conn = get_db()
+    period = request.args.get("period", "")
+    account_code = request.args.get("account_code", "")
+    book_type = request.args.get("type", "balance")  # balance | detail
+
+    # 获取所有期间
+    periods = [dict(p) for p in conn.execute(
+        "SELECT DISTINCT accounting_period FROM accounting_vouchers ORDER BY accounting_period DESC"
+    ).fetchall()]
+
+    # 获取科目列表
+    accounts_list = [dict(a) for a in conn.execute(
+        "SELECT code, name, account_type, balance_direction FROM chart_of_accounts WHERE is_active=1 ORDER BY code"
+    ).fetchall()]
+
+    # 如无期间，使用最新的
+    if not period and periods:
+        period = periods[0]["accounting_period"]
+
+    # ===== 科目余额表 =====
+    balance_data = []
+    if period and book_type == "balance":
+        # 获取期间内所有已记账凭证的科目发生额
+        rows = conn.execute("""
+            SELECT
+                a.code, a.name, a.account_type, a.balance_direction,
+                COALESCE(SUM(CASE WHEN v.status='已记账' AND CAST(l.debit AS REAL) > 0
+                    THEN CAST(l.debit AS REAL) ELSE 0 END), 0) as debit_sum,
+                COALESCE(SUM(CASE WHEN v.status='已记账' AND CAST(l.credit AS REAL) > 0
+                    THEN CAST(l.credit AS REAL) ELSE 0 END), 0) as credit_sum
+            FROM chart_of_accounts a
+            LEFT JOIN voucher_lines l ON l.account_code = a.code
+            LEFT JOIN accounting_vouchers v ON v.id = l.voucher_id AND v.accounting_period = ?
+            WHERE a.is_active = 1
+            GROUP BY a.code, a.name, a.account_type, a.balance_direction
+            ORDER BY a.code
+        """, (period,)).fetchall()
+
+        balance_data = []
+        for r in rows:
+            r = dict(r)
+            direction = r["balance_direction"] or "借"
+            # 计算期末余额（简化版，无期初则为借贷差）
+            if direction == "借":
+                closing = r["debit_sum"] - r["credit_sum"]
+            else:
+                closing = r["credit_sum"] - r["debit_sum"]
+            r["closing_balance"] = closing
+            balance_data.append(r)
+
+    # ===== 明细账 =====
+    detail_data = []
+    if period and account_code and book_type == "detail":
+        detail_rows = conn.execute("""
+            SELECT
+                v.voucher_no, v.voucher_date, v.summary,
+                l.account_code, l.account_name,
+                CAST(l.debit AS REAL) as debit,
+                CAST(l.credit AS REAL) as credit,
+                v.status
+            FROM voucher_lines l
+            JOIN accounting_vouchers v ON v.id = l.voucher_id
+            WHERE l.account_code = ? AND v.accounting_period = ?
+            ORDER BY v.voucher_date, v.voucher_no
+        """, (account_code, period)).fetchall()
+
+        detail_data = [dict(d) for d in detail_rows]
+
+        # 获取科目信息
+        acc_info = conn.execute(
+            "SELECT code, name, account_type, balance_direction FROM chart_of_accounts WHERE code=?",
+            (account_code,)
+        ).fetchone()
+        acc_info = dict(acc_info) if acc_info else None
+    else:
+        acc_info = None
+
+    conn.close()
+
+    return render_template(
+        "accounting_books.html",
+        periods=periods,
+        current_period=period,
+        accounts_list=accounts_list,
+        current_account=account_code,
+        book_type=book_type,
+        balance_data=balance_data,
+        detail_data=detail_data,
+        acc_info=acc_info,
+    )
+
+
 # ========== API 文档路由 ==========
 
 @app.route("/api-docs")
