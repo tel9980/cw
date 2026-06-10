@@ -219,6 +219,23 @@ def index():
             'expense_date': row[4]
         })
 
+    # ===== 会计模块统计 =====
+    # 科目数量
+    account_count = conn.execute(
+        "SELECT COUNT(*) FROM chart_of_accounts WHERE is_active=1"
+    ).fetchone()[0] or 0
+
+    # 凭证统计
+    draft_count = conn.execute(
+        "SELECT COUNT(*) FROM accounting_vouchers WHERE status='草稿'"
+    ).fetchone()[0] or 0
+    reviewed_count = conn.execute(
+        "SELECT COUNT(*) FROM accounting_vouchers WHERE status='已审核'"
+    ).fetchone()[0] or 0
+    posted_count = conn.execute(
+        "SELECT COUNT(*) FROM accounting_vouchers WHERE status='已记账'"
+    ).fetchone()[0] or 0
+
     conn.close()
 
     return render_template(
@@ -234,6 +251,10 @@ def index():
         recent_orders=recent_orders,
         recent_incomes=recent_incomes,
         recent_expenses=recent_expenses,
+        account_count=account_count,
+        draft_count=draft_count,
+        reviewed_count=reviewed_count,
+        posted_count=posted_count,
     )
 
 

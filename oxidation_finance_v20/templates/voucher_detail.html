@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>凭证详情 - 氧化加工厂财务系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .header { background: #1890ff; color: white; padding: 20px; margin-bottom: 20px; }
+        .header h1 { font-size: 24px; }
+        .nav { background: white; padding: 10px 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .nav a { color: #333; text-decoration: none; margin-right: 20px; padding: 5px 10px; font-size: 14px; }
+        .nav a:hover { color: #1890ff; }
+        .nav a.active { color: #1890ff; font-weight: 600; border-bottom: 2px solid #1890ff; }
+        .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .card h2 { font-size: 18px; margin-bottom: 15px; color: #333; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #fafafa; font-weight: 600; }
+        td.num, th.num { text-align: right; font-family: "SF Mono", Monaco, monospace; }
+        .btn { display: inline-block; padding: 8px 16px; background: #1890ff; color: white; text-decoration: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .btn:hover { background: #40a9ff; }
+        .btn-default { background: #fff; color: #333; border: 1px solid #d9d9d9; }
+        .btn-default:hover { background: #fafafa; color: #1890ff; border-color: #1890ff; }
+        .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
+        .info-item { background: #f8f9fa; padding: 15px; border-radius: 6px; }
+        .info-label { font-size: 12px; color: #999; margin-bottom: 5px; }
+        .info-value { font-size: 16px; font-weight: 500; color: #333; }
+        .status-badge { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: 500; }
+        .status-草稿 { background: #fff7e6; color: #fa8c16; border: 1px solid #ffd591; }
+        .status-已审核 { background: #e6f7ff; color: #1890ff; border: 1px solid #91d5ff; }
+        .status-已记账 { background: #f6ffed; color: #52c41a; border: 1px solid #b7eb8f; }
+        tr.total-row { background: #fafafa; font-weight: bold; border-top: 2px solid #ddd; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <h1>凭证详情</h1>
+        </div>
+    </div>
+    <div class="nav">
+        <div class="container">
+            <a href="/">首页</a>
+            <a href="/orders">订单</a>
+            <a href="/customers">客户</a>
+            <a href="/reports">报表</a>
+            <a href="/chart-of-accounts">会计科目</a>
+            <a href="/vouchers" class="active">会计凭证</a>
+            <a href="/accounting-books">会计账簿</a>
+        </div>
+    </div>
+    <div class="container">
+        <div class="card">
+            <h2>凭证信息</h2>
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="info-label">凭证编号</div>
+                    <div class="info-value">{{ voucher.voucher_no }}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">凭证日期</div>
+                    <div class="info-value">{{ voucher.voucher_date }}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">会计期间</div>
+                    <div class="info-value">{{ voucher.accounting_period }}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">状态</div>
+                    <div class="info-value"><span class="status-badge status-{{ voucher.status }}">{{ voucher.status }}</span></div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">制单人</div>
+                    <div class="info-value">{{ voucher.created_by or '-' }}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">审核人</div>
+                    <div class="info-value">{{ voucher.reviewed_by or '-' }}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">记账人</div>
+                    <div class="info-value">{{ voucher.posted_by or '-' }}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">创建时间</div>
+                    <div class="info-value" style="font-size:13px;">{{ voucher.created_at }}</div>
+                </div>
+            </div>
+            {% if voucher.summary %}
+            <div style="margin-top:20px; padding:15px; background:#f8f9fa; border-radius:6px;">
+                <strong style="color:#666;">摘要：</strong>
+                <span>{{ voucher.summary }}</span>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="card">
+            <h2>分录明细</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 5%;">序号</th>
+                        <th style="width: 20%;">科目编码</th>
+                        <th>科目名称</th>
+                        <th style="width: 25%;" class="num">借方金额</th>
+                        <th style="width: 25%;" class="num">贷方金额</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for l in lines %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td>{{ l.account_code }}</td>
+                        <td>{{ l.account_name }}</td>
+                        <td class="num">{% if l.debit|float > 0 %}{{ '%.2f'|format(l.debit|float) }}{% else %}-{% endif %}</td>
+                        <td class="num">{% if l.credit|float > 0 %}{{ '%.2f'|format(l.credit|float) }}{% else %}-{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                    <tr class="total-row">
+                        <td colspan="3">合计</td>
+                        <td class="num">{{ '%.2f'|format(voucher.total_debit|float) }}</td>
+                        <td class="num">{{ '%.2f'|format(voucher.total_credit|float) }}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <a href="/vouchers" class="btn btn-default">← 返回凭证列表</a>
+        </div>
+    </div>
+</body>
+</html>
