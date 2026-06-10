@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>凭证审核工作台 - 氧化加工厂财务系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .header { background: #1890ff; color: white; padding: 16px 20px; margin-bottom: 20px; }
+        .header h1 { font-size: 22px; display: flex; align-items: center; justify-content: space-between; }
+        .header a { color: white; font-size: 14px; text-decoration: none; opacity: 0.85; }
+        .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .card h2 { font-size: 18px; margin-bottom: 15px; color: #333; }
+        .tabs { display: flex; gap: 0; margin-bottom: 20px; border-bottom: 2px solid #f0f0f0; }
+        .tab { padding: 10px 24px; cursor: pointer; color: #666; font-size: 14px; border-bottom: 2px solid transparent; margin-bottom: -2px; position: relative; }
+        .tab.active { color: #1890ff; border-bottom-color: #1890ff; font-weight: 600; }
+        .tab .badge { position: absolute; top: 2px; right: 2px; background: #f5222d; color: white; border-radius: 10px; padding: 1px 6px; font-size: 11px; min-width: 18px; text-align: center; }
+        .btn { display: inline-block; padding: 9px 18px; background: #1890ff; color: white; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; font-size: 14px; }
+        .btn-success { background: #52c41a; }
+        .btn-danger { background: #f5222d; }
+        .btn-warning { background: #faad14; }
+        .btn-sm { padding: 5px 12px; font-size: 12px; }
+        .btn-outline { background: white; color: #1890ff; border: 1px solid #1890ff; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #fafafa; font-weight: 600; color: #555; }
+        tr:hover { background: #f5f5f5; }
+        tr.selected { background: #e6f7ff; }
+        .num { text-align: right; }
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+        .tag-draft { background: #f0f0f0; color: #888; }
+        .tag-pending { background: #fff7e6; color: #fa8c16; }
+        .tag-reviewed { background: #e6f7ff; color: #1890ff; }
+        .tag-posted { background: #f6ffed; color: #52c41a; }
+        .tag-rejected { background: #fff2f0; color: #f5222d; }
+        .checkbox-col { width: 40px; text-align: center; }
+        .empty-state { text-align: center; padding: 40px; color: #999; }
+        .filter-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+        .filter-bar select, .filter-bar input { padding: 7px 10px; border: 1px solid #d9d9d9; border-radius: 4px; }
+        .remark { color: #f5222d; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <h1>凭证审核工作台 <a href="/">← 返回首页</a></h1>
+        </div>
+    </div>
+    <div class="container">
+        {% if message %}<div class="card" style="background:#f6ffed;border:1px solid #b7eb8f;color:#52c41a;">{{ message }}</div>{% endif %}
+        {% if error %}<div class="card" style="background:#fff2f0;border:1px solid #ffccc7;color:#f5222d;">{{ error }}</div>{% endif %}
+
+        <div class="card">
+            <div class="tabs">
+                <a class="tab {{ 'active' if status_filter == '草稿' }}" href="?status=草稿">草稿<span class="badge">{{ counts.draft }}</span></a>
+                <a class="tab {{ 'active' if status_filter == '待审核' }}" href="?status=待审核">待审核<span class="badge">{{ counts.pending }}</span></a>
+                <a class="tab {{ 'active' if status_filter == '已审核' }}" href="?status=已审核">已审核<span class="badge">{{ counts.reviewed }}</span></a>
+                <a class="tab {{ 'active' if status_filter == '已记账' }}" href="?status=已记账">已记账<span class="badge">{{ counts.posted }}</span></a>
+                <a class="tab {{ 'active' if status_filter == '已驳回' }}" href="?status=已驳回">已驳回<span class="badge">{{ counts.rejected }}</span></a>
+            </div>
+        </div>
+
+        <form id="batchForm" method="POST">
+            {% if status_filter in ('草稿', '待审核', '已驳回') %}
+            <div class="card">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <label><input type="checkbox" id="selectAll" onclick="document.querySelectorAll('.check-item:not(:disabled)').forEach(c=>c.checked=this.checked)"> 全选</label>
+                    </div>
+                    <div style="display:flex; gap:10px;">
+                        {% if status_filter == '草稿' %}
+                        <button type="submit" name="batch_action" value="submit_review" class="btn btn-warning" onclick="return confirmSubmit()">批量提交审核</button>
+                        {% elif status_filter == '待审核' %}
+                        <button type="submit" name="batch_action" value="approve" class="btn btn-success" onclick="return confirmSubmit()">批量审核</button>
+                        <button type="submit" name="batch_action" value="reject" class="btn btn-danger" onclick="return confirmSubmit()">批量驳回</button>
+                        {% elif status_filter == '已驳回' %}
+                        <button type="submit" name="batch_action" value="resubmit" class="btn btn-warning" onclick="return confirmSubmit()">重新提交审核</button>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <div class="card table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            {% if status_filter in ('草稿', '待审核', '已驳回') %}<th class="checkbox-col">选</th>{% endif %}
+                            <th>凭证号</th>
+                            <th>日期</th>
+                            <th>摘要</th>
+                            <th>制单人</th>
+                            <th>审核人</th>
+                            <th class="num">借方</th>
+                            <th class="num">贷方</th>
+                            <th>状态</th>
+                            {% if status_filter == '已驳回' %}<th>驳回原因</th>{% endif %}
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for v in vouchers %}
+                        <tr>
+                            {% if status_filter in ('草稿', '待审核', '已驳回') %}
+                            <td class="checkbox-col">
+                                <input type="checkbox" class="check-item" name="voucher_ids" value="{{ v.id }}"
+                                    {% if v.status != status_filter %}disabled{% endif %}>
+                            </td>
+                            {% endif %}
+                            <td><a href="/vouchers/{{ v.id }}" style="color:#1890ff;">{{ v.voucher_no }}</a></td>
+                            <td>{{ v.voucher_date }}</td>
+                            <td>{{ v.summary[:20] }}{% if v.summary|length > 20 %}...{% endif %}</td>
+                            <td>{{ v.created_by }}</td>
+                            <td>{{ v.reviewed_by or '-' }}</td>
+                            <td class="num">{{ "%.2f"|format(v.total_debit) }}</td>
+                            <td class="num">{{ "%.2f"|format(v.total_credit) }}</td>
+                            <td>
+                                <span class="tag tag-{{ {'草稿':'draft','待审核':'pending','已审核':'reviewed','已记账':'posted','已驳回':'rejected'}[v.status] }}">
+                                    {{ v.status }}
+                                </span>
+                            </td>
+                            {% if status_filter == '已驳回' %}
+                            <td><span class="remark">{{ v.reject_reason or '-' }}</span></td>
+                            {% endif %}
+                            <td>
+                                {% if status_filter == '草稿' %}
+                                <form method="POST" style="display:inline;">
+                                    <input type="hidden" name="batch_action" value="submit_review">
+                                    <input type="hidden" name="voucher_ids" value="{{ v.id }}">
+                                    <button class="btn btn-sm btn-warning">提交审核</button>
+                                </form>
+                                {% elif status_filter == '待审核' %}
+                                <form method="POST" style="display:inline;">
+                                    <input type="hidden" name="batch_action" value="approve">
+                                    <input type="hidden" name="voucher_ids" value="{{ v.id }}">
+                                    <button class="btn btn-sm btn-success">审核</button>
+                                </form>
+                                <button class="btn btn-sm btn-danger" onclick="rejectVoucher('{{ v.id }}')">驳回</button>
+                                {% elif status_filter == '已审核' %}
+                                <form method="POST" style="display:inline;" onsubmit="return confirm('确认记账？');">
+                                    <input type="hidden" name="batch_action" value="post">
+                                    <input type="hidden" name="voucher_ids" value="{{ v.id }}">
+                                    <button class="btn btn-sm btn-success">记账</button>
+                                </form>
+                                {% endif %}
+                                <a href="/vouchers/{{ v.id }}" class="btn btn-sm btn-outline">详情</a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        {% if not vouchers %}
+                        <tr><td colspan="{{ 10 if status_filter=='已驳回' else 9 }}" class="empty-state">暂无{{ status_filter }}状态的凭证</td></tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </form>
+
+        <!-- 驳回弹窗 -->
+        <div class="modal-bg" id="rejectModal">
+            <div class="modal">
+                <h3>驳回凭证</h3>
+                <form method="POST">
+                    <input type="hidden" name="batch_action" value="reject">
+                    <input type="hidden" name="voucher_ids" id="rejectVoucherId">
+                    <div class="form-group">
+                        <label>驳回原因 *</label>
+                        <textarea name="reject_reason" rows="3" style="width:100%; padding:8px; border:1px solid #d9d9d9; border-radius:4px;" placeholder="请填写驳回原因..." required></textarea>
+                    </div>
+                    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:16px;">
+                        <button type="button" class="btn" style="background:#999;" onclick="document.getElementById('rejectModal').classList.remove('show')">取消</button>
+                        <button type="submit" class="btn btn-danger">确认驳回</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <style>
+            .modal-bg { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 999; justify-content: center; align-items: center; }
+            .modal-bg.show { display: flex; }
+            .modal { background: white; padding: 24px; border-radius: 8px; width: 460px; max-width: 95%; }
+            .modal h3 { margin-bottom: 16px; }
+            .form-group { margin-bottom: 12px; }
+            .form-group label { display: block; margin-bottom: 4px; font-size: 13px; color: #666; }
+        </style>
+        <script>
+            function confirmSubmit() {
+                var checked = document.querySelectorAll('.check-item:checked').length;
+                if (checked === 0) { alert('请至少选择一条凭证'); return false; }
+                return true;
+            }
+            function rejectVoucher(vid) {
+                document.getElementById('rejectVoucherId').value = vid;
+                document.getElementById('rejectModal').classList.add('show');
+            }
+            {% if show_reject %}document.getElementById('rejectModal').classList.add('show');{% endif %}
+        </script>
+    </div>
+</body>
+</html>

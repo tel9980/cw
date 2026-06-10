@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>自动凭证 - 氧化加工厂财务系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
+        .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+        .header { background: #1890ff; color: white; padding: 16px 20px; margin-bottom: 20px; }
+        .header h1 { font-size: 22px; display: flex; align-items: center; justify-content: space-between; }
+        .header a { color: white; font-size: 14px; text-decoration: none; opacity: 0.85; }
+        .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .card h2 { font-size: 18px; margin-bottom: 15px; color: #333; }
+        .btn { display: inline-block; padding: 9px 18px; background: #1890ff; color: white; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; font-size: 14px; }
+        .btn-success { background: #52c41a; }
+        .btn-danger { background: #f5222d; }
+        .btn-sm { padding: 4px 10px; font-size: 12px; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #fafafa; font-weight: 600; color: #555; }
+        tr:hover { background: #f5f5f5; }
+        .num { text-align: right; }
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+        .tag-on { background: #f6ffed; color: #52c41a; }
+        .tag-off { background: #f0f0f0; color: #888; }
+        .tag-due { background: #fff7e6; color: #fa8c16; }
+        .modal-bg { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 999; justify-content: center; align-items: center; }
+        .modal-bg.show { display: flex; }
+        .modal { background: white; padding: 24px; border-radius: 8px; width: 460px; max-width: 95%; }
+        .modal h3 { margin-bottom: 16px; }
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; margin-bottom: 4px; font-size: 13px; color: #666; }
+        .form-group input, .form-group select { width: 100%; padding: 8px 10px; border: 1px solid #d9d9d9; border-radius: 4px; }
+        .form-row { display: flex; gap: 10px; }
+        .form-row .form-group { flex: 1; }
+        @media (max-width: 768px) { .form-row { flex-direction: column; } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <h1>自动凭证规则 <a href="/">← 返回首页</a></h1>
+        </div>
+    </div>
+    <div class="container">
+        {% if message %}<div class="card" style="background:#f6ffed;border:1px solid #b7eb8f;color:#52c41a;">{{ message }}</div>{% endif %}
+        {% if error %}<div class="card" style="background:#fff2f0;border:1px solid #ffccc7;color:#f5222d;">{{ error }}</div>{% endif %}
+
+        <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h2>自动凭证规则</h2>
+                <div>
+                    <button class="btn" onclick="openModal()">+ 新建规则</button>
+                    <form method="POST" style="display:inline; margin-left:10px;">
+                        <input type="hidden" name="action" value="exec_all">
+                        <button class="btn btn-success" onclick="return confirm('确认执行所有到期规则？')">一键执行到期规则</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="card table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>规则名称</th>
+                        <th>科目</th>
+                        <th class="num">金额</th>
+                        <th>周期</th>
+                        <th>下次执行</th>
+                        <th>已执行</th>
+                        <th>状态</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rule in rules %}
+                    <tr>
+                        <td><strong>{{ rule.name }}</strong></td>
+                        <td>{{ rule.debit_account }} / {{ rule.credit_account }}</td>
+                        <td class="num">{{ "%.2f"|format(rule.amount) }}</td>
+                        <td>{{ rule.frequency }}</td>
+                        <td>
+                            <span class="{% if rule.is_due %}tag tag-due{% endif %}">{{ rule.next_date }}</span>
+                            {% if rule.is_due %}<span style="color:#f5222d;font-size:11px;">已到期</span>{% endif %}
+                        </td>
+                        <td>{{ rule.exec_count }}次</td>
+                        <td>
+                            <form method="POST" style="display:inline;">
+                                <input type="hidden" name="action" value="toggle">
+                                <input type="hidden" name="rule_id" value="{{ rule.id }}">
+                                <button class="tag {{ 'tag-on' if rule.enabled else 'tag-off' }}" style="cursor:pointer;">
+                                    {{ '启用' if rule.enabled else '停用' }}
+                                </button>
+                            </form>
+                        </td>
+                        <td>
+                            {% if rule.is_due and rule.enabled %}
+                            <form method="POST" style="display:inline;">
+                                <input type="hidden" name="action" value="exec_one">
+                                <input type="hidden" name="rule_id" value="{{ rule.id }}">
+                                <button class="btn btn-sm btn-success">执行</button>
+                            </form>
+                            {% endif %}
+                            <form method="POST" style="display:inline;" onsubmit="return confirm('确定删除？');">
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="rule_id" value="{{ rule.id }}">
+                                <button class="btn btn-sm btn-danger">删除</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not rules %}
+                    <tr><td colspan="8" style="text-align:center;color:#999;padding:30px;">暂无规则，请新建</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 预设模板区域 -->
+        <div class="card">
+            <h2>快速添加预设</h2>
+            <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                <form method="POST" style="display:inline;">
+                    <input type="hidden" name="action" value="preset">
+                    <input type="hidden" name="preset_type" value="depreciation">
+                    <button class="btn btn-sm" style="background:#722ed1;">一键添加折旧规则</button>
+                </form>
+                <form method="POST" style="display:inline;">
+                    <input type="hidden" name="action" value="preset">
+                    <input type="hidden" name="preset_type" value="rent">
+                    <button class="btn btn-sm" style="background:#13c2c2;">一键添加房租摊销</button>
+                </form>
+                <form method="POST" style="display:inline;">
+                    <input type="hidden" name="action" value="preset">
+                    <input type="hidden" name="preset_type" value="salary">
+                    <button class="btn btn-sm" style="background:#eb2f96;">一键添加工资计提</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 新建规则弹窗 -->
+        <div class="modal-bg" id="ruleModal">
+            <div class="modal">
+                <h3>新建自动凭证规则</h3>
+                <form method="POST">
+                    <input type="hidden" name="action" value="create">
+                    <div class="form-group"><label>规则名称 *</label><input type="text" name="name" placeholder="如：每月折旧" required></div>
+                    <div class="form-row">
+                        <div class="form-group"><label>借方科目</label><input type="text" name="debit_account" placeholder="5502" value="5502"></div>
+                        <div class="form-group"><label>贷方科目</label><input type="text" name="credit_account" placeholder="1502" value="1502"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group"><label>金额 *</label><input type="number" name="amount" step="0.01" placeholder="0.00" required></div>
+                        <div class="form-group">
+                            <label>摘要</label>
+                            <input type="text" name="summary" placeholder="自动生成摘要">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>频率</label>
+                        <select name="frequency">
+                            <option value="每月">每月</option>
+                            <option value="每季度">每季度</option>
+                            <option value="每年">每年</option>
+                        </select>
+                    </div>
+                    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:16px;">
+                        <button type="button" class="btn" style="background:#999;" onclick="document.getElementById('ruleModal').classList.remove('show')">取消</button>
+                        <button type="submit" class="btn">保存</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <script>
+            function openModal() { document.getElementById('ruleModal').classList.add('show'); }
+        </script>
+    </div>
+</body>
+</html>

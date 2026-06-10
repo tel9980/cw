@@ -2831,3 +2831,413 @@ def vat_return():
 
     conn.close()
     return render_template("vat_return.html", data=data, period=period)
+
+
+# ========== 凭证审批工作台 ==========
+
+@accounting_bp.route("/voucher-approval", methods=["GET", "POST"])
+def voucher_approval():
+    """凭证审批工作台：待审核/审核/驳回/记账"""
+    conn = get_db()
+    message = None; error = None; show_reject = False
+    status_filter = request.args.get("status", "待审核")
+    operator = request.args.get("operator", "审核人")
+    now = datetime.now().isoformat()
+
+    # Auto-create default status columns if missing
+    try:
+        conn.execute("ALTER TABLE accounting_vouchers ADD COLUMN reject_reason TEXT")
+    except:
+        pass  # already exists
+
+    if request.method == "POST":
+        batch_action = request.form.get("batch_action", "")
+        ids = request.form.getlist("voucher_ids")
+        if not ids and request.form.get("voucher_ids"):
+            ids = [request.form.get("voucher_ids")]  # single form
+        try:
+            if batch_action == "submit_review":
+                for vid in ids:
+                    conn.execute(
+                        "UPDATE accounting_vouchers SET status='待审核', updated_at=? WHERE id=? AND status='草稿'",
+                        (now, vid))
+                conn.commit()
+                message = f"已将 {len(ids)} 条凭证提交审核"
+            elif batch_action == "approve":
+                for vid in ids:
+                    conn.execute(
+                        "UPDATE accounting_vouchers SET status='已审核', reviewed_by=?, reviewed_at=?, reject_reason=NULL, updated_at=? WHERE id=? AND status='待审核'",
+                        (operator, now, now, vid))
+                conn.commit()
+                message = f"已审核 {len(ids)} 条凭证"
+            elif batch_action == "reject":
+                reason = request.form.get("reject_reason", "不符合要求")
+                for vid in ids:
+                    conn.execute(
+                        "UPDATE accounting_vouchers SET status='已驳回', reject_reason=?, reviewed_by=?, updated_at=? WHERE id=? AND status='待审核'",
+                        (reason, operator, now, vid))
+                conn.commit()
+                message = f"已驳回 {len(ids)} 条凭证"
+            elif batch_action == "resubmit":
+                for vid in ids:
+                    conn.execute(
+                        "UPDATE accounting_vouchers SET status='待审核', reject_reason=NULL, updated_at=? WHERE id=? AND status='已驳回'",
+                        (now, vid))
+                conn.commit()
+                message = f"已重新提交 {len(ids)} 条凭证"
+            elif batch_action == "post":
+                for vid in ids:
+                    conn.execute(
+                        "UPDATE accounting_vouchers SET status='已记账', posted_by=?, posted_at=?, updated_at=? WHERE id=? AND status='已审核'",
+                        (operator, now, now, vid))
+                conn.commit()
+                message = f"已记账 {len(ids)} 条凭证"
+        except Exception as e:
+            error = f"操作失败: {e}"
+
+    # Count by status
+    counts = {}
+    for s in ["草稿", "待审核", "已审核", "已记账", "已驳回"]:
+        counts[{"草稿": "draft", "待审核": "pending", "已审核": "reviewed",
+                "已记账": "posted", "已驳回": "rejected"}[s]] = conn.execute(
+            "SELECT COUNT(*) FROM accounting_vouchers WHERE status=?", (s,)).fetchone()[0]
+
+    vouchers = [dict(r) for r in conn.execute(
+        "SELECT * FROM accounting_vouchers WHERE status=? ORDER BY voucher_date DESC, voucher_no DESC LIMIT 200",
+        (status_filter,)).fetchall()]
+
+    conn.close()
+    return render_template("voucher_approval.html",
+        vouchers=vouchers, counts=counts, status_filter=status_filter,
+        message=message, error=error, show_reject=show_reject)
+
+
+# ========== 期间锁定 ==========
+
+@accounting_bp.route("/period-lock", methods=["POST"])
+def period_lock():
+    """锁定/解锁会计期间"""
+    conn = get_db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS period_locks (
+            id TEXT PRIMARY KEY, period TEXT NOT NULL UNIQUE,
+            locked_by TEXT, locked_at TEXT, is_locked INTEGER DEFAULT 1
+        )
+    """)
+    conn.commit()
+
+    action = request.form.get("action", "lock")
+    period = request.form.get("period", "")
+    try:
+        if action == "lock":
+            conn.execute(
+                "INSERT OR REPLACE INTO period_locks (id, period, locked_by, locked_at, is_locked) "
+                "VALUES (?,?,?,?,1)",
+                (str(uuid.uuid4()), period, "管理员", datetime.now().isoformat()))
+            conn.commit()
+            return redirect("/check-before-close?period=" + period)
+        elif action == "unlock":
+            conn.execute("DELETE FROM period_locks WHERE period=?", (period,))
+            conn.commit()
+            return redirect("/check-before-close?period=" + period)
+    except Exception as e:
+        conn.close()
+        return f"操作失败: {e}"
+
+
+# ========== 智能预警中心 ==========
+
+@accounting_bp.route("/alert-center")
+def alert_center():
+    """智能预警中心"""
+    conn = get_db()
+    today_str = date.today().isoformat()
+
+    # 逾期应收账款
+    overdue_ar = [dict(r) for r in conn.execute("""
+        SELECT o.order_no, o.total_amount, o.delivery_date, c.name customer_name,
+               CAST(julianday(?) - julianday(o.delivery_date) AS INTEGER) overdue_days
+        FROM processing_orders o
+        JOIN customers c ON c.id = o.customer_id
+        WHERE o.status IN ('已交付','已完工') AND o.delivery_date IS NOT NULL
+          AND o.delivery_date < ? AND o.received_amount < o.total_amount
+        ORDER BY o.delivery_date
+    """, (today_str, today_str)).fetchall()]
+    overdue_total = sum(float(r["total_amount"] or 0) for r in overdue_ar)
+
+    # 到期应付
+    due_ap = [dict(r) for r in conn.execute("""
+        SELECT e.expense_date, e.expense_type, e.amount, s.name supplier_name
+        FROM expenses e
+        LEFT JOIN suppliers s ON s.id = e.supplier_id
+        WHERE e.expense_date <= ?
+        ORDER BY e.expense_date DESC LIMIT 20
+    """, (today_str,)).fetchall()]
+    due_ap_total = sum(float(r["amount"] or 0) for r in due_ap)
+    # Ensure numeric types for template
+    for r in due_ap:
+        r["amount"] = float(r["amount"] or 0)
+
+    # 未记账凭证
+    unposted = conn.execute(
+        "SELECT COUNT(*) FROM accounting_vouchers WHERE status IN ('已审核','待审核')"
+    ).fetchone()[0]
+
+    # 现金流预警
+    total_income = to_float(conn.execute(
+        "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM incomes").fetchone()[0])
+    total_expense = to_float(conn.execute(
+        "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM expenses").fetchone()[0])
+    bank_balance = total_income - total_expense
+    avg_monthly_exp = total_expense / max(1, date.today().month)
+    safety_line = avg_monthly_exp * 2
+    cash_warning = bank_balance < safety_line and bank_balance > 0
+
+    # 未认证进项发票
+    uncertified_invoices = conn.execute(
+        "SELECT COUNT(*) FROM invoices WHERE inv_type='进项' AND status='未认证'"
+    ).fetchone()[0]
+
+    # 预算超支
+    budget_overrun = []
+    for p in conn.execute("SELECT id, name, budget FROM projects WHERE budget > 0").fetchall():
+        p = dict(p)
+        actual = to_float(conn.execute(
+            "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM expenses "
+            "WHERE expense_date LIKE ?", (today_str[:7] + "%",)).fetchone()[0]) / max(
+                conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0], 1)
+        if p["budget"] and actual > float(p["budget"]) * 0.8:
+            p["actual"] = actual
+            p["rate"] = actual / float(p["budget"]) * 100
+            budget_overrun.append(p)
+
+    conn.close()
+
+    alerts = {
+        "overdue_ar": overdue_ar, "overdue_total": overdue_total,
+        "due_ap": due_ap, "due_ap_total": due_ap_total,
+        "unposted": unposted, "bank_balance": bank_balance,
+        "safety_line": safety_line, "cash_warning": cash_warning,
+        "uncertified_invoices": uncertified_invoices,
+        "budget_overrun": budget_overrun
+    }
+
+    return render_template("alert_center.html", alerts=alerts)
+
+
+# ========== 自动凭证规则 ==========
+
+@accounting_bp.route("/auto-voucher", methods=["GET", "POST"])
+def auto_voucher():
+    """自动凭证规则管理"""
+    conn = get_db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS auto_voucher_rules (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL, frequency TEXT NOT NULL DEFAULT '每月',
+            debit_account TEXT, credit_account TEXT, amount REAL DEFAULT 0,
+            summary TEXT, next_date TEXT, exec_count INTEGER DEFAULT 0,
+            enabled INTEGER DEFAULT 1, created_at TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+
+    message = None; error = None
+    today_str = date.today().isoformat()
+    today_month = today_str[:7]
+
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        try:
+            if action == "create":
+                freq = request.form.get("frequency", "每月")
+                next_date = today_month
+                conn.execute(
+                    "INSERT INTO auto_voucher_rules (id, name, frequency, debit_account, credit_account, amount, summary, next_date, enabled, created_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,1,?)",
+                    (str(uuid.uuid4()), request.form.get("name"), freq,
+                     request.form.get("debit_account"), request.form.get("credit_account"),
+                     float(request.form.get("amount", "0") or 0),
+                     request.form.get("summary", ""), next_date, datetime.now().isoformat()))
+                conn.commit()
+                message = "规则创建成功"
+            elif action == "toggle":
+                rule = conn.execute("SELECT * FROM auto_voucher_rules WHERE id=?",
+                                   (request.form.get("rule_id"),)).fetchone()
+                conn.execute("UPDATE auto_voucher_rules SET enabled=? WHERE id=?",
+                            (0 if rule["enabled"] else 1, request.form.get("rule_id")))
+                conn.commit()
+            elif action == "delete":
+                conn.execute("DELETE FROM auto_voucher_rules WHERE id=?",
+                            (request.form.get("rule_id"),))
+                conn.commit()
+                message = "规则已删除"
+            elif action == "preset":
+                ptype = request.form.get("preset_type", "")
+                presets = {
+                    "depreciation": ("固定资产折旧", "5502", "1502", 1000, "每月计提折旧"),
+                    "rent": ("房租摊销", "5502", "1123", 5000, "每月房租摊销"),
+                    "salary": ("工资计提", "5502", "2211", 15000, "每月工资计提"),
+                }
+                if ptype in presets:
+                    nm, dr, cr, amt, sm = presets[ptype]
+                    conn.execute(
+                        "INSERT INTO auto_voucher_rules (id, name, frequency, debit_account, credit_account, amount, summary, next_date, enabled, created_at) "
+                        "VALUES (?,?,?,?,?,?,?,?,1,?)",
+                        (str(uuid.uuid4()), nm, "每月", dr, cr, amt, sm, today_month,
+                         datetime.now().isoformat()))
+                    conn.commit()
+                    message = f"预设规则「{nm}」已添加"
+            elif action in ("exec_one", "exec_all"):
+                rules = []
+                if action == "exec_one":
+                    r = conn.execute("SELECT * FROM auto_voucher_rules WHERE id=?",
+                                    (request.form.get("rule_id"),)).fetchone()
+                    if r: rules = [r]
+                else:
+                    rules = conn.execute(
+                        "SELECT * FROM auto_voucher_rules WHERE enabled=1 AND next_date<=?",
+                        (today_month,)).fetchall()
+                if not rules:
+                    error = "没有可执行的规则"
+                else:
+                    count = 0
+                    for rule in rules:
+                        vid = str(uuid.uuid4())
+                        vno = f"AV{rule['id'][:4]}{today_month.replace('-','')}"
+                        exist = conn.execute(
+                            "SELECT COUNT(*) FROM accounting_vouchers WHERE voucher_no=?",
+                            (vno,)).fetchone()[0]
+                        if exist:
+                            continue
+                        amt = float(rule["amount"] or 0)
+                        conn.execute(
+                            "INSERT INTO accounting_vouchers (id, voucher_no, voucher_date, accounting_period, summary, total_debit, total_credit, created_by, status, created_at, updated_at) "
+                            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                            (vid, vno, today_str, today_month, rule["summary"] or rule["name"],
+                             amt, amt, "自动", "待审核", datetime.now().isoformat(),
+                             datetime.now().isoformat()))
+                        conn.execute(
+                            "INSERT INTO voucher_lines (id, voucher_id, account_code, account_name, debit, credit, summary) VALUES (?,?,?,?,?,?,?)",
+                            (str(uuid.uuid4()), vid, rule["debit_account"], rule["debit_account"],
+                             str(amt), "0", rule["summary"] or ""))
+                        conn.execute(
+                            "INSERT INTO voucher_lines (id, voucher_id, account_code, account_name, debit, credit, summary) VALUES (?,?,?,?,?,?,?)",
+                            (str(uuid.uuid4()), vid, rule["credit_account"], rule["credit_account"],
+                             "0", str(amt), rule["summary"] or ""))
+                        # Update next date
+                        y, m = int(today_month[:4]), int(today_month[5:])
+                        freq = rule["frequency"]
+                        if freq == "每月":
+                            m += 1
+                        elif freq == "每季度":
+                            m += 3
+                        else:
+                            y += 1
+                        if m > 12: y += 1; m -= 12
+                        next_d = f"{y}-{m:02d}"
+                        conn.execute(
+                            "UPDATE auto_voucher_rules SET next_date=?, exec_count=exec_count+1 WHERE id=?",
+                            (next_d, rule["id"]))
+                        count += 1
+                    conn.commit()
+                    message = f"已执行 {count} 条规则"
+        except Exception as e:
+            error = f"操作失败: {e}"
+
+    rules = []
+    for r in conn.execute(
+        "SELECT * FROM auto_voucher_rules ORDER BY enabled DESC, next_date").fetchall():
+        r = dict(r)
+        r["is_due"] = r["enabled"] and (r["next_date"] or "") <= today_month
+        rules.append(r)
+
+    conn.close()
+    return render_template("auto_voucher.html", rules=rules,
+                          message=message, error=error)
+
+
+# ========== 客户/供应商全景视图 ==========
+
+@accounting_bp.route("/customer-profile/<entity_id>")
+def customer_profile(entity_id):
+    """客户全景视图"""
+    return _entity_profile(entity_id, "customer")
+
+@accounting_bp.route("/supplier-profile/<entity_id>")
+def supplier_profile(entity_id):
+    """供应商全景视图"""
+    return _entity_profile(entity_id, "supplier")
+
+def _entity_profile(entity_id, etype):
+    conn = get_db()
+    today_str = date.today().isoformat()
+    this_year = today_str[:4]
+
+    if etype == "customer":
+        entity = dict(conn.execute(
+            "SELECT * FROM customers WHERE id=?", (entity_id,)).fetchone())
+        # Stats
+        order_count = conn.execute(
+            "SELECT COUNT(*) FROM processing_orders WHERE customer_id=?", (entity_id,)).fetchone()[0]
+        total_amount = to_float(conn.execute(
+            "SELECT COALESCE(SUM(CAST(total_amount AS REAL)),0) FROM processing_orders WHERE customer_id=?",
+            (entity_id,)).fetchone()[0])
+        paid = to_float(conn.execute(
+            "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM incomes WHERE customer_id=?",
+            (entity_id,)).fetchone()[0])
+        balance = total_amount - paid
+        overdue_orders = conn.execute(
+            "SELECT COUNT(*) FROM processing_orders WHERE customer_id=? AND status IN ('已交付','已完工') AND delivery_date IS NOT NULL AND delivery_date<? AND received_amount<total_amount",
+            (entity_id, today_str)).fetchone()[0]
+        # Recent orders
+        recent_orders = [dict(r) for r in conn.execute(
+            "SELECT * FROM processing_orders WHERE customer_id=? ORDER BY order_date DESC LIMIT 5",
+            (entity_id,)).fetchall()]
+        for o in recent_orders:
+            o["total_amount"] = float(o["total_amount"] or 0)
+        # Recent transactions
+        recent_transactions = [dict(r) for r in conn.execute(
+            "SELECT income_date date, bank_type bank, amount, notes, '收款' type FROM incomes WHERE customer_id=? "
+            "ORDER BY income_date DESC LIMIT 10", (entity_id,)).fetchall()]
+        for t in recent_transactions:
+            t["amount"] = float(t["amount"] or 0)
+    else:
+        entity = dict(conn.execute(
+            "SELECT * FROM suppliers WHERE id=?", (entity_id,)).fetchone())
+        order_count = conn.execute(
+            "SELECT COUNT(*) FROM expenses WHERE supplier_id=?", (entity_id,)).fetchone()[0]
+        total_amount = to_float(conn.execute(
+            "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM expenses WHERE supplier_id=?",
+            (entity_id,)).fetchone()[0])
+        balance = total_amount  # owed to supplier
+        overdue_orders = 0
+        recent_orders = []
+        recent_transactions = [dict(r) for r in conn.execute(
+            "SELECT expense_date date, amount, expense_type type, '' bank, description notes FROM expenses WHERE supplier_id=? "
+            "ORDER BY expense_date DESC LIMIT 10", (entity_id,)).fetchall()]
+
+    # Aging (simplified customer only)
+    aging = []
+    if etype == "customer":
+        buckets = {"0-30天": 0, "31-60天": 0, "61-90天": 0, "90天以上": 0}
+        for r in conn.execute(
+            "SELECT CAST(julianday(?)-julianday(delivery_date) AS INTEGER) days, total_amount FROM processing_orders "
+            "WHERE customer_id=? AND status IN ('已交付','已完工') AND delivery_date IS NOT NULL AND received_amount<total_amount",
+            (today_str, entity_id)).fetchall():
+            days = r[0]; amt = float(r[1] or 0)
+            if days <= 30: buckets["0-30天"] += amt
+            elif days <= 60: buckets["31-60天"] += amt
+            elif days <= 90: buckets["61-90天"] += amt
+            else: buckets["90天以上"] += amt
+        total_aging = sum(buckets.values()) or 1
+        for k, v in buckets.items():
+            aging.append({"bucket": k, "amount": v, "pct": v / total_aging * 100})
+
+    stats = {"order_count": order_count, "total_amount": total_amount,
+             "balance": balance, "overdue_orders": overdue_orders}
+
+    conn.close()
+    return render_template("entity_profile.html",
+        entity=entity, etype=etype, stats=stats, aging=aging,
+        recent_orders=recent_orders, recent_transactions=recent_transactions,
+        this_year=this_year, today=today_str)
