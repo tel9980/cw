@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>批量导入 - 氧化加工厂财务系统</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#f5f5f5; }
+.container { max-width:700px; margin:0 auto; padding:20px; }
+.header { background:#1890ff; color:white; padding:18px 20px; margin-bottom:20px; }
+.header h1 { font-size:20px; }
+.nav { background:white; padding:10px 20px; margin-bottom:20px; box-shadow:0 2px 4px rgba(0,0,0,0.1); }
+.nav a { color:#333; text-decoration:none; margin-right:20px; font-size:14px; }
+.nav a:hover, .nav a.active { color:#1890ff; font-weight:600; }
+.card { background:white; padding:20px; margin-bottom:20px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.1); }
+.card h2 { font-size:18px; margin-bottom:15px; }
+.flash { padding:10px 15px; border-radius:4px; margin-bottom:12px; font-size:13px; }
+.flash-s { background:#f6ffed; border:1px solid #b7eb8f; color:#52c41a; }
+.flash-e { background:#fff1f0; border:1px solid #ffa39e; color:#f5222d; }
+.form-group { margin-bottom:12px; }
+.form-group label { display:block; margin-bottom:5px; font-weight:500; font-size:13px; }
+.form-group input, .form-group select { width:100%; padding:8px; border:1px solid #d9d9d9; border-radius:4px; font-size:13px; }
+.btn { display:inline-block; padding:8px 16px; background:#1890ff; color:white; border-radius:4px; border:none; cursor:pointer; font-size:14px; text-decoration:none; }
+.btn:hover { background:#40a9ff; }
+.btn-success { background:#52c41a; }
+pre { background:#f5f5f5; padding:10px; border-radius:4px; font-size:12px; margin:8px 0; overflow-x:auto; }
+.example { border:1px solid #d9d9d9; border-radius:6px; padding:12px; margin:12px 0; }
+.example h4 { font-size:13px; margin-bottom:6px; color:#555; }
+</style>
+</head>
+<body>
+<div class="header"><div class="container"><h1>批量导入</h1></div></div>
+<div class="nav"><div class="container">
+<a href="/">首页</a><a href="/customers">客户</a><a href="/chart-of-accounts">科目</a>
+<a href="/batch-import" class="active">导入</a><a href="/system-settings">设置</a>
+</div></div>
+<div class="container">
+{% if message %}<div class="flash flash-s">{{ message }}</div>{% endif %}
+{% if error %}<div class="flash flash-e">{{ error }}</div>{% endif %}
+<div class="card">
+<h2>导入CSV数据</h2>
+<form method="POST" enctype="multipart/form-data">
+<div class="form-group"><label>导入类型</label>
+<select name="import_type">
+<option value="customer">客户</option><option value="supplier">供应商</option><option value="account">会计科目</option>
+</select></div>
+<div class="form-group"><label>CSV文件</label><input type="file" name="csv_file" accept=".csv" required></div>
+<button type="submit" class="btn btn-success">开始导入</button>
+</form>
+</div>
+<div class="card">
+<h2>格式说明</h2>
+<div class="example"><h4>客户 CSV 格式</h4>
+<pre>名称,联系人,电话
+宏达五金厂,张经理,13800138000
+金利来机械,李总,13900139000</pre></div>
+<div class="example"><h4>供应商 CSV 格式</h4>
+<pre>名称,联系人,电话
+明辉铝业,王经理,13500135000
+瑞达氧化,陈工,13600136000</pre></div>
+<div class="example"><h4>会计科目 CSV 格式</h4>
+<pre>编码,名称,类型
+1001,库存现金,资产
+1123,预付账款,资产
+2242,预收账款,负债</pre></div>
+</div>
+</div>
+</body>
+</html>

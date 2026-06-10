@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据备份与恢复 - 氧化加工厂财务系统</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#f5f5f5; }
+.container { max-width:800px; margin:0 auto; padding:20px; }
+.header { background:#1890ff; color:white; padding:18px 20px; margin-bottom:20px; }
+.header h1 { font-size:20px; }
+.nav { background:white; padding:10px 20px; margin-bottom:20px; box-shadow:0 2px 4px rgba(0,0,0,0.1); }
+.nav a { color:#333; text-decoration:none; margin-right:20px; font-size:14px; }
+.nav a:hover, .nav a.active { color:#1890ff; font-weight:600; }
+.card { background:white; padding:20px; margin-bottom:20px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.1); }
+.card h2 { font-size:18px; margin-bottom:15px; }
+.flash { padding:10px 15px; border-radius:4px; margin-bottom:12px; font-size:13px; }
+.flash-s { background:#f6ffed; border:1px solid #b7eb8f; color:#52c41a; }
+.flash-e { background:#fff1f0; border:1px solid #ffa39e; color:#f5222d; }
+.form-group { margin-bottom:12px; }
+.form-group label { display:block; margin-bottom:5px; font-weight:500; font-size:13px; }
+.form-group input { width:100%; padding:8px; border:1px solid #d9d9d9; border-radius:4px; }
+.btn { display:inline-block; padding:8px 16px; background:#1890ff; color:white; border-radius:4px; border:none; cursor:pointer; font-size:14px; text-decoration:none; }
+.btn:hover { background:#40a9ff; }
+.btn-danger { background:#f5222d; }
+.btn-success { background:#52c41a; }
+.btn-sm { padding:5px 10px; font-size:12px; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th, td { padding:9px 12px; border-bottom:1px solid #eee; text-align:left; }
+th { background:#fafafa; font-weight:600; color:#555; }
+.danger-zone { border:2px solid #f5222d; padding:15px; border-radius:8px; margin-top:15px; }
+.danger-zone h3 { color:#f5222d; font-size:15px; margin-bottom:10px; }
+</style>
+</head>
+<body>
+<div class="header"><div class="container"><h1>数据备份与恢复</h1></div></div>
+<div class="nav"><div class="container">
+<a href="/">首页</a><a href="/reports">报表</a><a href="/vouchers">凭证</a>
+<a href="/data-backup" class="active">备份</a><a href="/system-settings">设置</a>
+</div></div>
+<div class="container">
+{% if message %}<div class="flash flash-s">{{ message }}</div>{% endif %}
+{% if error %}<div class="flash flash-e">{{ error }}</div>{% endif %}
+<div class="card">
+<h2>创建备份</h2>
+<form method="POST">
+<input type="hidden" name="action" value="backup">
+<div class="form-group"><label>备份备注</label><input type="text" name="note" placeholder="可选：说明备份原因"></div>
+<button type="submit" class="btn btn-success">一键备份数据库</button>
+</form>
+</div>
+<div class="card">
+<h2>备份历史</h2>
+{% if backups %}
+<table>
+<thead><tr><th>文件名</th><th>大小</th><th>时间</th></tr></thead>
+<tbody>{% for b in backups[:10] %}<tr><td>{{ b.name }}</td><td>{{ b.size }}</td><td>{{ b.time }}</td></tr>{% endfor %}</tbody>
+</table>
+{% else %}<div style="color:#999;text-align:center;padding:20px;">暂无备份记录</div>{% endif %}
+</div>
+<div class="card">
+<div class="danger-zone">
+<h3>数据恢复（危险操作）</h3>
+<p style="color:#666;font-size:13px;margin-bottom:12px;">上传 .db 备份文件将覆盖当前数据库，此操作不可撤销。</p>
+<form method="POST" enctype="multipart/form-data">
+<input type="hidden" name="action" value="restore">
+<div class="form-group"><label>选择备份文件 (.db)</label><input type="file" name="backup_file" accept=".db" required></div>
+<button type="submit" class="btn btn-danger" onclick="return confirm('确定恢复？当前数据将被覆盖！')">上传并恢复</button>
+</form>
+</div>
+</div>
+</div>
+</body>
+</html>

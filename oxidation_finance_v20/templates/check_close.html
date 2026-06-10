@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>月末结账检查 - 氧化加工厂财务系统</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#f5f5f5; }
+.container { max-width:800px; margin:0 auto; padding:20px; }
+.header { background:#1890ff; color:white; padding:18px 20px; margin-bottom:20px; }
+.header h1 { font-size:20px; }
+.nav { background:white; padding:10px 20px; margin-bottom:20px; box-shadow:0 2px 4px rgba(0,0,0,0.1); }
+.nav a { color:#333; text-decoration:none; margin-right:20px; font-size:14px; }
+.nav a:hover, .nav a.active { color:#1890ff; font-weight:600; }
+.card { background:white; padding:20px; margin-bottom:20px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.1); }
+.card h2 { font-size:18px; margin-bottom:15px; }
+.check-list { }
+.check-row { display:flex; align-items:center; padding:12px 15px; margin-bottom:8px; border-radius:6px; }
+.check-pass { background:#f6ffed; }
+.check-fail { background:#fff1f0; }
+.check-icon { font-size:20px; margin-right:12px; }
+.check-info { flex:1; }
+.check-title { font-size:14px; font-weight:600; }
+.check-detail { font-size:12px; color:#888; margin-top:2px; }
+.btn { display:inline-block; padding:10px 24px; background:#1890ff; color:white; border-radius:4px; border:none; cursor:pointer; font-size:14px; text-decoration:none; }
+.btn:hover { background:#40a9ff; }
+.btn-success { background:#52c41a; }
+.btn-success:hover { background:#73d13d; }
+.btn-warning { background:#fa8c16; }
+.btn-danger { background:#f5222d; }
+.btn-group { display:flex; gap:10px; margin-top:15px; }
+.banner { padding:15px; border-radius:6px; margin-bottom:15px; text-align:center; font-size:15px; font-weight:600; }
+.banner-ok { background:#f6ffed; color:#52c41a; border:1px solid #b7eb8f; }
+.banner-err { background:#fff1f0; color:#f5222d; border:1px solid #ffa39e; }
+</style>
+</head>
+<body>
+<div class="header"><div class="container"><h1>月末结账检查</h1></div></div>
+<div class="nav"><div class="container">
+<a href="/">首页</a><a href="/accounting-books">账簿</a><a href="/check-before-close" class="active">结账检查</a>
+<a href="/fixed-assets">固定资产</a><a href="/system-settings">设置</a>
+</div></div>
+<div class="container">
+<div class="card">
+<h2>检查项目 - {{ period }}</h2>
+{% if all_ok %}
+<div class="banner banner-ok">全部检查通过，可以执行月末结账</div>
+{% else %}
+<div class="banner banner-err">存在未通过的检查项，请处理后再结账</div>
+{% endif %}
+<div class="check-list">
+{% for key, c in checks.items() %}
+<div class="check-row {{ 'check-pass' if c.pass else 'check-fail' }}">
+<div class="check-icon">{{ '✅' if c.pass else '❌' }}</div>
+<div class="check-info">
+<div class="check-title">{{ {'all_posted':'凭证是否全部记账','balanced':'试算是否平衡','profit_closed':'损益是否已结转','depreciated':'折旧是否已计提','not_closed':'期间是否可关闭'}.get(key, key) }}</div>
+<div class="check-detail">{{ c.detail }}</div>
+</div>
+</div>
+{% endfor %}
+</div>
+<div class="btn-group">
+{% if all_ok %}
+<a href="/accounting-books?type=periods" class="btn btn-success">执行月末结账</a>
+{% else %}
+<a href="/vouchers" class="btn">去处理凭证</a>
+<a href="/fixed-assets" class="btn btn-warning">计提折旧</a>
+{% endif %}
+{% if has_posted and is_closed %}
+<form method="POST" style="display:inline;">
+<input type="hidden" name="action" value="rollback">
+<button type="submit" class="btn btn-danger" onclick="return confirm('确定取消结账？这将删除结转凭证并重新打开期间。')">取消结账（回滚）</button>
+</form>
+{% endif %}
+</div>
+</div>
+</div>
+</body>
+</html>

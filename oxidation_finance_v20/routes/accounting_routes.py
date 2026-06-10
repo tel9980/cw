@@ -3,7 +3,9 @@
 """会计路由：科目管理、凭证管理、账簿查询"""
 
 import csv
+import hashlib
 import io
+import os
 import uuid
 from datetime import date, datetime
 from flask import Blueprint, Response, render_template, request, redirect
@@ -1613,3 +1615,397 @@ def audit_log():
     conn.close()
     return render_template("audit_log.html",
         logs=[dict(r) for r in rows], total=total, page=page, per_page=per_page)
+
+
+# ========== 出纳日记账 ==========
+
+@accounting_bp.route("/cash-journal")
+def cash_journal():
+    """现金/银行日记账"""
+    conn = get_db()
+    journal_type = request.args.get("jtype", "cash")
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+    bank_name = request.args.get("bank_name", "")
+
+    if journal_type == "cash":
+        incomes = conn.execute("""
+            SELECT income_date as date, customer_name as party, CAST(amount AS REAL) amount,
+                   '收入' as type, bank_type, bank_type||' 收入' as note
+            FROM incomes WHERE income_date LIKE ? AND (bank_type NOT LIKE '%银行%' OR bank_type='现金')
+            ORDER BY income_date
+        """, (period + "%",)).fetchall()
+        expenses = conn.execute("""
+            SELECT expense_date as date, supplier_name as party, CAST(amount AS REAL) amount,
+                   '支出' as type, bank_type, expense_type||' 支出' as note
+            FROM expenses WHERE expense_date LIKE ? AND (bank_type NOT LIKE '%银行%' OR bank_type='现金')
+            ORDER BY expense_date
+        """, (period + "%",)).fetchall()
+    else:
+        incomes = conn.execute("""
+            SELECT income_date as date, customer_name as party, CAST(amount AS REAL) amount,
+                   '收入' as type, bank_type, bank_type||' 收入' as note
+            FROM incomes WHERE income_date LIKE ? AND bank_type=?
+            ORDER BY income_date
+        """, (period + "%", bank_name)).fetchall()
+        expenses = conn.execute("""
+            SELECT expense_date as date, supplier_name as party, CAST(amount AS REAL) amount,
+                   '支出' as type, bank_type, expense_type||' 支出' as note
+            FROM expenses WHERE expense_date LIKE ? AND bank_type=?
+            ORDER BY expense_date
+        """, (period + "%", bank_name)).fetchall()
+
+    all_items = sorted(
+        [dict(r) for r in incomes] + [dict(r) for r in expenses],
+        key=lambda x: (x["date"] or "", x.get("type", "")))
+
+    running_balance = 0.0
+    total_in = 0.0
+    total_out = 0.0
+    for item in all_items:
+        amt = item["amount"]
+        if item["type"] == "收入":
+            running_balance += amt
+            total_in += amt
+        else:
+            running_balance -= amt
+            total_out += amt
+        item["balance"] = round(running_balance, 2)
+
+    bank_list = [dict(r) for r in conn.execute(
+        "SELECT DISTINCT bank_type FROM incomes UNION SELECT DISTINCT bank_type FROM expenses").fetchall()]
+    if not bank_list:
+        bank_list = [{"bank_type": "对公账户"}, {"bank_type": "N银行"}]
+
+    conn.close()
+    return render_template("cash_journal.html",
+        journal_type=journal_type, period=period, bank_name=bank_name,
+        items=all_items, total_in=total_in, total_out=total_out,
+        balance=running_balance, bank_list=bank_list)
+
+
+# ========== 资金日报表导出 ==========
+
+@accounting_bp.route("/export/statement")
+def export_statement():
+    """导出资金日报/月报CSV"""
+    conn = get_db()
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+    jtype = request.args.get("jtype", "cash")
+    bank_name = request.args.get("bank_name", "")
+
+    if jtype == "cash":
+        incomes = conn.execute(
+            "SELECT income_date, customer_name, CAST(amount AS REAL) FROM incomes "
+            "WHERE income_date LIKE ? ORDER BY income_date", (period + "%",)).fetchall()
+        expenses = conn.execute(
+            "SELECT expense_date, supplier_name, CAST(amount AS REAL) FROM expenses "
+            "WHERE expense_date LIKE ? ORDER BY expense_date", (period + "%",)).fetchall()
+    else:
+        incomes = conn.execute(
+            "SELECT income_date, customer_name, CAST(amount AS REAL) FROM incomes "
+            "WHERE income_date LIKE ? AND bank_type=? ORDER BY income_date",
+            (period + "%", bank_name)).fetchall()
+        expenses = conn.execute(
+            "SELECT expense_date, supplier_name, CAST(amount AS REAL) FROM expenses "
+            "WHERE expense_date LIKE ? AND bank_type=? ORDER BY expense_date",
+            (period + "%", bank_name)).fetchall()
+
+    import csv, io
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["日期", "类型", "对方", "金额", "摘要"])
+    for r in incomes:
+        writer.writerow([r[0], "收入", r[1], f"{r[2]:.2f}", "收入"])
+    for r in expenses:
+        writer.writerow([r[0], "支出", r[1], f"{r[2]:.2f}", "支出"])
+
+    conn.close()
+    output.seek(0)
+    return Response(output.getvalue().encode('utf-8-sig'),
+        mimetype='text/csv',
+        headers={"Content-Disposition": f"attachment;filename=journal_{jtype}_{period}.csv"})
+
+
+# ========== 月末结账检查 ==========
+
+@accounting_bp.route("/check-before-close", methods=["GET", "POST"])
+def check_before_close():
+    """月末结账前检查"""
+    conn = get_db()
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        if action == "rollback":
+            # 删除该期间的最后一张结转凭证
+            last_close = conn.execute(
+                "SELECT id, voucher_no FROM accounting_vouchers "
+                "WHERE summary LIKE '%损益结转%' AND accounting_period=? "
+                "ORDER BY created_at DESC LIMIT 1", (period,)).fetchone()
+            if last_close:
+                conn.execute("DELETE FROM voucher_lines WHERE voucher_id=?", (last_close["id"],))
+                conn.execute("DELETE FROM accounting_vouchers WHERE id=?", (last_close["id"],))
+                conn.execute("UPDATE accounting_periods SET status='open', is_closed=0, "
+                           "closed_by='', closed_at='' WHERE period_name=?",
+                           (period,))
+                conn.commit()
+            conn.close()
+            return redirect(f"/check-before-close?period={period}")
+
+    checks = {}
+
+    # 1. 所有凭证是否已记账
+    unposted = conn.execute(
+        "SELECT COUNT(*) FROM accounting_vouchers WHERE accounting_period=? AND status!='已记账'",
+        (period,)).fetchone()[0]
+    checks["all_posted"] = {"pass": unposted == 0, "detail": f"{unposted} 张未记账凭证"}
+
+    # 2. 试算是否平衡
+    rows = conn.execute("""
+        SELECT a.code, a.balance_direction,
+            COALESCE(SUM(CASE WHEN v.status='已记账' THEN CAST(l.debit AS REAL) ELSE 0 END), 0) dr,
+            COALESCE(SUM(CASE WHEN v.status='已记账' THEN CAST(l.credit AS REAL) ELSE 0 END), 0) cr
+        FROM chart_of_accounts a
+        LEFT JOIN voucher_lines l ON l.account_code=a.code
+        LEFT JOIN accounting_vouchers v ON v.id=l.voucher_id AND v.accounting_period=?
+        WHERE a.is_active=1 GROUP BY a.code
+    """, (period,)).fetchall()
+    total_dr = sum(r[2] for r in rows)
+    total_cr = sum(r[3] for r in rows)
+    checks["balanced"] = {"pass": abs(total_dr - total_cr) < 0.01,
+                          "detail": f"借 {total_dr:.2f} = 贷 {total_cr:.2f}"}
+
+    # 3. 损益是否已结转
+    has_close = conn.execute(
+        "SELECT COUNT(*) FROM accounting_vouchers "
+        "WHERE summary LIKE '%损益结转%' AND accounting_period=?",
+        (period,)).fetchone()[0]
+    has_posted = conn.execute(
+        "SELECT COUNT(*) FROM accounting_vouchers "
+        "WHERE summary LIKE '%损益结转%' AND accounting_period=? AND status='已记账'",
+        (period,)).fetchone()[0]
+    checks["profit_closed"] = {"pass": has_posted > 0,
+                               "detail": f"{has_close} 张结转凭证({has_posted} 已记账)"}
+
+    # 4. 折旧是否已计提
+    has_dep = conn.execute(
+        "SELECT COUNT(*) FROM accounting_vouchers "
+        "WHERE summary LIKE '%折旧%' AND accounting_period=?",
+        (period,)).fetchone()[0]
+    fa_count = conn.execute("SELECT COUNT(*) FROM fixed_assets WHERE status='使用中'").fetchone()[0]
+    checks["depreciated"] = {"pass": has_dep > 0 or fa_count == 0,
+                             "detail": f"{has_dep} 张折旧凭证({fa_count} 项资产)"}
+
+    # 5. 期间是否已关闭
+    period_status = conn.execute(
+        "SELECT is_closed FROM accounting_periods WHERE period_name=?",
+        (period,)).fetchone()
+    is_closed = period_status["is_closed"] if period_status else 0
+    checks["not_closed"] = {"pass": not is_closed, "detail": "已关闭" if is_closed else "未关闭"}
+
+    all_ok = all(c["pass"] for c in checks.values())
+
+    conn.close()
+    return render_template("check_close.html", period=period, checks=checks, all_ok=all_ok,
+                          has_posted=has_posted, is_closed=is_closed)
+
+
+# ========== 数据备份与恢复 ==========
+
+@accounting_bp.route("/data-backup", methods=["GET", "POST"])
+def data_backup():
+    """数据备份与恢复"""
+    import shutil
+    DB = "/workspace/oxidation_finance_v20/oxidation_finance_demo_ready.db"
+    BACKUP_DIR = "/workspace/oxidation_finance_v20/backups"
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+
+    message = None
+    error = None
+
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        try:
+            if action == "backup":
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                note = request.form.get("note", "")
+                fname = f"backup_{ts}.db"
+                dst = os.path.join(BACKUP_DIR, fname)
+                shutil.copy2(DB, dst)
+                conn = get_db()
+                conn.execute(
+                    "INSERT INTO audit_logs (id, user_name, action, entity_type, entity_id, details, created_at) "
+                    "VALUES (?,?,?,?,?,?,?)",
+                    (str(uuid.uuid4()), "管理员", "数据备份", "system", fname,
+                     note or "手动备份", datetime.now().isoformat()))
+                conn.commit()
+                conn.close()
+                message = f"备份成功: {fname}"
+            elif action == "restore":
+                file = request.files.get("backup_file")
+                if file and file.filename.endswith('.db'):
+                    restore_path = os.path.join(BACKUP_DIR, "restore_" + file.filename)
+                    file.save(restore_path)
+                    shutil.copy2(restore_path, DB)
+                    conn = get_db()
+                    conn.execute(
+                        "INSERT INTO audit_logs (id, user_name, action, entity_type, entity_id, details, created_at) "
+                        "VALUES (?,?,?,?,?,?,?)",
+                        (str(uuid.uuid4()), "管理员", "数据恢复", "system", file.filename,
+                         "从备份恢复", datetime.now().isoformat()))
+                    conn.commit()
+                    conn.close()
+                    message = f"数据已从 {file.filename} 恢复"
+                else:
+                    error = "请上传 .db 格式的备份文件"
+        except Exception as e:
+            error = f"操作失败: {e}"
+
+    backups = []
+    if os.path.exists(BACKUP_DIR):
+        for f in sorted(os.listdir(BACKUP_DIR), reverse=True):
+            fp = os.path.join(BACKUP_DIR, f)
+            if f.endswith('.db'):
+                stat = os.stat(fp)
+                backups.append({"name": f, "size": f"{stat.st_size / 1024:.1f} KB",
+                               "time": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")})
+
+    return render_template("data_backup.html", backups=backups, message=message, error=error)
+
+
+# ========== 用户管理 ==========
+
+@accounting_bp.route("/user-management", methods=["GET", "POST"])
+def user_management():
+    """用户与权限管理"""
+    conn = get_db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT '记账会计',
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS login_sessions (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            login_at TEXT NOT NULL,
+            ip_address TEXT
+        )
+    """)
+    # Ensure default admin
+    import hashlib
+    exist = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    if exist == 0:
+        conn.execute(
+            "INSERT INTO users (id, username, password, role, is_active, created_at) VALUES (?,?,?,?,?,?)",
+            (str(uuid.uuid4()), "admin",
+             hashlib.sha256("admin123".encode()).hexdigest(),
+             "管理员", 1, datetime.now().isoformat()))
+    conn.commit()
+
+    message = None
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        try:
+            if action == "create":
+                uid = str(uuid.uuid4())
+                pwd = hashlib.sha256(request.form.get("password", "").encode()).hexdigest()
+                conn.execute(
+                    "INSERT INTO users (id, username, password, role, is_active, created_at) VALUES (?,?,?,?,?,?)",
+                    (uid, request.form.get("username"), pwd, request.form.get("role", "记账会计"),
+                     1, datetime.now().isoformat()))
+                conn.commit()
+                message = "用户创建成功"
+            elif action == "delete":
+                uid = request.form.get("user_id")
+                conn.execute("DELETE FROM users WHERE id=? AND role!='管理员'", (uid,))
+                conn.commit()
+                message = "用户已删除"
+            elif action == "change_pwd":
+                uid = request.form.get("user_id")
+                pwd = hashlib.sha256(request.form.get("password", "").encode()).hexdigest()
+                conn.execute("UPDATE users SET password=? WHERE id=?", (pwd, uid))
+                conn.commit()
+                message = "密码已更新"
+        except Exception as e:
+            message = f"操作失败: {e}"
+
+    users_list = [dict(u) for u in conn.execute(
+        "SELECT id, username, role, is_active, created_at FROM users ORDER BY role").fetchall()]
+    conn.close()
+    return render_template("user_management.html", users=users_list, message=message)
+
+
+# ========== 批量导入 ==========
+
+@accounting_bp.route("/batch-import", methods=["GET", "POST"])
+def batch_import():
+    """批量导入（客户/供应商/科目CSV）"""
+    import csv, io
+    message = None
+    error = None
+
+    if request.method == "POST":
+        imp_type = request.form.get("import_type", "")
+        file = request.files.get("csv_file")
+        if not file:
+            error = "请选择CSV文件"
+        elif imp_type not in ("customer", "supplier", "account"):
+            error = "未知导入类型"
+        else:
+            try:
+                content = file.read().decode('utf-8-sig')
+                reader = csv.reader(io.StringIO(content))
+                headers = next(reader, None)
+                conn = get_db()
+                now = datetime.now().isoformat()
+                count = 0
+                for row in reader:
+                    if not row or all(c.strip() == '' for c in row):
+                        continue
+                    if imp_type == "customer":
+                        name = row[0].strip()
+                        if name:
+                            exist = conn.execute("SELECT COUNT(*) FROM customers WHERE name=?", (name,)).fetchone()[0]
+                            if exist == 0:
+                                conn.execute(
+                                    "INSERT INTO customers (id, name, contact, phone, address, notes, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                                    (str(uuid.uuid4()), name, row[1] if len(row) > 1 else "",
+                                     row[2] if len(row) > 2 else "", "", "", now, now))
+                                count += 1
+                    elif imp_type == "supplier":
+                        name = row[0].strip()
+                        if name:
+                            exist = conn.execute("SELECT COUNT(*) FROM suppliers WHERE name=?", (name,)).fetchone()[0]
+                            if exist == 0:
+                                conn.execute(
+                                    "INSERT INTO suppliers (id, name, contact, phone, address, notes, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                                    (str(uuid.uuid4()), name, row[1] if len(row) > 1 else "",
+                                     row[2] if len(row) > 2 else "", "", "", now, now))
+                                count += 1
+                    elif imp_type == "account":
+                        code = row[0].strip()
+                        name = row[1].strip() if len(row) > 1 else ""
+                        acct_type = row[2].strip() if len(row) > 2 else "资产"
+                        if code and name:
+                            exist = conn.execute(
+                                "SELECT COUNT(*) FROM chart_of_accounts WHERE code=?", (code,)).fetchone()[0]
+                            if exist == 0:
+                                direction = "借" if acct_type in ("资产", "成本", "费用") else "贷"
+                                conn.execute(
+                                    "INSERT INTO chart_of_accounts (id, code, name, account_type, balance_direction, "
+                                    "parent_code, is_active, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                                    (str(uuid.uuid4()), code, name, acct_type, direction, "", 1, now, now))
+                                count += 1
+                conn.commit()
+                conn.close()
+                message = f"成功导入 {count} 条 {imp_type} 记录"
+            except Exception as eMsg:
+                error = f"导入失败: {eMsg}"
+
+    return render_template("batch_import.html", message=message, error=error)
