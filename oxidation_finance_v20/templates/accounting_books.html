@@ -48,105 +48,57 @@
     </style>
 </head>
 <body>
-    <div class="header">
-        <div class="container">
-            <h1>会计账簿查询</h1>
-        </div>
-    </div>
-    <div class="nav">
-        <div class="container">
-            <a href="/">首页</a>
-            <a href="/orders">订单</a>
-            <a href="/customers">客户</a>
-            <a href="/reports">报表</a>
-            <a href="/chart-of-accounts">会计科目</a>
-            <a href="/vouchers">会计凭证</a>
-            <a href="/accounting-books" class="active">会计账簿</a>
-        </div>
-    </div>
+    <div class="header"><div class="container"><h1>会计账簿查询</h1></div></div>
+    <div class="nav"><div class="container">
+        <a href="/">首页</a><a href="/orders">订单</a><a href="/customers">客户</a>
+        <a href="/reports">报表</a><a href="/chart-of-accounts">会计科目</a>
+        <a href="/vouchers">会计凭证</a><a href="/accounting-books" class="active">会计账簿</a>
+    </div></div>
     <div class="container">
+        <div class="flash flash-info">选择查询类型和会计期间，查看科目余额表、明细账、财务报表或管理期间。数据基于已记账凭证。</div>
 
-        <div class="flash flash-info">选择查询类型和会计期间，查看科目余额表或明细账。数据基于已记账凭证。</div>
-
-        <!-- 标签页 -->
         <div class="card" style="padding-bottom:0;">
             <div class="tabs">
                 <div class="tab {% if book_type == 'balance' %}active{% endif %}" onclick="switchTab('balance')">科目余额表</div>
                 <div class="tab {% if book_type == 'detail' %}active{% endif %}" onclick="switchTab('detail')">明细账</div>
+                <div class="tab {% if book_type == 'statement' %}active{% endif %}" onclick="switchTab('statement')">财务报表</div>
+                <div class="tab {% if book_type == 'periods' %}active{% endif %}" onclick="switchTab('periods')">期间管理</div>
             </div>
 
             <!-- 余额表 -->
             <div class="tab-content" id="tab-balance" style="{% if book_type != 'balance' %}display:none;{% endif %}">
                 <div class="filter-bar">
-                    <form method="GET" style="display: contents;">
+                    <form method="GET" style="display:contents;">
                         <input type="hidden" name="type" value="balance">
-                        <label style="font-weight:500;">会计期间：</label>
+                        <label>会计期间：</label>
                         {% if periods %}
-                            <select name="period" onchange="this.form.submit()">
-                                <option value="">-- 请选择 --</option>
-                                {% for p in periods %}
-                                    <option value="{{ p.accounting_period }}" {% if current_period == p.accounting_period %}selected{% endif %}>{{ p.accounting_period }}</option>
-                                {% endfor %}
-                            </select>
-                        {% else %}
-                            <input type="text" name="period" placeholder="例如: 2024-01" value="{{ current_period }}">
-                        {% endif %}
+                        <select name="period" onchange="this.form.submit()">
+                            <option value="">-- 请选择 --</option>
+                            {% for p in periods %}<option value="{{ p.accounting_period }}" {% if current_period==p.accounting_period %}selected{% endif %}>{{ p.accounting_period }}</option>{% endfor %}
+                        </select>
+                        {% else %}<input type="text" name="period" placeholder="2024-01" value="{{ current_period }}">{% endif %}
                         <button type="submit" class="btn btn-sm">查询</button>
                     </form>
                 </div>
-
-                {% if current_period %}
-                    <h3 style="font-size:15px; margin:15px 0 10px; color:#666;">
-                        期间：<strong>{{ current_period }}</strong>
-                        ({{ balance_data|length }} 个科目)
-                    </h3>
-                {% endif %}
-
+                {% if current_period %}<h3 style="font-size:15px;margin:10px 0;color:#666;">期间：<strong>{{ current_period }}</strong> ({{ balance_data|length }} 个科目)</h3>{% endif %}
                 {% if balance_data %}
                 <div class="stats-grid" style="margin-bottom:15px;">
-                    {% set ns = namespace(debit_sum=0, credit_sum=0) %}
-                    {% for b in balance_data %}
-                        {% set ns.debit_sum = ns.debit_sum + b.debit_sum|float %}
-                        {% set ns.credit_sum = ns.credit_sum + b.credit_sum|float %}
-                    {% endfor %}
-                    <div class="stat-item">
-                        <div class="stat-value">{{ '%.2f'|format(ns.debit_sum) }}</div>
-                        <div class="stat-label">借方发生额合计</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value">{{ '%.2f'|format(ns.credit_sum) }}</div>
-                        <div class="stat-label">贷方发生额合计</div>
-                    </div>
+                    {% set ns = namespace(ds=0, cs=0) %}{% for b in balance_data %}{% set ns.ds = ns.ds + b.debit_sum|float %}{% set ns.cs = ns.cs + b.credit_sum|float %}{% endfor %}
+                    <div class="stat-item"><div class="stat-value">{{ '%.2f'|format(ns.ds) }}</div><div class="stat-label">借方合计</div></div>
+                    <div class="stat-item"><div class="stat-value">{{ '%.2f'|format(ns.cs) }}</div><div class="stat-label">贷方合计</div></div>
                 </div>
                 {% endif %}
-
                 <table>
-                    <thead>
-                        <tr>
-                            <th style="width:120px;">科目编码</th>
-                            <th>科目名称</th>
-                            <th style="width:100px;">科目类型</th>
-                            <th class="num" style="width:130px;">借方发生额</th>
-                            <th class="num" style="width:130px;">贷方发生额</th>
-                            <th class="num" style="width:130px;">期末余额</th>
-                            <th style="width:60px;">方向</th>
-                        </tr>
-                    </thead>
+                    <thead><tr><th>科目编码</th><th>科目名称</th><th>类型</th><th class="num">借方发生额</th><th class="num">贷方发生额</th><th class="num">期末余额</th><th>方向</th></tr></thead>
                     <tbody>
                         {% for b in balance_data %}
-                        <tr>
-                            <td><strong>{{ b.code }}</strong></td>
-                            <td>{{ b.name }}</td>
+                        <tr><td><strong>{{ b.code }}</strong></td><td>{{ b.name }}</td>
                             <td><span class="type-tag type-{{ b.account_type }}">{{ b.account_type }}</span></td>
                             <td class="num">{% if b.debit_sum|float > 0 %}{{ '%.2f'|format(b.debit_sum|float) }}{% else %}-{% endif %}</td>
                             <td class="num">{% if b.credit_sum|float > 0 %}{{ '%.2f'|format(b.credit_sum|float) }}{% else %}-{% endif %}</td>
-                            <td class="num" style="font-weight:600;">{{ '%.2f'|format(b.closing_balance|float) }}</td>
-                            <td>{{ b.balance_direction }}</td>
-                        </tr>
+                            <td class="num" style="font-weight:600;">{{ '%.2f'|format(b.closing_balance|float) }}</td><td>{{ b.balance_direction }}</td></tr>
                         {% endfor %}
-                        {% if not balance_data %}
-                        <tr><td colspan="7" class="empty-state">暂无数据，请先创建并记账凭证</td></tr>
-                        {% endif %}
+                        {% if not balance_data %}<tr><td colspan="7" class="empty-state">暂无数据，请先创建并记账凭证</td></tr>{% endif %}
                     </tbody>
                 </table>
             </div>
@@ -154,80 +106,114 @@
             <!-- 明细账 -->
             <div class="tab-content" id="tab-detail" style="{% if book_type != 'detail' %}display:none;{% endif %}">
                 <div class="filter-bar">
-                    <form method="GET" style="display: contents;">
+                    <form method="GET" style="display:contents;">
                         <input type="hidden" name="type" value="detail">
-                        <label style="font-weight:500;">期间：</label>
+                        <label>期间：</label>
                         {% if periods %}
-                            <select name="period">
-                                <option value="">-- 请选择 --</option>
-                                {% for p in periods %}
-                                    <option value="{{ p.accounting_period }}" {% if current_period == p.accounting_period %}selected{% endif %}>{{ p.accounting_period }}</option>
-                                {% endfor %}
-                            </select>
-                        {% else %}
-                            <input type="text" name="period" placeholder="例如: 2024-01" value="{{ current_period }}">
-                        {% endif %}
-                        <label style="font-weight:500;">科目：</label>
-                        <select name="account_code">
-                            <option value="">-- 请选择科目 --</option>
-                            {% for a in accounts_list %}
-                                <option value="{{ a.code }}" {% if current_account == a.code %}selected{% endif %}>{{ a.code }} - {{ a.name }}</option>
-                            {% endfor %}
+                        <select name="period">{% for p in periods %}<option value="{{ p.accounting_period }}" {% if current_period==p.accounting_period %}selected{% endif %}>{{ p.accounting_period }}</option>{% endfor %}</select>
+                        {% else %}<input type="text" name="period" placeholder="2024-01" value="{{ current_period }}">{% endif %}
+                        <label>科目：</label>
+                        <select name="account_code"><option value="">-- 请选择 --</option>
+                            {% for a in accounts_list %}<option value="{{ a.code }}" {% if current_account==a.code %}selected{% endif %}>{{ a.code }} - {{ a.name }}</option>{% endfor %}
                         </select>
                         <button type="submit" class="btn btn-sm">查询</button>
                     </form>
                 </div>
-
-                {% if acc_info %}
-                    <h3 style="font-size:15px; margin:15px 0 10px; color:#666;">
-                        <span class="type-tag type-{{ acc_info.account_type }}">{{ acc_info.account_type }}</span>
-                        科目：<strong>{{ acc_info.code }} - {{ acc_info.name }}</strong>
-                        期间：<strong>{{ current_period }}</strong>
-                        ({{ detail_data|length }} 条记录)
-                    </h3>
-                {% endif %}
-
+                {% if acc_info %}<h3 style="font-size:15px;margin:10px 0;color:#666;"><span class="type-tag type-{{ acc_info.account_type }}">{{ acc_info.account_type }}</span> 科目：<strong>{{ acc_info.code }} - {{ acc_info.name }}</strong> 期间：<strong>{{ current_period }}</strong></h3>{% endif %}
                 <table>
-                    <thead>
-                        <tr>
-                            <th style="width:140px;">凭证编号</th>
-                            <th style="width:120px;">凭证日期</th>
-                            <th>摘要</th>
-                            <th class="num" style="width:130px;">借方金额</th>
-                            <th class="num" style="width:130px;">贷方金额</th>
-                            <th style="width:80px;">状态</th>
-                        </tr>
-                    </thead>
+                    <thead><tr><th>凭证编号</th><th>凭证日期</th><th>摘要</th><th class="num">借方金额</th><th class="num">贷方金额</th><th>状态</th></tr></thead>
                     <tbody>
                         {% for d in detail_data %}
-                        <tr>
-                            <td>{{ d.voucher_no }}</td>
-                            <td>{{ d.voucher_date }}</td>
-                            <td>{{ d.summary or '-' }}</td>
+                        <tr><td>{{ d.voucher_no }}</td><td>{{ d.voucher_date }}</td><td>{{ d.summary or '-' }}</td>
                             <td class="num">{% if d.debit|float > 0 %}{{ '%.2f'|format(d.debit|float) }}{% else %}-{% endif %}</td>
-                            <td class="num">{% if d.credit|float > 0 %}{{ '%.2f'|format(d.credit|float) }}{% else %}-{% endif %}</td>
-                            <td>{{ d.status }}</td>
-                        </tr>
+                            <td class="num">{% if d.credit|float > 0 %}{{ '%.2f'|format(d.credit|float) }}{% else %}-{% endif %}</td><td>{{ d.status }}</td></tr>
                         {% endfor %}
-                        {% if not detail_data and current_account %}
-                        <tr><td colspan="6" class="empty-state">该科目在此会计期间暂无凭证记录</td></tr>
-                        {% elif not current_account %}
-                        <tr><td colspan="6" class="empty-state">请选择科目进行查询</td></tr>
-                        {% endif %}
+                        {% if not detail_data and current_account %}<tr><td colspan="6" class="empty-state">该科目暂无凭证记录</td></tr>
+                        {% elif not current_account %}<tr><td colspan="6" class="empty-state">请选择科目进行查询</td></tr>{% endif %}
                     </tbody>
                 </table>
             </div>
+
+            <!-- 财务报表 -->
+            <div class="tab-content" id="tab-statement" style="{% if book_type != 'statement' %}display:none;{% endif %}">
+                <div class="filter-bar">
+                    <form method="GET" style="display:contents;">
+                        <input type="hidden" name="type" value="statement">
+                        <label>会计期间：</label>
+                        {% if periods %}
+                        <select name="period" onchange="this.form.submit()">{% for p in periods %}<option value="{{ p.accounting_period }}" {% if current_period==p.accounting_period %}selected{% endif %}>{{ p.accounting_period }}</option>{% endfor %}</select>
+                        {% else %}<input type="text" name="period" placeholder="2024-01" value="{{ current_period }}">{% endif %}
+                        <button type="submit" class="btn btn-sm">查询</button>
+                    </form>
+                </div>
+                {% if statement_data and statement_data.bs %}
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+                    <div class="card" style="padding:15px;margin-bottom:0;">
+                        <h2 style="text-align:center;">资产负债表</h2>
+                        <p style="text-align:center;color:#666;font-size:13px;margin-bottom:15px;">
+                            期间：{{ current_period }}
+                            {% if statement_data.bs.balanced %}<span style="color:#52c41a;">(平衡)</span>
+                            {% else %}<span style="color:#f5222d;">(差{{ '%.2f'|format(statement_data.bs.total_assets - statement_data.bs.total_liabilities - statement_data.bs.total_equity) }})</span>{% endif %}
+                        </p>
+                        <table>
+                            <thead><tr><th colspan="2" style="background:#e6f7ff;">资产</th><th class="num">金额</th></tr></thead>
+                            <tbody>
+                                {% for a in statement_data.bs.assets if a.balance != 0 %}<tr><td colspan="2">{{ a.code }} {{ a.name }}</td><td class="num">{{ '%.2f'|format(a.balance) }}</td></tr>{% endfor %}
+                                <tr style="font-weight:bold;background:#fafafa;"><td colspan="2">资产合计</td><td class="num">{{ '%.2f'|format(statement_data.bs.total_assets) }}</td></tr>
+                            </tbody>
+                            <thead><tr><th colspan="2" style="background:#fff1f0;">负债</th><th class="num">金额</th></tr></thead>
+                            <tbody>
+                                {% for l in statement_data.bs.liabilities if l.balance != 0 %}<tr><td colspan="2">{{ l.code }} {{ l.name }}</td><td class="num">{{ '%.2f'|format(l.balance) }}</td></tr>{% endfor %}
+                                <tr style="font-weight:bold;background:#fafafa;"><td colspan="2">负债合计</td><td class="num">{{ '%.2f'|format(statement_data.bs.total_liabilities) }}</td></tr>
+                            </tbody>
+                            <thead><tr><th colspan="2" style="background:#f6ffed;">所有者权益</th><th class="num">金额</th></tr></thead>
+                            <tbody>
+                                {% for e in statement_data.bs.equity if e.balance != 0 %}<tr><td colspan="2">{{ e.code }} {{ e.name }}</td><td class="num">{{ '%.2f'|format(e.balance) }}</td></tr>{% endfor %}
+                                <tr style="font-weight:bold;background:#fafafa;"><td colspan="2">权益合计</td><td class="num">{{ '%.2f'|format(statement_data.bs.total_equity) }}</td></tr>
+                            </tbody>
+                            <tfoot><tr style="font-weight:bold;border-top:2px solid #333;background:#f0f0f0;"><td colspan="2">负债和所有者权益总计</td><td class="num">{{ '%.2f'|format(statement_data.bs.total_liabilities + statement_data.bs.total_equity) }}</td></tr></tfoot>
+                        </table>
+                    </div>
+                    <div class="card" style="padding:15px;margin-bottom:0;">
+                        <h2 style="text-align:center;">利润表</h2>
+                        <p style="text-align:center;color:#666;font-size:13px;margin-bottom:15px;">期间：{{ current_period }}</p>
+                        <table>
+                            <thead><tr><th colspan="2" style="background:#f9f0ff;">收入</th><th class="num">金额</th></tr></thead>
+                            <tbody>
+                                {% for r in statement_data.is.revenue if r.balance != 0 %}<tr><td colspan="2">{{ r.code }} {{ r.name }}</td><td class="num">{{ '%.2f'|format(r.balance) }}</td></tr>{% endfor %}
+                                <tr style="font-weight:bold;background:#fafafa;"><td colspan="2">收入合计</td><td class="num">{{ '%.2f'|format(statement_data.is.total_revenue) }}</td></tr>
+                            </tbody>
+                            <thead><tr><th colspan="2" style="background:#fff7e6;">成本与费用</th><th class="num">金额</th></tr></thead>
+                            <tbody>
+                                {% for c in statement_data.is.costs if c.balance != 0 %}<tr><td colspan="2">{{ c.code }} {{ c.name }}</td><td class="num">{{ '%.2f'|format(c.balance) }}</td></tr>{% endfor %}
+                                <tr style="font-weight:bold;background:#fafafa;"><td colspan="2">成本费用合计</td><td class="num">{{ '%.2f'|format(statement_data.is.total_costs) }}</td></tr>
+                            </tbody>
+                            <tfoot><tr style="font-weight:bold;border-top:2px solid #333;background:#f0f0f0;"><td colspan="2">净利润</td><td class="num" style="color:{% if statement_data.is.net_profit >= 0 %}#52c41a{% else %}#f5222d{% endif %};">{{ '%.2f'|format(statement_data.is.net_profit) }}</td></tr></tfoot>
+                        </table>
+                    </div>
+                </div>
+                {% else %}<div class="empty-state">请选择期间查看财务报表</div>{% endif %}
+            </div>
+
+            <!-- 期间管理 -->
+            <div class="tab-content" id="tab-periods" style="{% if book_type != 'periods' %}display:none;{% endif %}">
+                <div class="filter-bar"><button class="btn btn-sm btn-success">+ 新增期间</button></div>
+                {% if period_records %}
+                <table><thead><tr><th>会计期间</th><th>开始日期</th><th>结束日期</th><th>状态</th><th>操作</th></tr></thead>
+                    <tbody>
+                        {% for pr in period_records %}
+                        <tr><td><strong>{{ pr.period_name }}</strong></td><td>{{ pr.start_date }}</td><td>{{ pr.end_date }}</td>
+                            <td><span class="{% if pr.status=='打开' %}type-tag type-权益类{% else %}type-tag type-负债类{% endif %}">{{ pr.status }}</span></td>
+                            <td><a href="/accounting-books?type=balance&period={{ pr.period_name }}" class="btn btn-sm btn-default">查看</a></td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}<div class="empty-state">暂无会计期间记录</div>{% endif %}
+            </div>
         </div>
-
     </div>
-
     <script>
-        function switchTab(name) {
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
-            event.target.classList.add('active');
-            document.getElementById('tab-' + name).style.display = 'block';
-        }
+        function switchTab(name){document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));document.querySelectorAll('.tab-content').forEach(c=>c.style.display='none');event.target.classList.add('active');document.getElementById('tab-'+name).style.display='block';}
     </script>
 </body>
 </html>

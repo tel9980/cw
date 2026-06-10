@@ -3,147 +3,46 @@
 {% block title %}小会计助手 - 氧化加工厂财务系统{% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <h2>🤖 小会计助手</h2>
-    <p>今日工作检查和快速操作</p>
-</div>
+<div class="card" style="text-align: center; padding: 40px;">
+    <h2>小会计助手</h2>
+    <p style="color: #666; margin: 15px 0;">用自然语言查询财务数据（收入、支出、利润、订单等）</p>
 
-<div class="stats-grid">
-    <div class="stat-item">
-        <div class="stat-value">{{ "%.2f"|format(today_income) }}</div>
-        <div class="stat-label">今日收入</div>
-    </div>
-    <div class="stat-item">
-        <div class="stat-value">{{ "%.2f"|format(today_expense) }}</div>
-        <div class="stat-label">今日支出</div>
-    </div>
-    <div class="stat-item">
-        <div class="stat-value">{{ today_orders|length }}</div>
-        <div class="stat-label">今日订单</div>
-    </div>
-    <div class="stat-item">
-        <div class="stat-value">{{ unpaid_orders|length }}</div>
-        <div class="stat-label">未收款订单</div>
-    </div>
-</div>
-
-<div class="quick-actions">
-    <a href="{{ url_for('quick_income') }}" class="btn btn-success">💰 快速记录收入</a>
-    <a href="{{ url_for('quick_expense') }}" class="btn btn-warning">💸 快速记录支出</a>
-    <a href="{{ url_for('index') }}" class="btn">🏠 返回首页</a>
-</div>
-
-{% if reminders %}
-<div class="card">
-    <div class="card-header">
-        <h3>🔔 智能提醒</h3>
-    </div>
-    <div class="card-body">
-        <div class="reminder-list">
-            {% for reminder in reminders %}
-            <div class="reminder-item reminder-{{ reminder.priority }}">
-                <strong>{{ reminder.type }}:</strong> {{ reminder.content }}
-            </div>
-            {% endfor %}
+    <form method="POST" style="max-width: 600px; margin: 20px auto;">
+        <div class="form-group" style="display: flex; gap: 10px;">
+            <input type="text" name="question" value="{{ question }}" placeholder="例如：本月收入多少？今日订单情况？"
+                   style="flex: 1; padding: 12px; border: 2px solid #1890ff; border-radius: 8px; font-size: 16px;" required>
+            <button type="submit" class="btn" style="padding: 12px 24px; font-size: 16px;">查询</button>
         </div>
-    </div>
-</div>
-{% endif %}
+    </form>
 
-{% if today_orders %}
+    {% if answer %}
+    <div style="background: #f6ffed; border: 1px solid #b7eb8f; padding: 20px; border-radius: 8px; margin-top: 20px; text-align: left; font-size: 16px;">
+        <strong style="color: #52c41a;">回答：</strong>
+        <p style="margin-top: 10px; color: #333;">{{ answer }}</p>
+    </div>
+    {% endif %}
+</div>
+
 <div class="card">
-    <div class="card-header">
-        <h3>📋 今日订单</h3>
-    </div>
-    <div class="card-body">
-        <div class="table-responsive">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>订单号</th>
-                        <th>客户</th>
-                        <th>金额</th>
-                        <th>状态</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for order in today_orders %}
-                    <tr>
-                        <td>{{ order.order_no }}</td>
-                        <td>{{ order.customer_name }}</td>
-                        <td>{{ "%.2f"|format(order.total_amount) }}</td>
-                        <td><span class="status-badge status-{{ order.status }}">{{ order.status }}</span></td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
+    <h2>可用的查询方式</h2>
+    <table>
+        <thead><tr><th>类别</th><th>示例问题</th></tr></thead>
+        <tbody>
+            <tr><td>收入</td><td>"今日收入多少"、"2024年6月收入"</td></tr>
+            <tr><td>支出</td><td>"本月支出多少"、"费用情况"</td></tr>
+            <tr><td>订单</td><td>"还有多少订单"、"待处理订单情况"</td></tr>
+            <tr><td>利润</td><td>"本月利润"、"赚了多少"</td></tr>
+        </tbody>
+    </table>
 </div>
-{% endif %}
 
-{% if unpaid_orders %}
 <div class="card">
-    <div class="card-header">
-        <h3>⚠️ 未收款订单</h3>
-    </div>
-    <div class="card-body">
-        <div class="table-responsive">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>订单号</th>
-                        <th>客户</th>
-                        <th>未收金额</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for order in unpaid_orders %}
-                    <tr>
-                        <td>{{ order.order_no }}</td>
-                        <td>{{ order.customer_name }}</td>
-                        <td class="text-danger">{{ "%.2f"|format(order.unpaid) }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+    <h2>快速操作</h2>
+    <div class="quick-actions">
+        <a href="/income/new" class="btn btn-success">+ 录入收入</a>
+        <a href="/expense/new" class="btn btn-warning">+ 录入支出</a>
+        <a href="/vouchers" class="btn">制作凭证</a>
+        <a href="/accounting-books" class="btn btn-success">查账簿</a>
     </div>
 </div>
-{% endif %}
-
-{% endblock %}
-
-{% block extra_head %}
-<style>
-.reminder-list {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.reminder-item {
-    padding: 12px 16px;
-    border-radius: 6px;
-    border-left: 4px solid;
-}
-
-.reminder-高 {
-    background: #fff2f0;
-    border-color: #ff4d4f;
-    color: #cf1322;
-}
-
-.reminder-中 {
-    background: #fffbe6;
-    border-color: #faad14;
-    color: #ad6800;
-}
-
-.reminder-低 {
-    background: #f6ffed;
-    border-color: #52c41a;
-    color: #389e0d;
-}
-</style>
 {% endblock %}
