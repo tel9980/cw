@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>发票管理 - 氧化加工厂财务系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .header { background: #1890ff; color: white; padding: 16px 20px; margin-bottom: 20px; }
+        .header h1 { font-size: 22px; display: flex; align-items: center; justify-content: space-between; }
+        .header a { color: white; font-size: 14px; text-decoration: none; opacity: 0.85; }
+        .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .card h2 { font-size: 18px; margin-bottom: 15px; color: #333; }
+        .summary-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
+        .summary-card { background: #f8f9fa; padding: 16px; border-radius: 6px; text-align: center; border-left: 4px solid #1890ff; }
+        .summary-card .val { font-size: 22px; font-weight: bold; color: #333; }
+        .summary-card .lbl { font-size: 13px; color: #999; margin-top: 4px; }
+        .btn { display: inline-block; padding: 9px 18px; background: #1890ff; color: white; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; font-size: 14px; }
+        .btn-success { background: #52c41a; }
+        .btn-danger { background: #f5222d; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #fafafa; font-weight: 600; color: #555; }
+        tr:hover { background: #f5f5f5; }
+        .num { text-align: right; }
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+        .tag-output { background: #e6f7ff; color: #1890ff; }
+        .tag-input { background: #fff7e6; color: #fa8c16; }
+        .tag-done { background: #f6ffed; color: #52c41a; }
+        .tag-draft { background: #f0f0f0; color: #888; }
+        .form-inline { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+        .form-inline .fg { display: flex; flex-direction: column; gap: 4px; }
+        .form-inline label { font-size: 12px; color: #666; }
+        .form-inline input, .form-inline select { padding: 7px 10px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; }
+        .modal-bg { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 999; justify-content: center; align-items: center; }
+        .modal-bg.show { display: flex; }
+        .modal { background: white; padding: 24px; border-radius: 8px; width: 460px; max-width: 90%; }
+        .modal h3 { margin-bottom: 16px; }
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; margin-bottom: 4px; font-size: 13px; color: #666; }
+        .form-group input, .form-group select { width: 100%; padding: 8px 10px; border: 1px solid #d9d9d9; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <h1>发票管理 <a href="/">← 返回首页</a></h1>
+        </div>
+    </div>
+    <div class="container">
+        {% if view == "summary" %}
+        <!-- 发票汇总页 -->
+        <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h2>发票汇总</h2>
+                <a href="/invoices" class="btn">返回列表</a>
+            </div>
+        </div>
+        <div class="summary-row">
+            <div class="summary-card">
+                <div class="val">{{ "%.2f"|format(summary.output_amount) }}</div>
+                <div class="lbl">销项发票金额</div>
+            </div>
+            <div class="summary-card" style="border-left-color:#f5222d;">
+                <div class="val">{{ "%.2f"|format(summary.output_tax) }}</div>
+                <div class="lbl">销项税额</div>
+            </div>
+            <div class="summary-card" style="border-left-color:#faad14;">
+                <div class="val">{{ "%.2f"|format(summary.input_amount) }}</div>
+                <div class="lbl">进项发票金额</div>
+            </div>
+            <div class="summary-card" style="border-left-color:#52c41a;">
+                <div class="val">{{ "%.2f"|format(summary.input_tax) }}</div>
+                <div class="lbl">进项税额</div>
+            </div>
+        </div>
+        <div class="card">
+            <h2>应纳税额</h2>
+            <div style="text-align:center; padding:20px;">
+                <div style="font-size:32px; font-weight:bold; color:{% if summary.tax_payable >= 0 %}#f5222d{% else %}#52c41a{% endif %};">
+                    {{ "%.2f"|format(summary.tax_payable) }}
+                </div>
+                <div style="color:#999; margin-top:4px;">
+                    销项 {{ "%.2f"|format(summary.output_tax) }} - 进项 {{ "%.2f"|format(summary.input_tax) }} = 应纳税额
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <!-- 发票列表页 -->
+        <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h2>发票列表</h2>
+                <div>
+                    <a href="/invoices?view=summary" class="btn btn-success">查看汇总</a>
+                    <button class="btn" onclick="openModal()">+ 录入发票</button>
+                </div>
+            </div>
+        </div>
+        {% if invoices %}
+        <div class="card">
+            <table>
+                <thead>
+                    <tr>
+                        <th>发票号码</th>
+                        <th>类型</th>
+                        <th>对方单位</th>
+                        <th class="num">金额</th>
+                        <th class="num">税额</th>
+                        <th>税率</th>
+                        <th>开票日期</th>
+                        <th>状态</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for inv in invoices %}
+                    <tr>
+                        <td>{{ inv.invoice_no }}</td>
+                        <td><span class="tag {% if inv.inv_type == '销项' %}tag-output{% else %}tag-input{% endif %}">{{ inv.inv_type }}</span></td>
+                        <td>{{ inv.counterparty }}</td>
+                        <td class="num">{{ "%.2f"|format(inv.amount) }}</td>
+                        <td class="num">{{ "%.2f"|format(inv.tax_amount) }}</td>
+                        <td>{{ inv.tax_rate }}%</td>
+                        <td>{{ inv.invoice_date }}</td>
+                        <td><span class="tag {% if inv.status == '已认证' %}tag-done{% else %}tag-draft{% endif %}">{{ inv.status }}</span></td>
+                        <td>
+                            <form method="POST" style="display:inline;" onsubmit="return confirm('确定删除？');">
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="inv_id" value="{{ inv.id }}">
+                                <button type="submit" class="btn btn-danger" style="padding:4px 10px; font-size:12px;">删除</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="card">
+            <p style="color:#999; text-align:center; padding:20px;">暂无发票记录</p>
+        </div>
+        {% endif %}
+        {% endif %}
+
+        <!-- 录入发票弹窗 -->
+        <div class="modal-bg" id="invModal">
+            <div class="modal">
+                <h3>录入发票</h3>
+                <form method="POST">
+                    <input type="hidden" name="action" value="create">
+                    <div class="form-group">
+                        <label>发票号码 *</label>
+                        <input type="text" name="invoice_no" placeholder="如：12345678" required>
+                    </div>
+                    <div class="form-group">
+                        <label>发票类型</label>
+                        <select name="inv_type">
+                            <option value="销项">销项发票</option>
+                            <option value="进项">进项发票</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>对方单位 *</label>
+                        <input type="text" name="counterparty" placeholder="客户或供应商名称" required>
+                    </div>
+                    <div class="form-group">
+                        <label>金额（不含税）*</label>
+                        <input type="number" name="amount" step="0.01" placeholder="0.00" required>
+                    </div>
+                    <div class="form-group">
+                        <label>税率 (%)</label>
+                        <select name="tax_rate">
+                            <option value="13">13%</option>
+                            <option value="9">9%</option>
+                            <option value="6">6%</option>
+                            <option value="3">3%</option>
+                            <option value="0">0%</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>开票日期</label>
+                        <input type="date" name="invoice_date" value="{{ today }}">
+                    </div>
+                    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:16px;">
+                        <button type="button" class="btn" style="background:#999;" onclick="closeModal()">取消</button>
+                        <button type="submit" class="btn">保存</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <script>
+            function openModal() { document.getElementById('invModal').classList.add('show'); }
+            function closeModal() { document.getElementById('invModal').classList.remove('show'); }
+            {% if show_modal %}
+            setTimeout(openModal, 100);
+            {% endif %}
+        </script>
+    </div>
+</body>
+</html>

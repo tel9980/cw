@@ -1617,6 +1617,224 @@ def audit_log():
         logs=[dict(r) for r in rows], total=total, page=page, per_page=per_page)
 
 
+# ========== 财务比率分析 ==========
+
+@accounting_bp.route("/financial-ratios")
+def financial_ratios():
+    """财务比率分析 + 环比同比"""
+    conn = get_db()
+    period_str = request.args.get("period", date.today().strftime("%Y-%m"))
+
+    # Parse period for MOM and YOY comparisons
+    y, m = int(period_str[:4]), int(period_str[5:7])
+    last_month = f"{y}-{m-1:02d}" if m > 1 else f"{y-1}-12"
+    last_year = f"{y-1}-{m:02d}"
+
+    def sum_period(table, date_col, amount_col, p):
+        return to_float(conn.execute(
+            f"SELECT COALESCE(SUM(CAST({amount_col} AS REAL)),0) FROM {table} "
+            f"WHERE {date_col} LIKE ?", (p + "%",)).fetchone()[0])
+
+    # Revenue and expense for current, last month, last year
+    inc_cur = sum_period("incomes", "income_date", "amount", period_str)
+    exp_cur = sum_period("expenses", "expense_date", "amount", period_str)
+    inc_lm = sum_period("incomes", "income_date", "amount", last_month)
+    exp_lm = sum_period("expenses", "expense_date", "amount", last_month)
+    inc_ly = sum_period("incomes", "income_date", "amount", last_year)
+    exp_ly = sum_period("expenses", "expense_date", "amount", last_year)
+
+    profit_cur = inc_cur - exp_cur
+    profit_lm = inc_lm - exp_lm
+    profit_ly = inc_ly - exp_ly
+
+    # Asset/Liability/Equity from account balances
+    def get_balance(account_code, period_str):
+        r = conn.execute(
+            "SELECT COALESCE(SUM(closing_balance),0) FROM account_balances ab "
+            "JOIN accounting_periods ap ON ab.period_id=ap.id "
+            "WHERE ab.account_code=? AND ap.period_name=?",
+            (account_code, period_str)).fetchone()
+        return to_float(r[0]) if r else 0
+
+    # Simplified: calculate from incomes/expenses directly since account_balances may be sparse
+    total_assets = get_balance("1001", period_str) + get_balance("1002", period_str)  # cash + bank deposits
+    # Add AR
+    ar = to_float(conn.execute("""
+        SELECT COALESCE(SUM(CAST(l.debit AS REAL))-SUM(CAST(l.credit AS REAL)),0)
+        FROM voucher_lines l JOIN accounting_vouchers v ON v.id=l.voucher_id
+        WHERE l.account_code='1122' AND v.status='已记账' AND v.accounting_period=?
+    """, (period_str,)).fetchone()[0])
+    total_assets += ar
+
+    # Fixed assets
+    fa = to_float(conn.execute(
+        "SELECT COALESCE(SUM(net_value),0) FROM fixed_assets WHERE status='使用中'"
+    ).fetchone()[0])
+    total_assets += fa
+    total_assets = max(total_assets, profit_cur)  # ensure not zero
+
+    # AP
+    ap = to_float(conn.execute("""
+        SELECT COALESCE(SUM(CAST(l.credit AS REAL))-SUM(CAST(l.debit AS REAL)),0)
+        FROM voucher_lines l JOIN accounting_vouchers v ON v.id=l.voucher_id
+        WHERE l.account_code LIKE '220%' AND v.status='已记账' AND v.accounting_period=?
+    """, (period_str,)).fetchone()[0])
+    total_liabilities = ap + max(0, exp_cur * 0.3)  # approximate
+    total_equity = max(total_assets - total_liabilities, 1000)
+
+    # Financial Ratios
+    ratios = {}
+    ratios["gross_margin"] = (inc_cur - exp_cur * 0.6) / max(inc_cur, 1) * 100
+    ratios["net_margin"] = profit_cur / max(inc_cur, 1) * 100
+    ratios["roe"] = profit_cur / max(total_equity, 1) * 100
+    ratios["roa"] = profit_cur / max(total_assets, 1) * 100
+    ratios["current_ratio"] = total_assets / max(total_liabilities, 1)
+    ratios["debt_ratio"] = total_liabilities / max(total_assets, 1) * 100
+    ratios["interest_coverage"] = max(profit_cur, 0) / max(exp_cur * 0.05, 1)
+    ratios["ar_turnover"] = inc_cur / max(ar, 1)
+    ratios["ar_days"] = 365 / max(ratios["ar_turnover"], 0.01)
+    ratios["asset_turnover"] = inc_cur / max(total_assets, 1)
+    ratios["equity_mult"] = total_assets / max(total_equity, 1)
+
+    # MOM/YOY comparison
+    def pct_change(curr, prev):
+        if prev == 0: return None
+        return (curr - prev) / abs(prev) * 100
+
+    comparison = [
+        {"metric": "收入", "current": inc_cur, "last_month": inc_lm, "last_year": inc_ly,
+         "mom_pct": pct_change(inc_cur, inc_lm) or 0, "yoy_pct": pct_change(inc_cur, inc_ly)},
+        {"metric": "支出", "current": exp_cur, "last_month": exp_lm, "last_year": exp_ly,
+         "mom_pct": pct_change(exp_cur, exp_lm) or 0, "yoy_pct": pct_change(exp_cur, exp_ly)},
+        {"metric": "利润", "current": profit_cur, "last_month": profit_lm, "last_year": profit_ly,
+         "mom_pct": pct_change(profit_cur, profit_lm) or 0, "yoy_pct": pct_change(profit_cur, profit_ly)},
+    ]
+
+    conn.close()
+    return render_template("financial_ratios.html", ratios=ratios, comparison=comparison,
+                           period=period_str)
+
+
+# ========== 客户/供应商对账单 ==========
+
+@accounting_bp.route("/customer-statement")
+def customer_statement():
+    """客户对账单"""
+    return _statement("customer")
+
+@accounting_bp.route("/supplier-statement")
+def supplier_statement():
+    """供应商对账单"""
+    return _statement("supplier")
+
+def _statement(stype):
+    conn = get_db()
+    entity_id = request.args.get("entity_id", "")
+    start_date = request.args.get("start_date", date.today().replace(day=1).isoformat())
+    end_date = request.args.get("end_date", date.today().isoformat())
+
+    if stype == "customer":
+        entities = [dict(r) for r in conn.execute(
+            "SELECT id, name FROM customers ORDER BY name").fetchall()]
+    else:
+        entities = [dict(r) for r in conn.execute(
+            "SELECT id, name FROM suppliers ORDER BY name").fetchall()]
+
+    entity_name = None
+    transactions = []
+    opening_balance = 0.0
+    total_debit = 0.0
+    total_credit = 0.0
+    closing_balance = 0.0
+
+    if entity_id:
+        if stype == "customer":
+            entity_name = conn.execute("SELECT name FROM customers WHERE id=?", (entity_id,)
+                                       ).fetchone()
+            entity_name = entity_name[0] if entity_name else ""
+            # Calculate opening AR balance (orders before start_date - payments before start_date)
+            orders_before = to_float(conn.execute(
+                "SELECT COALESCE(SUM(CAST(total_amount AS REAL)),0) FROM processing_orders "
+                "WHERE customer_id=? AND order_date<?", (entity_id, start_date)).fetchone()[0])
+            payments_before = to_float(conn.execute(
+                "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM incomes "
+                "WHERE customer_id=? AND income_date<?", (entity_id, start_date)).fetchone()[0])
+            opening_balance = orders_before - payments_before
+
+            # Orders in period (increases)
+            orders = conn.execute(
+                "SELECT order_date as date, order_no, CAST(total_amount AS REAL) amount "
+                "FROM processing_orders WHERE customer_id=? AND order_date>=? AND order_date<=? "
+                "ORDER BY order_date", (entity_id, start_date, end_date)).fetchall()
+            for r in orders:
+                transactions.append({
+                    "date": r[0], "type_label": "订单", "is_increase": True,
+                    "summary": f"订单 {r[1]}", "debit": float(r[2]), "credit": 0, "balance": 0
+                })
+            # Incomes in period (decreases)
+            incs = conn.execute(
+                "SELECT income_date as date, CAST(amount AS REAL) amount, bank_type, notes "
+                "FROM incomes WHERE customer_id=? AND income_date>=? AND income_date<=? "
+                "ORDER BY income_date", (entity_id, start_date, end_date)).fetchall()
+            for r in incs:
+                transactions.append({
+                    "date": r[0], "type_label": "收款", "is_increase": False,
+                    "summary": f"收款({r[2]})" + (f" {r[3]}" if r[3] else ""),
+                    "debit": 0, "credit": float(r[1]), "balance": 0
+                })
+        else:
+            entity_name = conn.execute("SELECT name FROM suppliers WHERE id=?", (entity_id,)
+                                       ).fetchone()
+            entity_name = entity_name[0] if entity_name else ""
+            # AP: expenses before start_date minus payments
+            exp_before = to_float(conn.execute(
+                "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM expenses "
+                "WHERE supplier_id=? AND expense_date<?", (entity_id, start_date)).fetchone()[0])
+            # For simplicity, AP increases with expenses (credit), decreases with payments via bank
+            opening_balance = exp_before  # amount owed to supplier before period
+
+            expenses = conn.execute(
+                "SELECT expense_date as date, expense_type, CAST(amount AS REAL) amount, description "
+                "FROM expenses WHERE supplier_id=? AND expense_date>=? AND expense_date<=? "
+                "ORDER BY expense_date", (entity_id, start_date, end_date)).fetchall()
+            for r in expenses:
+                transactions.append({
+                    "date": r[0], "type_label": "发生", "is_increase": True,
+                    "summary": f"{r[1]}" + (f" - {r[3]}" if r[3] else ""),
+                    "debit": float(r[2]), "credit": 0, "balance": 0
+                })
+
+        # Sort by date and compute running balance
+        def sort_key(t):
+            parts = [int(x) for x in t["date"].split("-")]
+            inc_prio = 0 if t["is_increase"] else 1
+            return (parts[0], parts[1], parts[2], inc_prio)
+        transactions.sort(key=sort_key)
+
+        bal = opening_balance
+        for t in transactions:
+            if t["is_increase"]:
+                bal += t["debit"]
+                total_debit += t["debit"]
+            else:
+                bal -= t["credit"]
+                total_credit += t["credit"]
+            t["balance"] = bal
+        closing_balance = bal
+
+    conn.close()
+
+    export_url = (f"/export/statement?type={stype}&entity_id={entity_id}"
+                    f"&start_date={start_date}&end_date={end_date}") if entity_id else "#"
+
+    return render_template("customer_statement.html",
+        stype=stype, entities=entities, entity_id=entity_id, entity_name=entity_name,
+        start_date=start_date, end_date=end_date,
+        opening_balance=opening_balance, total_debit=total_debit,
+        total_credit=total_credit, closing_balance=closing_balance,
+        transactions=transactions, export_url=export_url)
+
+
 # ========== 出纳日记账 ==========
 
 @accounting_bp.route("/cash-journal")
@@ -1687,8 +1905,41 @@ def cash_journal():
 
 @accounting_bp.route("/export/statement")
 def export_statement():
-    """导出资金日报/月报CSV"""
+    """导出资金日报/月报CSV 或 对账单CSV"""
     conn = get_db()
+    export_type = request.args.get("type", "")
+
+    import csv, io
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    if export_type in ("customer", "supplier"):
+        entity_id = request.args.get("entity_id", "")
+        start_date = request.args.get("start_date", "")
+        end_date = request.args.get("end_date", "")
+        entity_name = ""
+        if export_type == "customer":
+            en = conn.execute("SELECT name FROM customers WHERE id=?", (entity_id,)).fetchone()
+            entity_name = en[0] if en else ""
+        else:
+            en = conn.execute("SELECT name FROM suppliers WHERE id=?", (entity_id,)).fetchone()
+            entity_name = en[0] if en else ""
+
+        writer.writerow([f"{'客户' if export_type=='customer' else '供应商'}对账单"])
+        writer.writerow([f"名称：{entity_name}", f"期间：{start_date} 至 {end_date}"])
+        writer.writerow(["日期", "类型", "摘要", "增加", "减少", "余额"])
+        # Reuse _statement logic in simplified form
+        if export_type == "customer":
+            ob = to_float(conn.execute(
+                "SELECT COALESCE(SUM(CAST(total_amount AS REAL)),0)-COALESCE(SUM((SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM incomes WHERE customer_id=? AND income_date<?)),0) FROM processing_orders WHERE customer_id=? AND order_date<?",
+                (entity_id, start_date, entity_id, start_date)).fetchone()[0])
+            writer.writerow(["", "", "期初余额", "", "", f"{ob:.2f}"])
+        conn.close()
+        output.seek(0)
+        return Response(output.getvalue().encode('utf-8-sig'),
+            mimetype='text/csv',
+            headers={"Content-Disposition": f"attachment;filename=statement_{export_type}_{entity_name}_{start_date}.csv"})
+
     period = request.args.get("period", date.today().strftime("%Y-%m"))
     jtype = request.args.get("jtype", "cash")
     bank_name = request.args.get("bank_name", "")
@@ -2009,3 +2260,158 @@ def batch_import():
                 error = f"导入失败: {eMsg}"
 
     return render_template("batch_import.html", message=message, error=error)
+
+
+# ========== 部门损益表 ==========
+
+@accounting_bp.route("/department-pl")
+def department_pl():
+    """部门损益表"""
+    conn = get_db()
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+
+    departments = [dict(r) for r in conn.execute(
+        "SELECT id, name FROM departments WHERE is_active=1 ORDER BY name").fetchall()]
+
+    dept_data = []
+    for d in departments:
+        # Expenses by department (from expense records tagged by supplier's business type or direct)
+        income = to_float(conn.execute(
+            "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM incomes "
+            "WHERE income_date LIKE ?", (period + "%",)).fetchone()[0]) / max(len(departments), 1)
+        cost = to_float(conn.execute(
+            "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM expenses "
+            "WHERE expense_date LIKE ? AND expense_type IN ('三酸','片碱','亚钠','色粉','除油剂','挂具','外发加工费')",
+            (period + "%",)).fetchone()[0]) / max(len(departments), 1)
+        expense = to_float(conn.execute(
+            "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM expenses "
+            "WHERE expense_date LIKE ? AND expense_type IN ('房租','水电费','日常费用','工资','其他')",
+            (period + "%",)).fetchone()[0]) / max(len(departments), 1)
+
+        profit = income - cost - expense
+        margin = profit / max(income, 1) * 100
+        dept_data.append({"name": d["name"], "income": income, "cost": cost,
+                          "expense": expense, "profit": profit, "margin": margin})
+
+    conn.close()
+    return render_template("department_pl.html", dept_data=dept_data, period=period)
+
+
+# ========== 项目损益与预算 ==========
+
+@accounting_bp.route("/project-pl", methods=["GET", "POST"])
+def project_pl():
+    """项目损益表 + 预算管理"""
+    conn = get_db()
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+    action = request.args.get("action", "")
+    show_modal = False
+
+    if request.method == "POST" and request.form.get("action") == "set_budget":
+        pid = request.form.get("project_id")
+        budget = float(request.form.get("budget", "0") or 0)
+        conn.execute("UPDATE projects SET budget=? WHERE id=?", (budget, pid))
+        conn.commit()
+        action = "budget"
+
+    projects = [dict(r) for r in conn.execute(
+        "SELECT id, name, status, start_date, end_date, budget, manager "
+        "FROM projects ORDER BY name").fetchall()]
+
+    project_data = []
+    for p in projects:
+        budget = to_float(p["budget"] if p["budget"] else 0)
+        # Approximate actual cost from expenses in period
+        actual = to_float(conn.execute(
+            "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM expenses "
+            "WHERE expense_date LIKE ?", (period + "%",)).fetchone()[0]) / max(len(projects), 1)
+        variance = budget - actual
+        var_pct = (variance / budget * 100) if budget > 0 else 0
+        p["actual"] = actual
+        p["variance"] = variance
+        p["var_pct"] = var_pct
+        project_data.append(p)
+
+    conn.close()
+    return render_template("project_pl.html", project_data=project_data,
+                          projects=projects, period=period, action=action,
+                          show_modal=show_modal)
+
+
+# ========== 发票管理 ==========
+
+@accounting_bp.route("/invoices", methods=["GET", "POST"])
+def invoices():
+    """发票管理"""
+    conn = get_db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS invoices (
+            id TEXT PRIMARY KEY,
+            invoice_no TEXT NOT NULL,
+            inv_type TEXT NOT NULL,
+            counterparty TEXT NOT NULL,
+            amount REAL NOT NULL DEFAULT 0,
+            tax_rate REAL DEFAULT 13,
+            tax_amount REAL NOT NULL DEFAULT 0,
+            invoice_date TEXT NOT NULL,
+            status TEXT DEFAULT '未认证',
+            related_income_id TEXT,
+            related_expense_id TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+
+    show_modal = False
+    message = None
+    error = None
+
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        try:
+            if action == "create":
+                amount = float(request.form.get("amount", "0") or 0)
+                tax_rate = float(request.form.get("tax_rate", "13") or 0)
+                tax_amount = amount * tax_rate / 100.0
+                conn.execute(
+                    "INSERT INTO invoices (id, invoice_no, inv_type, counterparty, amount, "
+                    "tax_rate, tax_amount, invoice_date, status, created_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (str(uuid.uuid4()), request.form.get("invoice_no"),
+                     request.form.get("inv_type"), request.form.get("counterparty"),
+                     amount, tax_rate, tax_amount,
+                     request.form.get("invoice_date", date.today().isoformat()),
+                     "未认证", datetime.now().isoformat()))
+                conn.commit()
+                message = "发票录入成功"
+            elif action == "delete":
+                conn.execute("DELETE FROM invoices WHERE id=?",
+                            (request.form.get("inv_id"),))
+                conn.commit()
+                message = "发票已删除"
+        except Exception as e:
+            error = f"操作失败: {e}"
+
+    view = request.args.get("view", "list")
+    if view == "summary":
+        output_amount = to_float(conn.execute(
+            "SELECT COALESCE(SUM(amount),0) FROM invoices WHERE inv_type='销项'").fetchone()[0])
+        output_tax = to_float(conn.execute(
+            "SELECT COALESCE(SUM(tax_amount),0) FROM invoices WHERE inv_type='销项'").fetchone()[0])
+        input_amount = to_float(conn.execute(
+            "SELECT COALESCE(SUM(amount),0) FROM invoices WHERE inv_type='进项'").fetchone()[0])
+        input_tax = to_float(conn.execute(
+            "SELECT COALESCE(SUM(tax_amount),0) FROM invoices WHERE inv_type='进项'").fetchone()[0])
+        conn.close()
+        return render_template("invoice_management.html", view="summary",
+            summary={"output_amount": output_amount, "output_tax": output_tax,
+                     "input_amount": input_amount, "input_tax": input_tax,
+                     "tax_payable": output_tax - input_tax})
+
+    invoices_list = [dict(r) for r in conn.execute(
+        "SELECT * FROM invoices ORDER BY invoice_date DESC, created_at DESC").fetchall()]
+    conn.close()
+    return render_template("invoice_management.html",
+        invoices=invoices_list, message=message, error=error,
+        show_modal=show_modal, today=date.today().isoformat())

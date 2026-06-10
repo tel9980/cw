@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>部门损益表 - 氧化加工厂财务系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
+        .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+        .header { background: #1890ff; color: white; padding: 16px 20px; margin-bottom: 20px; }
+        .header h1 { font-size: 22px; display: flex; align-items: center; justify-content: space-between; }
+        .header a { color: white; font-size: 14px; text-decoration: none; opacity: 0.85; }
+        .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .filter-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-bottom: 20px; }
+        .filter-bar label { font-size: 13px; color: #666; display: block; }
+        .filter-bar select, .filter-bar input { padding: 8px 12px; border: 1px solid #d9d9d9; border-radius: 4px; }
+        .btn { display: inline-block; padding: 9px 18px; background: #1890ff; color: white; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; font-size: 14px; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #fafafa; font-weight: 600; color: #555; }
+        tr:hover { background: #f5f5f5; }
+        .num { text-align: right; }
+        .positive { color: #52c41a; }
+        .negative { color: #f5222d; }
+        .budget-bar { display: inline-block; height: 16px; border-radius: 3px; background: #1890ff; vertical-align: middle; margin-right: 6px; }
+        .budget-bg { display: inline-block; width: 100px; height: 16px; background: #f0f0f0; border-radius: 3px; vertical-align: middle; }
+        .ratio-warn { color: #faad14; }
+        .ratio-danger { color: #f5222d; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <h1>部门损益表 <a href="/">← 返回首页</a></h1>
+        </div>
+    </div>
+    <div class="container">
+        <div class="card">
+            <form method="GET" class="filter-bar">
+                <div>
+                    <label>会计期间</label>
+                    <input type="month" name="period" value="{{ period }}">
+                </div>
+                <button type="submit" class="btn">查询</button>
+            </form>
+        </div>
+
+        {% if dept_data %}
+        <div class="card">
+            <h2>各部门损益汇总 ({{ period }})</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>部门</th>
+                        <th class="num">收入</th>
+                        <th class="num">成本</th>
+                        <th class="num">费用</th>
+                        <th class="num">利润</th>
+                        <th class="num">利润率</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for d in dept_data %}
+                    <tr>
+                        <td><strong>{{ d.name }}</strong></td>
+                        <td class="num">{{ "%.2f"|format(d.income) }}</td>
+                        <td class="num">{{ "%.2f"|format(d.cost) }}</td>
+                        <td class="num">{{ "%.2f"|format(d.expense) }}</td>
+                        <td class="num {% if d.profit >= 0 %}positive{% else %}negative{% endif %}">
+                            <strong>{{ "%.2f"|format(d.profit) }}</strong>
+                        </td>
+                        <td class="num">{{ "%.1f"|format(d.margin) }}%</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="card">
+            <p style="color:#999; text-align:center; padding:20px;">暂无部门数据，请先在会计科目中设置部门辅助核算</p>
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>

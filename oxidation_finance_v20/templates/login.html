@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 - 氧化加工厂财务系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+            min-height: 100vh; display: flex; align-items: center; justify-content: center;
+        }
+        .login-card {
+            background: white; border-radius: 12px; box-shadow: 0 8px 40px rgba(0,0,0,0.2);
+            padding: 40px; width: 400px; max-width: 90%;
+        }
+        .login-card h1 { font-size: 22px; color: #333; margin-bottom: 8px; text-align: center; }
+        .login-card .subtitle { font-size: 14px; color: #999; margin-bottom: 30px; text-align: center; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 6px; font-weight: 500; color: #555; font-size: 14px; }
+        .form-group input {
+            width: 100%; padding: 12px 14px; border: 1px solid #d9d9d9;
+            border-radius: 6px; font-size: 15px; transition: border-color 0.2s;
+        }
+        .form-group input:focus { outline: none; border-color: #1890ff; box-shadow: 0 0 0 3px rgba(24,144,255,0.15); }
+        .btn-login {
+            width: 100%; padding: 12px; background: #1890ff; color: white; border: none;
+            border-radius: 6px; font-size: 16px; cursor: pointer; transition: background 0.2s;
+        }
+        .btn-login:hover { background: #40a9ff; }
+        .error-msg {
+            background: #fff2f0; border: 1px solid #ffccc7; color: #f5222d;
+            padding: 10px 14px; border-radius: 6px; margin-bottom: 20px; font-size: 14px;
+        }
+        .info-box {
+            background: #f6ffed; border: 1px solid #b7eb8f; padding: 14px;
+            border-radius: 6px; margin-top: 24px; font-size: 13px; color: #555; line-height: 1.8;
+        }
+        .info-box strong { color: #333; }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <h1>氧化加工厂财务系统</h1>
+        <p class="subtitle">V3.0 · 企业级财务管理系统</p>
+
+        {% if error %}
+        <div class="error-msg">{{ error }}</div>
+        {% endif %}
+
+        <form method="POST">
+            <div class="form-group">
+                <label>用户名</label>
+                <input type="text" name="username" placeholder="请输入用户名" required autofocus>
+            </div>
+            <div class="form-group">
+                <label>密码</label>
+                <input type="password" name="password" placeholder="请输入密码" required>
+            </div>
+            <button type="submit" class="btn-login">登 录</button>
+        </form>
+
+        <div class="info-box">
+            <strong>默认管理员账号：</strong><br>
+            用户名：admin<br>
+            密码：admin123
+        </div>
+    </div>
+</body>
+</html>

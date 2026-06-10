@@ -41,15 +41,29 @@
 <body>
     <div class="header">
         <div class="container">
-            <h1>氧化加工厂财务系统 V2.0</h1>
+            <h1>氧化加工厂财务系统 V3.0</h1>
         </div>
     </div>
     <div class="nav">
-        <div class="container">
-            <a href="/">首页</a>
-            <a href="/orders">订单</a>
-            <a href="/customers">客户</a>
-            <a href="/reports">报表</a>
+        <div class="container" style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <a href="/">首页</a>
+                <a href="/orders">订单</a>
+                <a href="/customers">客户</a>
+                <a href="/reports">报表</a>
+                <a href="/chart-of-accounts">会计科目</a>
+                <a href="/vouchers">会计凭证</a>
+                <a href="/accounting-books">会计账簿</a>
+            </div>
+            <div style="display:flex; align-items:center; gap:15px;">
+                {% if session.user %}
+                <span style="color:#666; font-size:14px;">
+                    当前用户: <strong>{{ session.user.display_name }}</strong>
+                    <span style="background:#e6f7ff; color:#1890ff; padding:2px 8px; border-radius:10px; font-size:12px; margin-left:4px;">{{ session.user.role }}</span>
+                </span>
+                <a href="/logout" style="color:#f5222d; font-size:14px;">退出登录</a>
+                {% endif %}
+            </div>
         </div>
     </div>
     <div class="container">

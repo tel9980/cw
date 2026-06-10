@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>项目损益与预算 - 氧化加工厂财务系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
+        .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+        .header { background: #1890ff; color: white; padding: 16px 20px; margin-bottom: 20px; }
+        .header h1 { font-size: 22px; display: flex; align-items: center; justify-content: space-between; }
+        .header a { color: white; font-size: 14px; text-decoration: none; opacity: 0.85; }
+        .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .card h2 { font-size: 18px; margin-bottom: 15px; color: #333; }
+        .filter-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-bottom: 20px; }
+        .filter-bar label { font-size: 13px; color: #666; display: block; }
+        .filter-bar select, .filter-bar input { padding: 8px 12px; border: 1px solid #d9d9d9; border-radius: 4px; }
+        .btn { display: inline-block; padding: 9px 18px; background: #1890ff; color: white; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; font-size: 14px; }
+        .btn-warning { background: #faad14; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #fafafa; font-weight: 600; color: #555; }
+        tr:hover { background: #f5f5f5; }
+        .num { text-align: right; }
+        .positive { color: #52c41a; }
+        .negative { color: #f5222d; }
+        .budget-bar { display: inline-block; height: 16px; border-radius: 3px; vertical-align: middle; }
+        .budget-bg { display: inline-block; width: 120px; height: 16px; background: #f0f0f0; border-radius: 3px; vertical-align: middle; margin: 0 6px; }
+        .modal-bg { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 999; justify-content: center; align-items: center; }
+        .modal-bg.show { display: flex; }
+        .modal { background: white; padding: 24px; border-radius: 8px; width: 400px; max-width: 90%; }
+        .modal h3 { margin-bottom: 16px; }
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; margin-bottom: 4px; font-size: 13px; color: #666; }
+        .form-group input, .form-group select { width: 100%; padding: 8px 10px; border: 1px solid #d9d9d9; border-radius: 4px; }
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+        .tag-active { background: #f6ffed; color: #52c41a; }
+        .tag-done { background: #f0f5ff; color: #1890ff; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <h1>项目损益与预算 <a href="/">← 返回首页</a></h1>
+        </div>
+    </div>
+    <div class="container">
+        {% if action == "budget" %}
+        <!-- 预算管理页面 -->
+        <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h2>项目预算管理</h2>
+                <button class="btn" onclick="openBudgetModal()">+ 设置预算</button>
+            </div>
+        </div>
+        {% for p in projects %}
+        <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:start;">
+                <div>
+                    <strong>{{ p.name }}</strong>
+                    <span class="tag {% if p.status == '进行中' %}tag-active{% else %}tag-done{% endif %}">{{ p.status }}</span>
+                    <div style="color:#999; font-size:13px; margin-top:4px;">{{ p.start_date or '' }} ~ {{ p.end_date or '' }} | 负责人: {{ p.manager or '-' }}</div>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-size:13px; color:#999;">预算: <strong>{{ "%.2f"|format(p.budget) }}</strong></div>
+                    {% if p.actual > 0 %}
+                    <div style="font-size:13px; color:#999; margin-top:2px;">实际: <strong>{{ "%.2f"|format(p.actual) }}</strong></div>
+                    <div class="budget-bg" style="margin-top:4px;">
+                        <div class="budget-bar" style="width:{{ [p.actual/p.budget*100, 100]|min if p.budget > 0 else 0 }}%; background: {% if p.actual > p.budget %}#f5222d{% elif p.actual > p.budget*0.9 %}#faad14{% else %}#52c41a{% endif %};"></div>
+                    </div>
+                    <div style="font-size:12px; margin-top:2px; color: {% if p.actual > p.budget %}#f5222d{% elif p.actual > p.budget*0.9 %}#faad14{% else %}#52c41a{% endif %};">
+                        {{ "%.1f"|format(p.actual / p.budget * 100) if p.budget > 0 else 0 }}% 使用率
+                        {% if p.actual > p.budget %}(超预算!){% endif %}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+
+        {% else %}
+        <!-- 项目损益表 -->
+        <div class="card">
+            <form method="GET" class="filter-bar">
+                <div>
+                    <label>会计期间</label>
+                    <input type="month" name="period" value="{{ period }}">
+                </div>
+                <button type="submit" class="btn">查询</button>
+                <a href="/project-pl?action=budget" class="btn btn-warning">预算管理</a>
+            </form>
+        </div>
+        {% if project_data %}
+        <div class="card">
+            <h2>各项目损益 ({{ period }})</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>项目</th>
+                        <th class="num">预算</th>
+                        <th class="num">实际成本</th>
+                        <th class="num">差异</th>
+                        <th class="num">差异率</th>
+                        <th class="num">状态</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in project_data %}
+                    <tr>
+                        <td><strong>{{ p.name }}</strong></td>
+                        <td class="num">{{ "%.2f"|format(p.budget) }}</td>
+                        <td class="num">{{ "%.2f"|format(p.actual) }}</td>
+                        <td class="num {% if p.variance >= 0 %}positive{% else %}negative{% endif %}">
+                            {{ "%+.2f"|format(p.variance) }}
+                        </td>
+                        <td class="num">{{ "%.1f"|format(p.var_pct) }}%</td>
+                        <td class="num">
+                            {% if p.actual > p.budget %}
+                            <span style="color:#f5222d; font-weight:bold;">超预算</span>
+                            {% elif p.actual > p.budget * 0.9 %}
+                            <span style="color:#faad14; font-weight:bold;">接近预算</span>
+                            {% else %}
+                            <span style="color:#52c41a;">正常</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+        {% endif %}
+
+        <!-- 预算设置弹窗 -->
+        <div class="modal-bg" id="budgetModal">
+            <div class="modal">
+                <h3>设置项目预算</h3>
+                <form method="POST" action="/project-pl">
+                    <input type="hidden" name="action" value="set_budget">
+                    <div class="form-group">
+                        <label>项目</label>
+                        <select name="project_id">
+                            {% for p in projects %}
+                            <option value="{{ p.id }}">{{ p.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>预算金额</label>
+                        <input type="number" name="budget" step="0.01" placeholder="0.00" required>
+                    </div>
+                    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:16px;">
+                        <button type="button" class="btn" style="background:#999;" onclick="closeBudgetModal()">取消</button>
+                        <button type="submit" class="btn">保存</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <script>
+            function openBudgetModal() { document.getElementById('budgetModal').classList.add('show'); }
+            function closeBudgetModal() { document.getElementById('budgetModal').classList.remove('show'); }
+            {% if show_modal %}
+            setTimeout(openBudgetModal, 100);
+            {% endif %}
+        </script>
+    </div>
+</body>
+</html>

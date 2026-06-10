@@ -10,7 +10,7 @@ import sys
 import logging
 from pathlib import Path
 from datetime import date, datetime
-from flask import Flask, request, g, render_template, redirect
+from flask import Flask, request, session, g, render_template, redirect, url_for
 
 from routes.helpers import DB_PATH, get_db, request_stats
 from routes import register_all_blueprints
@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 # 创建Flask应用
 app = Flask(__name__)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
+app.secret_key = "oxidation_finance_v30_secret_2024"
 
 # 注册所有路由蓝图
 register_all_blueprints(app)
@@ -30,11 +31,20 @@ register_all_blueprints(app)
 
 # ========== 中间件 ==========
 
+# 不需要登录的公开路由
+PUBLIC_ROUTES = {"main.login", "main.logout", "static"}
+
+
 @app.before_request
 def before_request():
-    """请求前性能计时"""
+    """请求前认证检查和性能计时"""
     g.start_time = time.time()
     g.conn = get_db()
+
+    # 登录认证检查
+    if request.endpoint and request.endpoint not in PUBLIC_ROUTES:
+        if "user" not in session:
+            return redirect(url_for("main.login", next=request.url))
 
 
 @app.after_request
@@ -119,18 +129,29 @@ def create_templates():
 <body>
     <div class="header">
         <div class="container">
-            <h1>氧化加工厂财务系统 V2.2</h1>
+            <h1>氧化加工厂财务系统 V3.0</h1>
         </div>
     </div>
     <div class="nav">
-        <div class="container">
-            <a href="/">首页</a>
-            <a href="/orders">订单</a>
-            <a href="/customers">客户</a>
-            <a href="/reports">报表</a>
-            <a href="/chart-of-accounts">会计科目</a>
-            <a href="/vouchers">会计凭证</a>
-            <a href="/accounting-books">会计账簿</a>
+        <div class="container" style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <a href="/">首页</a>
+                <a href="/orders">订单</a>
+                <a href="/customers">客户</a>
+                <a href="/reports">报表</a>
+                <a href="/chart-of-accounts">会计科目</a>
+                <a href="/vouchers">会计凭证</a>
+                <a href="/accounting-books">会计账簿</a>
+            </div>
+            <div style="display:flex; align-items:center; gap:15px;">
+                {% if session.user %}
+                <span style="color:#666; font-size:14px;">
+                    当前用户: <strong>{{ session.user.display_name }}</strong>
+                    <span style="background:#e6f7ff; color:#1890ff; padding:2px 8px; border-radius:10px; font-size:12px; margin-left:4px;">{{ session.user.role }}</span>
+                </span>
+                <a href="/logout" style="color:#f5222d; font-size:14px;">退出登录</a>
+                {% endif %}
+            </div>
         </div>
     </div>
     <div class="container">

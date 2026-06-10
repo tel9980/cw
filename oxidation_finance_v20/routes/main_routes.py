@@ -3,12 +3,66 @@
 """主页面路由：首页、订单、客户"""
 
 import uuid
+import hashlib
 from datetime import date, datetime
-from flask import Blueprint, render_template, request, redirect, url_for
+from flask import Blueprint, render_template, request, redirect, url_for, session
 
 from routes.helpers import get_db, to_float, convert_rows_to_dicts
 
 main_bp = Blueprint('main', __name__)
+
+
+@main_bp.route("/login", methods=["GET", "POST"])
+def login():
+    """用户登录"""
+    error = None
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "").strip()
+        if not username or not password:
+            error = "请输入用户名和密码"
+        else:
+            conn = get_db()
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL,
+                    password TEXT NOT NULL, role TEXT NOT NULL DEFAULT '记账会计',
+                    is_active INTEGER DEFAULT 1, created_at TEXT NOT NULL
+                )
+            """)
+            # Ensure default admin
+            exist = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+            if exist == 0:
+                conn.execute(
+                    "INSERT INTO users (id, username, password, role, is_active, created_at) VALUES (?,?,?,?,?,?)",
+                    (str(uuid.uuid4()), "admin",
+                     hashlib.sha256("admin123".encode()).hexdigest(),
+                     "管理员", 1, datetime.now().isoformat()))
+                conn.commit()
+
+            pwd_hash = hashlib.sha256(password.encode()).hexdigest()
+            user = conn.execute(
+                "SELECT id, username, role FROM users WHERE username=? AND password=? AND is_active=1",
+                (username, pwd_hash)
+            ).fetchone()
+            conn.close()
+
+            if user:
+                session["user"] = {"id": user[0], "username": user[1],
+                                    "display_name": user[1], "role": user[2]}
+                next_url = request.args.get("next", "/")
+                return redirect(next_url)
+            else:
+                error = "用户名或密码错误，或账号已被禁用"
+
+    return render_template("login.html", error=error)
+
+
+@main_bp.route("/logout")
+def logout():
+    """退出登录"""
+    session.pop("user", None)
+    return redirect(url_for("main.login"))
 
 
 @main_bp.route("/")
