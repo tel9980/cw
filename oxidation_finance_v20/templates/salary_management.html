@@ -134,6 +134,7 @@
                         <input type="hidden" name="period" value="{{ period }}">
                         <button type="submit" class="btn btn-success" onclick="return confirm('确认生成 {{ period }} 工资表？将覆盖已有记录。')">生成当月工资表</button>
                     </form>
+                    <a href="/export/xls/salary?period={{ period }}" class="btn btn-warning" style="margin-left:5px;">导出Excel</a>
                 </form>
             </div>
 

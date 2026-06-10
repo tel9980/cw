@@ -70,8 +70,9 @@
                         <label><input type="checkbox" id="selectAll" onclick="document.querySelectorAll('.check-item:not(:disabled)').forEach(c=>c.checked=this.checked)"> 全选</label>
                     </div>
                     <div style="display:flex; gap:10px;">
-                        {% if status_filter == '草稿' %}
+                        {% if status_filter in ('草稿', '已驳回') %}
                         <button type="submit" name="batch_action" value="submit_review" class="btn btn-warning" onclick="return confirmSubmit()">批量提交审核</button>
+                        <button type="button" class="btn btn-danger" onclick="batchDelete()">批量删除</button>
                         {% elif status_filter == '待审核' %}
                         <button type="submit" name="batch_action" value="approve" class="btn btn-success" onclick="return confirmSubmit()">批量审核</button>
                         <button type="submit" name="batch_action" value="reject" class="btn btn-danger" onclick="return confirmSubmit()">批量驳回</button>
@@ -193,6 +194,22 @@
             function rejectVoucher(vid) {
                 document.getElementById('rejectVoucherId').value = vid;
                 document.getElementById('rejectModal').classList.add('show');
+            }
+            function batchDelete() {
+                var checked = document.querySelectorAll('.check-item:checked');
+                if (checked.length === 0) { alert('请至少选择一条凭证'); return; }
+                if (!confirm('确定删除选中的 ' + checked.length + ' 条凭证？此操作不可恢复！')) return;
+                var ids = Array.from(checked).map(c => c.value);
+                var form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '/vouchers/batch-delete';
+                ids.forEach(function(id) {
+                    var inp = document.createElement('input');
+                    inp.type = 'hidden'; inp.name = 'voucher_ids'; inp.value = id;
+                    form.appendChild(inp);
+                });
+                document.body.appendChild(form);
+                form.submit();
             }
             {% if show_reject %}document.getElementById('rejectModal').classList.add('show');{% endif %}
         </script>

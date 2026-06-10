@@ -79,7 +79,7 @@ def chart_of_accounts():
         accounts=accounts, stats=stats,
         departments=departments, projects=projects,
         department_count=len(departments), project_count=len(projects),
-        message=message, error=error,
+        message=message, error=error, search_term=request.args.get("search", ""),
     )
 
 
@@ -3241,3 +3241,157 @@ def _entity_profile(entity_id, etype):
         entity=entity, etype=etype, stats=stats, aging=aging,
         recent_orders=recent_orders, recent_transactions=recent_transactions,
         this_year=this_year, today=today_str)
+
+
+# ========== Excel 导出 ==========
+
+@accounting_bp.route("/export/xls/<report_type>")
+def export_xls(report_type):
+    """导出报表为 .xls 格式（HTML表格，Excel可打开）"""
+    conn = get_db()
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+
+    if report_type == "salary":
+        records = [dict(r) for r in conn.execute(
+            "SELECT * FROM salary_records WHERE period=? ORDER BY emp_name", (period,)).fetchall()]
+        html = """<html><meta charset='utf-8'><body>
+        <h2>工资表 - """ + period + """</h2>
+        <table border=1 cellpadding=4 cellspacing=0>
+        <tr style='background:#f0f0f0'><th>员工</th><th>基本工资</th><th>加班费</th><th>奖金</th><th>应发</th><th>社保个人</th><th>个税</th><th>实发</th></tr>"""
+        for r in records:
+            html += f"<tr><td>{r['emp_name']}</td><td align=right>{float(r['base_salary']):.2f}</td><td align=right>{float(r['overtime']):.2f}</td><td align=right>{float(r['bonus']):.2f}</td><td align=right>{float(r['gross']):.2f}</td><td align=right>{float(r['social_personal']):.2f}</td><td align=right>{float(r['tax']):.2f}</td><td align=right>{float(r['net']):.2f}</td></tr>"
+        html += "</table></body></html>"
+        conn.close()
+        return Response(html.encode('utf-8'), mimetype='application/vnd.ms-excel',
+            headers={"Content-Disposition": f"attachment;filename=salary_{period}.xls"})
+
+    elif report_type == "financial-reports":
+        # Simple balance sheet export
+        html = f"""<html><meta charset='utf-8'><body>
+        <h2>资产负债表 - {period}</h2>
+        <table border=1 cellpadding=4 cellspacing=0>
+        <tr style='background:#f0f0f0'><th>项目</th><th>金额</th></tr>
+        <tr><td>货币资金</td><td align=right>--</td></tr>
+        <tr><td>应收账款</td><td align=right>--</td></tr>
+        <tr><td>固定资产</td><td align=right>--</td></tr>
+        <tr style='font-weight:bold'><td>资产总计</td><td align=right>--</td></tr>
+        </table><br>
+        <h2>利润表 - {period}</h2>
+        <table border=1 cellpadding=4 cellspacing=0>
+        <tr style='background:#f0f0f0'><th>项目</th><th>金额</th></tr>"""
+        inc = to_float(conn.execute(
+            "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM incomes WHERE income_date LIKE ?",
+            (period + "%",)).fetchone()[0])
+        exp = to_float(conn.execute(
+            "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM expenses WHERE expense_date LIKE ?",
+            (period + "%",)).fetchone()[0])
+        html += f"<tr><td>营业收入</td><td align=right>{inc:.2f}</td></tr>"
+        html += f"<tr><td>营业成本</td><td align=right>{exp*.6:.2f}</td></tr>"
+        html += f"<tr style='font-weight:bold'><td>净利润</td><td align=right>{inc-exp:.2f}</td></tr>"
+        html += "</table></body></html>"
+        conn.close()
+        return Response(html.encode('utf-8'), mimetype='application/vnd.ms-excel',
+            headers={"Content-Disposition": f"attachment;filename=financial_reports_{period}.xls"})
+
+    elif report_type == "vat-return":
+        invoices = [dict(r) for r in conn.execute(
+            "SELECT * FROM invoices WHERE invoice_date LIKE ? ORDER BY inv_type, invoice_date",
+            (period + "%",)).fetchall()]
+        html = """<html><meta charset='utf-8'><body>
+        <h2>增值税申报表 - """ + period + """</h2>
+        <table border=1 cellpadding=4 cellspacing=0>
+        <tr style='background:#f0f0f0'><th>发票号码</th><th>类型</th><th>对方</th><th>金额</th><th>税额</th><th>认证状态</th></tr>"""
+        for inv in invoices:
+            html += f"<tr><td>{inv['invoice_no']}</td><td>{inv['inv_type']}</td><td>{inv['counterparty']}</td><td align=right>{float(inv['amount']):.2f}</td><td align=right>{float(inv['tax_amount']):.2f}</td><td>{inv['status']}</td></tr>"
+        html += "</table></body></html>"
+        conn.close()
+        return Response(html.encode('utf-8'), mimetype='application/vnd.ms-excel',
+            headers={"Content-Disposition": f"attachment;filename=vat_return_{period}.xls"})
+
+    elif report_type == "customer-statement":
+        entity_id = request.args.get("entity_id", "")
+        stype = request.args.get("stype", "customer")
+        start = request.args.get("start_date", "")
+        end = request.args.get("end_date", "")
+        html = f"<html><meta charset='utf-8'><body><h2>{'客户' if stype=='customer' else '供应商'}对账单 {start}~{end}</h2><table border=1 cellpadding=4><tr style='background:#f0f0f0'><th>日期</th><th>类型</th><th>摘要</th><th>金额</th></tr>"
+        if stype == "customer":
+            rows = conn.execute(
+                "SELECT order_date date, '订单' type, order_no summary, CAST(total_amount AS REAL) amount "
+                "FROM processing_orders WHERE customer_id=? AND order_date BETWEEN ? AND ? ORDER BY order_date",
+                (entity_id, start, end)).fetchall()
+            rows += conn.execute(
+                "SELECT income_date, '收款', '收款', CAST(amount AS REAL) FROM incomes WHERE customer_id=? AND income_date BETWEEN ? AND ? ORDER BY income_date",
+                (entity_id, start, end)).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT expense_date, expense_type, description, CAST(amount AS REAL) FROM expenses WHERE supplier_id=? AND expense_date BETWEEN ? AND ? ORDER BY expense_date",
+                (entity_id, start, end)).fetchall()
+        for r in rows:
+            html += f"<tr><td>{r[0]}</td><td>{r[1]}</td><td>{r[2]}</td><td align=right>{float(r[3]):.2f}</td></tr>"
+        html += "</table></body></html>"
+        conn.close()
+        return Response(html.encode('utf-8'), mimetype='application/vnd.ms-excel',
+            headers={"Content-Disposition": f"attachment;filename=statement_{start}_{end}.xls"})
+
+    conn.close()
+    return "Unknown report type", 400
+
+
+# ========== 常用摘要管理 ==========
+
+@accounting_bp.route("/common-summaries", methods=["GET", "POST"])
+def common_summaries():
+    """常用摘要管理"""
+    conn = get_db()
+    try:
+        conn.execute("ALTER TABLE system_settings ADD COLUMN common_summaries TEXT DEFAULT ''")
+    except:
+        pass
+
+    message = None
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        summaries = request.form.get("summaries", "")
+        conn.execute("DELETE FROM system_settings")
+        conn.execute("INSERT INTO system_settings (key, value) VALUES ('common_summaries', ?)",
+                    (summaries,))
+        conn.commit()
+        message = "常用摘要已更新"
+
+    row = conn.execute(
+        "SELECT value FROM system_settings WHERE key='common_summaries'").fetchone()
+    summaries_str = row["value"] if row else ""
+    summaries_list = [s.strip() for s in summaries_str.split("\n") if s.strip()]
+
+    conn.close()
+    return render_template("common_summaries.html",
+        summaries=summaries_list, summaries_str=summaries_str, message=message)
+
+
+# ========== 凭证批量删除 ==========
+
+@accounting_bp.route("/vouchers/batch-delete", methods=["POST"])
+def batch_delete_vouchers():
+    """批量删除凭证"""
+    conn = get_db()
+    ids = request.form.getlist("voucher_ids")
+    if not ids and request.form.get("voucher_ids"):
+        ids = [request.form.get("voucher_ids")]
+    try:
+        count = 0
+        for vid in ids:
+            conn.execute("DELETE FROM voucher_lines WHERE voucher_id=?", (vid,))
+            conn.execute("DELETE FROM accounting_vouchers WHERE id=?", (vid,))
+            # Audit log
+            conn.execute(
+                "INSERT INTO audit_logs (id, entity_type, entity_id, action, operator, details, created_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (str(uuid.uuid4()), "voucher", vid, "批量删除", "管理员",
+                 f"凭证ID:{vid}", datetime.now().isoformat()))
+            count += 1
+        conn.commit()
+        message = f"已删除 {count} 条凭证"
+    except Exception as e:
+        message = f"删除失败: {e}"
+    conn.close()
+    return redirect(f"/voucher-approval?status=草稿&message={message}")
