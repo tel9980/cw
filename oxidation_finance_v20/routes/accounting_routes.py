@@ -357,8 +357,85 @@ def voucher_detail(voucher_id):
     voucher = dict(voucher)
     lines = [dict(l) for l in conn.execute(
         "SELECT * FROM voucher_lines WHERE voucher_id=? ORDER BY id", (voucher_id,)).fetchall()]
+    # 附件列表
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS voucher_attachments (
+            id TEXT PRIMARY KEY, voucher_id TEXT NOT NULL,
+            filename TEXT NOT NULL, original_name TEXT NOT NULL,
+            file_size INTEGER DEFAULT 0, uploaded_by TEXT,
+            uploaded_at TEXT NOT NULL,
+            FOREIGN KEY(voucher_id) REFERENCES accounting_vouchers(id)
+        )
+    """)
+    conn.commit()
+    attachments = [dict(a) for a in conn.execute(
+        "SELECT * FROM voucher_attachments WHERE voucher_id=? ORDER BY uploaded_at DESC",
+        (voucher_id,)).fetchall()]
     conn.close()
-    return render_template("voucher_detail.html", voucher=voucher, lines=lines)
+    return render_template("voucher_detail.html", voucher=voucher, lines=lines,
+                          attachments=attachments)
+
+
+# ========== 凭证附件管理 ==========
+
+import os
+import time
+
+@accounting_bp.route("/voucher/upload-attachment/<voucher_id>", methods=["POST"])
+def upload_attachment(voucher_id):
+    """上传凭证附件"""
+    conn = get_db()
+    if "file" not in request.files:
+        conn.close()
+        return redirect(f"/vouchers/{voucher_id}")
+    
+    file = request.files["file"]
+    if file.filename == "":
+        conn.close()
+        return redirect(f"/vouchers/{voucher_id}")
+    
+    now = datetime.now().isoformat()
+    original_name = file.filename
+    # 安全的文件名
+    ext = os.path.splitext(original_name)[1].lower() if "." in original_name else ""
+    safe_name = f"{voucher_id}_{int(time.time())}{ext}"
+    
+    # 确保附件目录存在
+    upload_dir = os.path.join(os.path.dirname(__file__), "..", "attachments")
+    os.makedirs(upload_dir, exist_ok=True)
+    
+    filepath = os.path.join(upload_dir, safe_name)
+    file.save(filepath)
+    file_size = os.path.getsize(filepath)
+    
+    conn.execute(
+        """INSERT INTO voucher_attachments (id, voucher_id, filename, original_name, file_size, uploaded_by, uploaded_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (str(uuid.uuid4()), voucher_id, safe_name, original_name, file_size, "用户", now))
+    conn.commit()
+    conn.close()
+    return redirect(f"/vouchers/{voucher_id}")
+
+
+@accounting_bp.route("/voucher/delete-attachment/<attachment_id>", methods=["POST"])
+def delete_attachment(attachment_id):
+    """删除凭证附件"""
+    conn = get_db()
+    att = conn.execute("SELECT * FROM voucher_attachments WHERE id=?", (attachment_id,)).fetchone()
+    if att:
+        a = dict(att)
+        # 删除文件
+        upload_dir = os.path.join(os.path.dirname(__file__), "..", "attachments")
+        filepath = os.path.join(upload_dir, a["filename"])
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        conn.execute("DELETE FROM voucher_attachments WHERE id=?", (attachment_id,))
+        conn.commit()
+        vid = a["voucher_id"]
+        conn.close()
+        return redirect(f"/vouchers/{vid}")
+    conn.close()
+    return redirect("/vouchers")
 
 
 # ========== 会计账簿查询 ==========
@@ -833,6 +910,7 @@ DEFAULT_SETTINGS = {
     "fiscal_year_start": "01-01",
     "accounting_standard": "小企业会计准则",
     "voucher_number_rule": "prefix:记-,date_fmt:%Y%m%d,seq_digits:3,reset:daily",
+    "home_shortcuts": "vouchers:voucher-approval:quick-income:quick-expense:salary:customer-statement:alert-center:auto-voucher:financial-ratios:financial-reports",
 }
 
 
@@ -923,6 +1001,10 @@ def system_settings():
                     vn_seq_digits = request.form.get("vn_seq_digits", "3")
                     vn_reset = request.form.get("vn_reset", "daily")
                     value = f"prefix:{vn_prefix},date_fmt:{vn_date_fmt},seq_digits:{vn_seq_digits},reset:{vn_reset}"
+                elif key == "home_shortcuts":
+                    # 从表单复选框构建快捷菜单列表
+                    selected = [k[3:] for k in request.form if k.startswith("sc_") and request.form.get(k) == "1"]
+                    value = ":".join(selected) if selected else DEFAULT_SETTINGS[key]
                 else:
                     value = request.form.get(key, DEFAULT_SETTINGS[key])
                 conn.execute(
@@ -957,13 +1039,33 @@ def system_settings():
     seq_digits = int(vn_rule.get("seq_digits", "3"))
     vn_rule["preview"] = f"{prefix}{dt.now().strftime(date_fmt)}-{'1'.zfill(seq_digits)}"
 
+    # 处理首页快捷菜单选项
+    shortcut_options = [
+        {"route": "vouchers", "label": "录入凭证", "icon": "📝"},
+        {"route": "voucher-approval", "label": "审核凭证", "icon": "✅"},
+        {"route": "quick-income", "label": "快速收入", "icon": "💰"},
+        {"route": "quick-expense", "label": "快速支出", "icon": "💳"},
+        {"route": "salary", "label": "工资管理", "icon": "📊"},
+        {"route": "customer-statement", "label": "客户对账", "icon": "📋"},
+        {"route": "alert-center", "label": "预警中心", "icon": "🔔"},
+        {"route": "auto-voucher", "label": "自动凭证", "icon": "⚙️"},
+        {"route": "financial-ratios", "label": "财务分析", "icon": "📈"},
+        {"route": "financial-reports", "label": "打印报表", "icon": "🖨️"},
+        {"route": "cash-flow-projects", "label": "现金流量", "icon": "💵"},
+        {"route": "profit-carry-forward", "label": "损益结转", "icon": "🔄"},
+    ]
+    selected_shortcuts = settings.get("home_shortcuts", DEFAULT_SETTINGS["home_shortcuts"]).split(":")
+    for sc in shortcut_options:
+        sc["checked"] = sc["route"] in selected_shortcuts
+
     banks = [dict(b) for b in conn.execute(
         "SELECT DISTINCT bank_type FROM bank_accounts UNION SELECT DISTINCT bank_type FROM bank_transactions"
     ).fetchall()]
 
     conn.close()
     return render_template("system_settings.html", settings=settings,
-                           vn_rule=vn_rule, banks=banks, message=message, error=error,
+                           vn_rule=vn_rule, shortcut_options=shortcut_options,
+                           banks=banks, message=message, error=error,
                            defaults=DEFAULT_SETTINGS)
 
 
@@ -2387,10 +2489,17 @@ def user_management():
             username TEXT UNIQUE NOT NULL,
             password TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT '记账会计',
+            data_scope TEXT DEFAULT 'all',
             is_active INTEGER DEFAULT 1,
             created_at TEXT NOT NULL
         )
     """)
+    # Add data_scope column for existing tables
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN data_scope TEXT DEFAULT 'all'")
+    except:
+        pass
+    conn.commit()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS login_sessions (
             id TEXT PRIMARY KEY,
@@ -2417,10 +2526,11 @@ def user_management():
             if action == "create":
                 uid = str(uuid.uuid4())
                 pwd = hashlib.sha256(request.form.get("password", "").encode()).hexdigest()
+                data_scope = request.form.get("data_scope", "all")
                 conn.execute(
-                    "INSERT INTO users (id, username, password, role, is_active, created_at) VALUES (?,?,?,?,?,?)",
+                    "INSERT INTO users (id, username, password, role, data_scope, is_active, created_at) VALUES (?,?,?,?,?,?,?)",
                     (uid, request.form.get("username"), pwd, request.form.get("role", "记账会计"),
-                     1, datetime.now().isoformat()))
+                     data_scope, 1, datetime.now().isoformat()))
                 conn.commit()
                 message = "用户创建成功"
             elif action == "delete":
@@ -2438,7 +2548,7 @@ def user_management():
             message = f"操作失败: {e}"
 
     users_list = [dict(u) for u in conn.execute(
-        "SELECT id, username, role, is_active, created_at FROM users ORDER BY role").fetchall()]
+        "SELECT id, username, role, data_scope, is_active, created_at FROM users ORDER BY role").fetchall()]
     conn.close()
     return render_template("user_management.html", users=users_list, message=message)
 
@@ -2927,6 +3037,114 @@ def financial_reports():
     return render_template("financial_reports.html",
         balance_sheet=balance_sheet, profit_loss=profit_loss, cash_flow=cash_flow,
         period=period)
+
+
+# ========== 现金流量项目管理 ==========
+
+@accounting_bp.route("/cash-flow-projects", methods=["GET", "POST"])
+def cash_flow_projects():
+    """现金流量项目管理：项目维护 + 明细表"""
+    conn = get_db()
+    # 确保表存在
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS cash_flow_projects (
+            id TEXT PRIMARY KEY, code TEXT NOT NULL, name TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT '经营',
+            direction TEXT NOT NULL DEFAULT '流入',
+            created_at TEXT NOT NULL
+        )
+    """)
+    # 确保 voucher_lines 有 cash_flow_project_id 字段
+    try:
+        conn.execute("ALTER TABLE voucher_lines ADD COLUMN cash_flow_project_id TEXT")
+    except:
+        pass
+    conn.commit()
+
+    # 初始化默认项目
+    defaults = [
+        ("CF01","销售商品、提供劳务收到的现金","经营","流入"),
+        ("CF02","收到税费返还","经营","流入"),
+        ("CF03","收到其他与经营活动有关的现金","经营","流入"),
+        ("CF04","购买商品、接受劳务支付的现金","经营","流出"),
+        ("CF05","支付给职工以及为职工支付的现金","经营","流出"),
+        ("CF06","支付的各项税费","经营","流出"),
+        ("CF07","支付其他与经营活动有关的现金","经营","流出"),
+        ("CF11","收回投资收到的现金","投资","流入"),
+        ("CF12","取得投资收益收到的现金","投资","流入"),
+        ("CF13","购建固定资产支付的现金","投资","流出"),
+        ("CF14","投资支付的现金","投资","流出"),
+        ("CF21","吸收投资收到的现金","筹资","流入"),
+        ("CF22","取得借款收到的现金","筹资","流入"),
+        ("CF23","偿还债务支付的现金","筹资","流出"),
+        ("CF24","分配股利利润或偿付利息支付的现金","筹资","流出"),
+    ]
+    now = datetime.now().isoformat()
+    for d in defaults:
+        exist = conn.execute("SELECT id FROM cash_flow_projects WHERE code=?", (d[0],)).fetchone()
+        if not exist:
+            conn.execute("INSERT INTO cash_flow_projects (id,code,name,category,direction,created_at) VALUES (?,?,?,?,?,?)",
+                         (str(uuid.uuid4()), d[0], d[1], d[2], d[3], now))
+    conn.commit()
+
+    message = None
+    error = None
+    tab = request.args.get("tab", "list")
+
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        if action == "add":
+            code = request.form.get("code", "").strip()
+            name = request.form.get("name", "").strip()
+            category = request.form.get("category", "经营")
+            direction = request.form.get("direction", "流入")
+            if code and name:
+                conn.execute("INSERT INTO cash_flow_projects (id,code,name,category,direction,created_at) VALUES (?,?,?,?,?,?)",
+                             (str(uuid.uuid4()), code, name, category, direction, now))
+                conn.commit()
+                message = f"现金流量项目 {name} 添加成功"
+        elif action == "delete":
+            project_id = request.form.get("project_id", "")
+            conn.execute("DELETE FROM cash_flow_projects WHERE id=?", (project_id,))
+            conn.commit()
+            message = "项目已删除"
+
+    projects = [dict(p) for p in conn.execute(
+        "SELECT * FROM cash_flow_projects ORDER BY code").fetchall()]
+
+    # 明细表
+    report_period = request.args.get("period", "")
+    report_data = []
+    periods_list = [p[0] for p in conn.execute(
+        "SELECT DISTINCT accounting_period FROM accounting_vouchers ORDER BY accounting_period DESC"
+    ).fetchall()]
+
+    if tab == "report":
+        for p in projects:
+            where = "l.cash_flow_project_id=?"
+            params = [p["id"]]
+            if report_period:
+                where += " AND v.accounting_period=?"
+                params.append(report_period)
+            row = conn.execute(f"""
+                SELECT COALESCE(SUM(CASE WHEN l.debit>0 THEN CAST(l.debit AS REAL) ELSE 0 END),0) as inflow,
+                       COALESCE(SUM(CASE WHEN l.credit>0 THEN CAST(l.credit AS REAL) ELSE 0 END),0) as outflow
+                FROM voucher_lines l
+                JOIN accounting_vouchers v ON v.id=l.voucher_id
+                WHERE {where} AND v.status='已记账'
+            """, params).fetchone()
+            inflow = float(row["inflow"] or 0)
+            outflow = float(row["outflow"] or 0)
+            report_data.append({
+                "code": p["code"], "name": p["name"], "category": p["category"],
+                "inflow": inflow, "outflow": outflow, "net": inflow - outflow
+            })
+
+    conn.close()
+    return render_template("cash_flow_projects.html",
+        projects=projects, tab=tab, report_data=report_data,
+        report_period=report_period, periods=periods_list,
+        message=message, error=error)
 
 
 # ========== 摊销与预提 ==========

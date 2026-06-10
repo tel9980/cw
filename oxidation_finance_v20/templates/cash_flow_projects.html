@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>现金流量项目管理 - 氧化加工厂财务系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
+        .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+        .header { background: #1890ff; color: white; padding: 20px; margin-bottom: 20px; }
+        .header h1 { font-size: 24px; }
+        .nav { background: white; padding: 10px 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .nav a { color: #333; text-decoration: none; margin-right: 20px; padding: 5px 10px; font-size: 14px; }
+        .nav a:hover { color: #1890ff; }
+        .nav a.active { color: #1890ff; font-weight: 600; border-bottom: 2px solid #1890ff; }
+        .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .card h2 { font-size: 18px; margin-bottom: 15px; color: #333; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #fafafa; font-weight: 600; }
+        td.num, th.num { text-align: right; font-family: "SF Mono", Monaco, monospace; }
+        .btn { display: inline-block; padding: 8px 16px; background: #1890ff; color: white; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; font-size: 14px; }
+        .btn:hover { background: #40a9ff; }
+        .btn-sm { padding: 5px 12px; font-size: 12px; }
+        .btn-success { background: #52c41a; }
+        .btn-success:hover { background: #73d13d; }
+        .btn-danger { background: #f5222d; }
+        .btn-danger:hover { background: #ff4d4f; }
+        .btn-default { background: #fff; color: #333; border: 1px solid #d9d9d9; }
+        .btn-default:hover { background: #fafafa; color: #1890ff; border-color: #1890ff; }
+        .flash { padding: 12px 15px; border-radius: 4px; margin-bottom: 15px; font-size: 14px; }
+        .flash-success { background: #f6ffed; border: 1px solid #b7eb8f; color: #52c41a; }
+        .flash-error { background: #fff1f0; border: 1px solid #ffa39e; color: #f5222d; }
+        .cat-tag { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 500; }
+        .cat-经营 { background: #e6f7ff; color: #1890ff; }
+        .cat-投资 { background: #f9f0ff; color: #722ed1; }
+        .cat-筹资 { background: #f6ffed; color: #52c41a; }
+        .section { border-top: 2px solid #e8e8e8; }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: 500; font-size: 14px; }
+        .form-group input, .form-group select { width: 100%; padding: 8px 12px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: #1890ff; }
+        .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: none; z-index: 1000; }
+        .modal.show { display: flex; align-items: center; justify-content: center; }
+        .modal-content { background: white; padding: 25px; border-radius: 8px; max-width: 500px; width: 90%; }
+        .modal-content h3 { margin-bottom: 20px; }
+        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+        .tabs { display: flex; gap: 0; margin-bottom: 15px; border-bottom: 2px solid #e8e8e8; }
+        .tab { padding: 10px 20px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; font-size: 14px; color: #666; }
+        .tab:hover { color: #1890ff; }
+        .tab.active { color: #1890ff; border-bottom-color: #1890ff; font-weight: 600; }
+        .tab-content { padding: 10px 0; }
+    </style>
+</head>
+<body>
+    <div class="header"><div class="container"><h1>现金流量项目管理</h1></div></div>
+    <div class="nav"><div class="container">
+        <a href="/">首页</a><a href="/vouchers">会计凭证</a>
+        <a href="/accounting-books">会计账簿</a><a href="/financial-reports">财务报表</a>
+        <a href="/system-settings">系统设置</a>
+        <a href="/cash-flow-projects" class="active">现金流量项目</a>
+    </div></div>
+    <div class="container">
+        {% if message %}<div class="flash flash-success">{{ message }}</div>{% endif %}
+        {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+
+        <div class="card" style="padding-bottom:5px;">
+            <div class="tabs">
+                <div class="tab {% if tab=='list' %}active{% endif %}" onclick="switchTab('list')">项目列表</div>
+                <div class="tab {% if tab=='report' %}active{% endif %}" onclick="switchTab('report')">明细表</div>
+            </div>
+
+            <!-- 项目列表 -->
+            <div class="tab-content" id="tab-list" style="{% if tab!='list' %}display:none;{% endif %}">
+                <div style="margin-bottom:15px;">
+                    <button class="btn btn-sm btn-success" onclick="showAddModal()">+ 新增项目</button>
+                </div>
+                <table>
+                    <thead><tr><th>编码</th><th>项目名称</th><th>类别</th><th>方向</th><th>操作</th></tr></thead>
+                    <tbody>
+                        {% for p in projects %}
+                        <tr>
+                            <td>{{ p.code }}</td><td>{{ p.name }}</td>
+                            <td><span class="cat-tag cat-{{ p.category }}">{{ p.category }}</span></td>
+                            <td>{{ p.direction }}</td>
+                            <td>
+                                <form method="POST" style="display:inline;">
+                                    <input type="hidden" name="action" value="delete">
+                                    <input type="hidden" name="project_id" value="{{ p.id }}">
+                                    <button class="btn btn-sm btn-danger" onclick="return confirm('确认删除？')">删除</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        {% if not projects %}
+                        <tr><td colspan="5" style="text-align:center;color:#999;padding:30px;">暂无现金流量项目，请点击"新增项目"添加</td></tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 明细表 -->
+            <div class="tab-content" id="tab-report" style="{% if tab!='report' %}display:none;{% endif %}">
+                <form method="GET" style="margin-bottom:15px;">
+                    <input type="hidden" name="tab" value="report">
+                    <label>期间：</label>
+                    <select name="period" onchange="this.form.submit()">
+                        <option value="">全部</option>
+                        {% for p in periods %}
+                        <option value="{{ p }}" {% if p==report_period %}selected{% endif %}>{{ p }}</option>
+                        {% endfor %}
+                    </select>
+                </form>
+                <table>
+                    <thead><tr><th>编码</th><th>项目名称</th><th>类别</th><th class="num">本期流入</th><th class="num">本期流出</th><th class="num">净额</th></tr></thead>
+                    <tbody>
+                        {% for r in report_data %}
+                        <tr>
+                            <td>{{ r.code }}</td><td>{{ r.name }}</td>
+                            <td><span class="cat-tag cat-{{ r.category }}">{{ r.category }}</span></td>
+                            <td class="num">{% if r.inflow>0 %}{{ '%.2f'|format(r.inflow) }}{% else %}-{% endif %}</td>
+                            <td class="num">{% if r.outflow>0 %}{{ '%.2f'|format(r.outflow) }}{% else %}-{% endif %}</td>
+                            <td class="num" style="font-weight:bold;">{{ '%.2f'|format(r.net) }}</td>
+                        </tr>
+                        {% endfor %}
+                        {% if not report_data %}
+                        <tr><td colspan="6" style="text-align:center;color:#999;padding:30px;">暂无数据</td></tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 新增项目弹窗 -->
+    <div class="modal" id="addModal">
+        <div class="modal-content">
+            <h3>新增现金流量项目</h3>
+            <form method="POST">
+                <input type="hidden" name="action" value="add">
+                <div class="form-group">
+                    <label>项目编码</label>
+                    <input type="text" name="code" placeholder="如：CF01" required>
+                </div>
+                <div class="form-group">
+                    <label>项目名称</label>
+                    <input type="text" name="name" placeholder="如：销售商品收到的现金" required>
+                </div>
+                <div class="form-group">
+                    <label>类别</label>
+                    <select name="category">
+                        <option value="经营">经营活动</option>
+                        <option value="投资">投资活动</option>
+                        <option value="筹资">筹资活动</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>方向</label>
+                    <select name="direction">
+                        <option value="流入">流入</option>
+                        <option value="流出">流出</option>
+                    </select>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-default" onclick="hideAddModal()">取消</button>
+                    <button type="submit" class="btn">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function showAddModal() { document.getElementById('addModal').classList.add('show'); }
+        function hideAddModal() { document.getElementById('addModal').classList.remove('show'); }
+        function switchTab(name) {
+            window.location.href = '/cash-flow-projects?tab=' + name;
+        }
+    </script>
+</body>
+</html>

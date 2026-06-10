@@ -159,6 +159,12 @@ def index():
 
     conn.close()
 
+    # 首页快捷菜单
+    from routes.accounting_routes import get_setting
+    with get_db() as c:
+        home_sc = get_setting(c, "home_shortcuts") or "vouchers:voucher-approval:quick-income:quick-expense:salary:customer-statement:alert-center:auto-voucher:financial-ratios:financial-reports"
+    home_shortcuts = home_sc.split(":")
+
     import json
     return render_template("index.html",
         today_income=today_income, today_expense=today_expense,
@@ -173,7 +179,7 @@ def index():
         monthly_data=json.dumps(monthly_data),
         expense_cats=expense_cats,
         recent_inc=recent_inc, recent_exp=recent_exp,
-        recent_orders=recent_orders)
+        recent_orders=recent_orders, home_shortcuts=home_shortcuts)
 
 
 @main_bp.route("/orders")

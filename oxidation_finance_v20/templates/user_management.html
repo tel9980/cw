@@ -46,7 +46,7 @@ th { background:#fafafa; font-weight:600; color:#555; }
 {% if message %}<div class="flash flash-s">{{ message }}</div>{% endif %}
 <div class="card">
 <h2>新建用户</h2>
-<form method="POST">
+<form method="POST" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
 <input type="hidden" name="action" value="create">
 <div class="form-row">
 <div class="form-group"><label>用户名</label><input type="text" name="username" required></div>
@@ -56,6 +56,11 @@ th { background:#fafafa; font-weight:600; color:#555; }
 <option value="记账会计">记账会计</option><option value="出纳">出纳</option>
 <option value="审核员">审核员</option><option value="管理员">管理员</option>
 </select></div>
+<div class="form-group"><label>数据权限</label>
+<select name="data_scope">
+<option value="all">全部数据</option>
+<option value="self">仅本人数据</option>
+</select></div>
 <div><button type="submit" class="btn btn-sm">创建</button></div>
 </div>
 </form>
@@ -63,11 +68,12 @@ th { background:#fafafa; font-weight:600; color:#555; }
 <div class="card">
 <h2>用户列表 ({{ users|length }})</h2>
 <table>
-<thead><tr><th>用户名</th><th>角色</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
+<thead><tr><th>用户名</th><th>角色</th><th>数据权限</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
 <tbody>
 {% for u in users %}
 <tr><td><strong>{{ u.username }}</strong></td>
 <td><span class="tag tag-{% if u.role=='管理员' %}admin{% elif u.role=='出纳' %}cashier{% elif u.role=='审核员' %}auditor{% else %}acc{% endif %}">{{ u.role }}</span></td>
+<td>{{ '全部' if u.data_scope=='all' else '本人' }}</td>
 <td>{{ '启用' if u.is_active else '停用' }}</td>
 <td>{{ u.created_at[:10] }}</td>
 <td>

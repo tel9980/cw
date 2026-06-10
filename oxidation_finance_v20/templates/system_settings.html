@@ -169,6 +169,19 @@
                 </div>
             </div>
 
+            <div class="card">
+                <div class="section-title" style="border-top:none;margin-top:0;padding-top:0;">首页快捷菜单</div>
+                <div class="help-text" style="margin-bottom:10px;">勾选要在首页快捷操作区显示的功能入口（最多10个）</div>
+                <div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+                    {% for sc in shortcut_options %}
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;padding:4px 0;">
+                        <input type="checkbox" name="sc_{{ sc.route }}" value="1" {% if sc.checked %}checked{% endif %}>
+                        {{ sc.icon }} {{ sc.label }}
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+
             <div class="btn-group">
                 <button type="submit" class="btn">保存设置</button>
                 <a href="/" class="btn btn-default">返回首页</a>

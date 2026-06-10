@@ -149,16 +149,26 @@
             <div class="panel-hd"><h2>快捷操作</h2></div>
             <div class="panel-bd">
                 <div class="quick-grid">
-                    <a href="/vouchers" class="quick-item"><span class="icon">📝</span>录入凭证</a>
-                    <a href="/voucher-approval" class="quick-item"><span class="icon">✅</span>审核凭证</a>
-                    <a href="/quick-income" class="quick-item"><span class="icon">💰</span>快速收入</a>
-                    <a href="/quick-expense" class="quick-item"><span class="icon">💳</span>快速支出</a>
-                    <a href="/salary" class="quick-item"><span class="icon">📊</span>工资表</a>
-                    <a href="/customer-statement" class="quick-item"><span class="icon">📋</span>客户对账</a>
-                    <a href="/alert-center" class="quick-item"><span class="icon">🔔</span>预警中心</a>
-                    <a href="/auto-voucher" class="quick-item"><span class="icon">⚙️</span>自动凭证</a>
-                    <a href="/financial-ratios" class="quick-item"><span class="icon">📈</span>财务分析</a>
-                    <a href="/financial-reports" class="quick-item"><span class="icon">🖨️</span>打印报表</a>
+                    {% set all_shortcuts = {
+                        'vouchers': {'label': '录入凭证', 'icon': '📝', 'color': '#1890ff'},
+                        'voucher-approval': {'label': '审核凭证', 'icon': '✅', 'color': '#722ed1'},
+                        'quick-income': {'label': '快速收入', 'icon': '💰', 'color': '#52c41a'},
+                        'quick-expense': {'label': '快速支出', 'icon': '💳', 'color': '#f5222d'},
+                        'salary': {'label': '工资表', 'icon': '📊', 'color': '#13c2c2'},
+                        'customer-statement': {'label': '客户对账', 'icon': '📋', 'color': '#fa8c16'},
+                        'alert-center': {'label': '预警中心', 'icon': '🔔', 'color': '#eb2f96'},
+                        'auto-voucher': {'label': '自动凭证', 'icon': '⚙️', 'color': '#2f54eb'},
+                        'financial-ratios': {'label': '财务分析', 'icon': '📈', 'color': '#a0d911'},
+                        'financial-reports': {'label': '打印报表', 'icon': '🖨️', 'color': '#595959'},
+                        'cash-flow-projects': {'label': '现金流量', 'icon': '💵', 'color': '#fa541c'},
+                        'profit-carry-forward': {'label': '损益结转', 'icon': '🔄', 'color': '#eb2f96'},
+                    } %}
+                    {% for route in home_shortcuts %}
+                    {% set sc = all_shortcuts.get(route) %}
+                    {% if sc %}
+                    <a href="/{{ route }}" class="quick-item" style="background:{{ sc.color }}11;border-left:3px solid {{ sc.color }};"><span class="icon">{{ sc.icon }}</span>{{ sc.label }}</a>
+                    {% endif %}
+                    {% endfor %}
                 </div>
             </div>
         </div>
