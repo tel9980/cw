@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多栏式明细账 - 氧化加工厂财务系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .header { background: #1890ff; color: white; padding: 20px; margin-bottom: 20px; }
+        .header h1 { font-size: 22px; }
+        .nav { background: white; padding: 10px 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .nav a { color: #333; text-decoration: none; margin-right: 20px; font-size: 14px; }
+        .nav a:hover, .nav a.active { color: #1890ff; font-weight: 600; }
+        .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow-x: auto; }
+        .card h2 { font-size: 16px; margin-bottom: 15px; }
+        .filter-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 15px; }
+        .filter-bar label { font-size: 13px; }
+        .filter-bar select, .filter-bar input { padding: 6px 10px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 13px; }
+        table { border-collapse: collapse; font-size: 12px; min-width: 100%; }
+        th, td { padding: 8px 10px; border: 1px solid #e8e8e8; text-align: left; white-space: nowrap; }
+        th { background: #fafafa; font-weight: 600; color: #555; font-size: 11px; }
+        td.num { text-align: right; font-family: monospace; }
+        .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 20px; }
+        .sg { background: white; padding: 12px; border-radius: 6px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+        .sg .l { font-size: 11px; color: #888; }
+        .sg .v { font-size: 18px; font-weight: 700; margin-top: 3px; }
+        .btn { display: inline-block; padding: 7px 14px; background: #1890ff; color: white; border-radius: 4px; border: none; cursor: pointer; font-size: 13px; text-decoration: none; }
+        .btn-sm { padding: 5px 10px; font-size: 12px; }
+    </style>
+</head>
+<body>
+<div class="header"><div class="container"><h1>多栏式明细账</h1></div></div>
+<div class="nav"><div class="container">
+    <a href="/">首页</a><a href="/orders">订单</a><a href="/reports">报表</a>
+    <a href="/vouchers">凭证</a><a href="/accounting-books">会计账簿</a>
+    <a href="/multi-column-ledger" class="active">多栏账</a>
+    <a href="/fixed-assets">固定资产</a><a href="/system-settings">系统设置</a>
+</div></div>
+<div class="container">
+    <div class="filter-bar">
+        <form method="GET" style="display:flex;gap:10px;align-items:center;">
+            <label>类别：</label>
+            <select name="ltype" onchange="this.form.submit()">
+                <option value="expense" {% if ledger_type=='expense' %}selected{% endif %}>费用多栏账</option>
+                <option value="vat" {% if ledger_type=='vat' %}selected{% endif %}>应交增值税多栏账</option>
+            </select>
+            <label>期间：</label>
+            <input type="text" name="period" value="{{ period }}" style="width:100px;">
+            <button type="submit" class="btn btn-sm">查询</button>
+        </form>
+    </div>
+
+    <!-- 汇总卡片 -->
+    <div class="summary-grid">
+        {% for col in columns %}
+        <div class="sg"><div class="l">{{ col.name }}</div>
+            <div class="v" style="color:{% if col_data[col.code].net>=0 %}#52c41a{% else %}#f5222d{% endif %};">{{ '%.2f'|format(col_data[col.code].net) }}</div></div>
+        {% endfor %}
+    </div>
+
+    <!-- 细表 -->
+    <div class="card">
+        <h2>{% if ledger_type=='expense' %}费用{% else %}增值税{% endif %}多栏明细 - {{ period }}</h2>
+        <table>
+            <thead>
+                <tr><th>凭证号</th><th>日期</th><th>摘要</th><th>科目</th>
+                <th class="num">借方</th><th class="num">贷方</th></tr>
+            </thead>
+            <tbody>
+            {% for r in detail_rows %}
+            <tr><td>{{ r.voucher_no }}</td><td>{{ r.voucher_date }}</td><td>{{ r.summary }}</td><td>{{ r.account }} {{ r.name }}</td>
+                <td class="num">{{ '%.2f'|format(r.dr) if r.dr>0 else '' }}</td>
+                <td class="num">{{ '%.2f'|format(r.cr) if r.cr>0 else '' }}</td></tr>
+            {% endfor %}
+            {% if not detail_rows %}<tr><td colspan="6" style="text-align:center;color:#999;padding:20px;">暂无数据</td></tr>{% endif %}
+            </tbody>
+            {% if detail_rows %}
+            <tfoot><tr style="font-weight:bold;background:#fafafa;border-top:2px solid #333;"><td colspan="4">合计</td><td class="num">{{ '%.2f'|format(total_dr) }}</td><td class="num">{{ '%.2f'|format(total_cr) }}</td></tr></tfoot>
+            {% endif %}
+        </table>
+    </div>
+</div>
+</body>
+</html>

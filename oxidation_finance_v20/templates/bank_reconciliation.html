@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>银行对账 - 氧化加工厂财务系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f0f2f5; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .header { background: #1890ff; color: white; padding: 20px; }
+        .header h1 { font-size: 22px; }
+        .nav { background: white; padding: 0 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.06); position: sticky; top: 0; z-index: 100; }
+        .nav .container { display: flex; padding: 0; }
+        .nav a { color: #555; text-decoration: none; padding: 14px 18px; font-size: 14px; border-bottom: 2px solid transparent; }
+        .nav a:hover, .nav a.active { color: #1890ff; border-bottom-color: #1890ff; font-weight: 600; }
+        .flash { padding: 10px 15px; border-radius: 4px; margin-bottom: 12px; font-size: 13px; }
+        .flash-s { background: #f6ffed; border: 1px solid #b7eb8f; color: #52c41a; }
+        .flash-e { background: #fff1f0; border: 1px solid #ffa39e; color: #f5222d; }
+        .panel { background: white; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-bottom: 20px; overflow: hidden; }
+        .panel-hd { padding: 16px 20px; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
+        .panel-hd h2 { font-size: 16px; }
+        .panel-bd { padding: 20px; }
+        .filter-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 15px; }
+        .filter-bar label { font-size: 13px; color: #555; }
+        .filter-bar select, .filter-bar input { padding: 6px 10px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 13px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { padding: 9px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; }
+        th { background: #fafafa; font-weight: 600; color: #555; font-size: 12px; }
+        td.num, th.num { text-align: right; font-family: monospace; }
+        tr:hover { background: #fafafa; }
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; }
+        .tag-g { background: #f6ffed; color: #52c41a; }
+        .tag-r { background: #fff1f0; color: #f5222d; }
+        .tag-b { background: #e6f7ff; color: #1890ff; }
+        .tag-o { background: #fff7e6; color: #fa8c16; }
+        .btn { display: inline-block; padding: 7px 14px; background: #1890ff; color: white; border-radius: 4px; border: none; cursor: pointer; font-size: 13px; text-decoration: none; }
+        .btn:hover { background: #40a9ff; }
+        .btn-sm { padding: 5px 10px; font-size: 12px; }
+        .btn-success { background: #52c41a; }
+        .btn-success:hover { background: #73d13d; }
+        .btn-warning { background: #fa8c16; }
+        .btn-outline { background: white; color: #1890ff; border: 1px solid #1890ff; }
+        .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .summary-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+        .sc { background: white; padding: 14px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+        .sc .l { font-size: 11px; color: #888; }
+        .sc .v { font-size: 20px; font-weight: 700; margin-top: 3px; }
+        .sc .s { font-size: 11px; color: #999; margin-top: 2px; }
+        .text-green { color: #52c41a; }
+        .text-red { color: #f5222d; }
+    </style>
+</head>
+<body>
+<div class="header"><div class="container"><h1>银行对账</h1></div></div>
+<div class="nav"><div class="container">
+    <a href="/">首页</a><a href="/orders">订单</a><a href="/customers">客户</a>
+    <a href="/reports">报表</a><a href="/chart-of-accounts">会计科目</a>
+    <a href="/vouchers">会计凭证</a><a href="/accounting-books">会计账簿</a>
+    <a href="/fixed-assets">固定资产</a><a href="/bank-reconciliation" class="active">银行对账</a>
+    <a href="/system-settings">系统设置</a>
+</div></div>
+
+<div class="container">
+    {% if message %}<div class="flash flash-s">{{ message }}</div>{% endif %}
+    {% if error %}<div class="flash flash-e">{{ error }}</div>{% endif %}
+
+    <div class="panel">
+        <div class="panel-hd">
+            <h2>对账面板</h2>
+            <div style="display:flex;gap:8px;">
+                <form method="POST" style="display:contents;">
+                    <input type="hidden" name="action" value="import_bank_stmt">
+                    <input type="hidden" name="operator" value="管理员">
+                    <button class="btn btn-sm btn-outline" onclick="return confirm('导入该银行该期间所有收支为银行对账单项目？')">导入银行流水</button>
+                </form>
+                <form method="POST" style="display:contents;">
+                    <input type="hidden" name="action" value="auto_match">
+                    <input type="hidden" name="operator" value="管理员">
+                    <button class="btn btn-sm btn-success" onclick="return confirm('自动按金额+日期匹配勾稽？')">自动匹配</button>
+                </form>
+            </div>
+        </div>
+        <div class="panel-bd">
+            <div class="filter-bar">
+                <form method="GET" style="display:flex;gap:12px;align-items:center;">
+                    <label>银行账户：</label>
+                    <select name="bank_type" onchange="this.form.submit()">
+                        {% for b in bank_types %}<option value="{{ b.bank_type }}" {% if bank_type==b.bank_type %}selected{% endif %}>{{ b.bank_type }}</option>{% endfor %}
+                        {% if not bank_types %}<option>对公账户</option>{% endif %}
+                    </select>
+                    <label>期间：</label>
+                    <input type="text" name="period" value="{{ period }}" placeholder="YYYY-MM" style="width:100px;" onchange="this.form.submit()">
+                </form>
+            </div>
+
+            <!-- Summary -->
+            <div class="summary-cards">
+                <div class="sc"><div class="l">对账单未勾稽</div><div class="v text-red">{{ '%.0f'|format(bank_stmt_total) }}</div><div class="s">{{ bank_stmt|selectattr('matched','equalto',0)|list|length }} 笔</div></div>
+                <div class="sc"><div class="l">企业未勾稽收入</div><div class="v text-green">{{ '%.0f'|format(book_income_total) }}</div><div class="s">{{ book_income|length }} 笔</div></div>
+                <div class="sc"><div class="l">企业未勾稽支出</div><div class="v text-red">{{ '%.0f'|format(book_expense_total) }}</div><div class="s">{{ book_expense|length }} 笔</div></div>
+                <div class="sc"><div class="l">已勾稽</div><div class="v" style="color:#1890ff;">{{ '%.0f'|format(recon_total) }}</div><div class="s">{{ recon_items|length }} 笔</div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Unmatched items for manual reconciliation -->
+    <div class="grid2">
+        <!-- Bank Statement -->
+        <div class="panel">
+            <div class="panel-hd"><h2>银行对账单 (未勾稽)</h2></div>
+            <div class="panel-bd">
+                {% set unmatched = bank_stmt|selectattr('matched','equalto',0)|list %}
+                {% if unmatched %}
+                <table>
+                    <thead><tr><th>日期</th><th>对方</th><th class="num">金额</th><th>描述</th></tr></thead>
+                    <tbody>
+                    {% for b in unmatched %}
+                    <tr><td>{{ b.transaction_date }}</td><td>{{ b.counterparty or '-' }}</td>
+                        <td class="num">{{ '%.2f'|format(b.amount|float) }}</td>
+                        <td>{{ b.description or '-' }}</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}<div style="color:#999;text-align:center;padding:20px;">无未勾稽银行项目</div>{% endif %}
+            </div>
+        </div>
+
+        <!-- Book Items -->
+        <div class="panel">
+            <div class="panel-hd"><h2>企业账面 (未勾稽)</h2></div>
+            <div class="panel-bd">
+                {% if book_income or book_expense %}
+                <table>
+                    <thead><tr><th>类型</th><th>日期</th><th>对象</th><th class="num">金额</th></tr></thead>
+                    <tbody>
+                    {% for inc in book_income[:10] %}
+                    <tr><td><span class="tag tag-g">收入</span></td><td>{{ inc.date }}</td><td>{{ inc.name }}</td>
+                        <td class="num text-green">{{ '%.2f'|format(inc.amount) }}</td></tr>
+                    {% endfor %}
+                    {% for exp in book_expense[:10] %}
+                    <tr><td><span class="tag tag-r">支出</span></td><td>{{ exp.date }}</td><td>{{ exp.name or exp.expense_type }}</td>
+                        <td class="num text-red">{{ '%.2f'|format(exp.amount) }}</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}<div style="color:#999;text-align:center;padding:20px;">无未勾稽企业项目</div>{% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Reconciled Items -->
+    <div class="panel">
+        <div class="panel-hd"><h2>已勾稽项 ({{ recon_items|length }} 笔)</h2></div>
+        <div class="panel-bd">
+            {% if recon_items %}
+            <table>
+                <thead><tr><th>类型</th><th class="num">金额</th><th>勾稽时间</th><th>操作人</th></tr></thead>
+                <tbody>
+                {% for r in recon_items %}
+                <tr><td><span class="tag tag-b">{{ {'income':'收入','expense':'支出'}.get(r.book_item_type, r.book_item_type) }}</span></td>
+                    <td class="num">{{ '%.2f'|format(r.amount|float) }}</td>
+                    <td>{{ r.reconciled_at[:16] }}</td><td>{{ r.reconcilied_by }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}<div style="color:#999;text-align:center;padding:20px;">暂无已勾稽项，使用"导入银行流水"和"自动匹配"开始对账</div>{% endif %}
+        </div>
+    </div>
+</div>
+</body>
+</html>

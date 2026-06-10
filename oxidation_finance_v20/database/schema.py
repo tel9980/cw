@@ -423,6 +423,34 @@ def create_tables(conn: sqlite3.Connection):
         )
     """)
 
+    # 19. 银行对账记录表（记录勾稽关系）
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS bank_reconciliations (
+            id TEXT PRIMARY KEY,
+            bank_type TEXT NOT NULL,
+            period TEXT NOT NULL,
+            book_item_type TEXT NOT NULL,
+            book_item_id TEXT NOT NULL,
+            bank_item_id TEXT,
+            amount REAL NOT NULL,
+            reconciled_at TEXT NOT NULL,
+            reconciled_by TEXT DEFAULT '',
+            notes TEXT
+        )
+    """)
+
+    # 20. 凭证模板表
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS voucher_templates (
+            id TEXT PRIMARY KEY,
+            template_name TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            lines_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
     # 新增表的索引
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_accounts_type ON chart_of_accounts(account_type)"

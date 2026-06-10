@@ -1401,3 +1401,215 @@ def depreciate_fixed_assets():
     conn.commit()
     conn.close()
     return redirect("/fixed-assets")
+
+
+# ========== 凭证模板 ==========
+
+@accounting_bp.route("/voucher-templates", methods=["GET", "POST"])
+def voucher_templates():
+    """凭证模板管理"""
+    conn = get_db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS voucher_templates (
+            id TEXT PRIMARY KEY, template_name TEXT NOT NULL, summary TEXT NOT NULL,
+            lines_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+
+    message = None
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        now = datetime.now().isoformat()
+        try:
+            if action == "create":
+                name = request.form.get("template_name", "")
+                summary = request.form.get("summary", "")
+                accounts = request.form.getlist("line_account[]")
+                debits = request.form.getlist("line_debit[]")
+                credits = request.form.getlist("line_credit[]")
+                lines = []
+                for i in range(len(accounts)):
+                    d = float(debits[i] or 0); c = float(credits[i] or 0)
+                    if d > 0 or c > 0:
+                        acc = conn.execute("SELECT name FROM chart_of_accounts WHERE code=?",
+                                          (accounts[i],)).fetchone()
+                        lines.append({"code": accounts[i], "name": acc["name"] if acc else accounts[i],
+                                       "debit": d, "credit": c})
+                import json
+                conn.execute(
+                    "INSERT INTO voucher_templates (id,template_name,summary,lines_json,created_at,updated_at) VALUES (?,?,?,?,?,?)",
+                    (str(uuid.uuid4()), name, summary, json.dumps(lines, ensure_ascii=False), now, now))
+                conn.commit()
+                message = f"模板 {name} 创建成功"
+            elif action == "delete":
+                tid = request.form.get("template_id", "")
+                conn.execute("DELETE FROM voucher_templates WHERE id=?", (tid,))
+                conn.commit()
+                message = "模板已删除"
+        except Exception as e:
+            message = f"操作失败: {e}"
+
+    templates = [dict(t) for t in conn.execute(
+        "SELECT * FROM voucher_templates ORDER BY updated_at DESC").fetchall()]
+    import json
+    for t in templates:
+        t["lines"] = json.loads(t["lines_json"])
+
+    accounts_list = [dict(a) for a in conn.execute(
+        "SELECT code, name FROM chart_of_accounts WHERE is_active=1 ORDER BY code").fetchall()]
+    conn.close()
+    return render_template("voucher_templates.html", templates=templates,
+                          accounts_list=accounts_list, message=message,
+                          today=date.today().isoformat())
+
+
+# ========== 凭证批量审核/记账 ==========
+
+@accounting_bp.route("/batch-vouchers", methods=["POST"])
+def batch_vouchers():
+    """批量审核/记账"""
+    action = request.form.get("action", "")
+    voucher_ids = request.form.getlist("voucher_ids[]")
+    conn = get_db()
+    now = datetime.now().isoformat()
+
+    if action == "batch_review":
+        conn.execute("UPDATE accounting_vouchers SET status='已审核',updated_at=? WHERE id IN ({}) AND status='草稿'".format(
+            ",".join("?" for _ in voucher_ids)), [now] + voucher_ids)
+    elif action == "batch_post":
+        conn.execute("UPDATE accounting_vouchers SET status='已记账',updated_at=? WHERE id IN ({}) AND status='已审核'".format(
+            ",".join("?" for _ in voucher_ids)), [now] + voucher_ids)
+
+    conn.commit()
+    conn.close()
+    return redirect("/vouchers")
+
+
+# ========== 凭证复制 ==========
+
+@accounting_bp.route("/copy-voucher/<voucher_id>", methods=["POST"])
+def copy_voucher(voucher_id):
+    """复制凭证"""
+    conn = get_db()
+    now = datetime.now().isoformat()
+    orig = conn.execute("SELECT * FROM accounting_vouchers WHERE id=?", (voucher_id,)).fetchone()
+    if not orig:
+        conn.close()
+        return redirect("/vouchers")
+
+    orig_lines = conn.execute("SELECT * FROM voucher_lines WHERE voucher_id=?", (voucher_id,)).fetchall()
+    vid = str(uuid.uuid4())
+    seq = conn.execute("SELECT COUNT(*) FROM accounting_vouchers WHERE accounting_period=?",
+                       (orig["accounting_period"],)).fetchone()[0] + 1
+    voucher_no = f"{orig['accounting_period']}-{seq:03d}"
+
+    conn.execute("""
+        INSERT INTO accounting_vouchers
+        (id, voucher_no, voucher_date, accounting_period, summary,
+         total_debit, total_credit, created_by, status, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    """, (vid, voucher_no, orig["voucher_date"], orig["accounting_period"],
+          orig["summary"] + " (复制)", orig["total_debit"], orig["total_credit"],
+          "管理员", "草稿", now, now))
+
+    for line in orig_lines:
+        conn.execute("""
+            INSERT INTO voucher_lines
+            (id, voucher_id, account_code, account_name, debit, credit, summary,
+             related_entity_type, related_entity_id)
+            VALUES (?,?,?,?,?,?,?,?,?)
+        """, (str(uuid.uuid4()), vid, line["account_code"], line["account_name"],
+              line["debit"], line["credit"], line["summary"],
+              line["related_entity_type"], line["related_entity_id"]))
+
+    conn.commit()
+    conn.close()
+    return redirect("/vouchers")
+
+
+# ========== 多栏式明细账 ==========
+
+@accounting_bp.route("/multi-column-ledger")
+def multi_column_ledger():
+    """多栏式明细账"""
+    conn = get_db()
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+    ledger_type = request.args.get("ltype", "expense")
+
+    # 费用科目明细（管理费用/销售费用/财务费用的子科目）
+    expense_accounts = conn.execute("""
+        SELECT code, name FROM chart_of_accounts
+        WHERE (code LIKE '6601%' OR code LIKE '6602%' OR code LIKE '6603%' OR code LIKE '5501%' OR code LIKE '5502%' OR code LIKE '5503%')
+        AND is_active=1 ORDER BY code
+    """).fetchall()
+
+    # 增值税科目
+    vat_accounts = conn.execute("""
+        SELECT code, name FROM chart_of_accounts
+        WHERE code LIKE '2221%' AND is_active=1 ORDER BY code
+    """).fetchall()
+
+    columns = expense_accounts if ledger_type == "expense" else vat_accounts
+    columns = [dict(c) for c in columns]
+
+    # 获取每个科目的发生额（按期间汇总）
+    col_data = {}
+    for col in columns:
+        row = conn.execute("""
+            SELECT COALESCE(SUM(CAST(l.debit AS REAL)),0) dr, COALESCE(SUM(CAST(l.credit AS REAL)),0) cr
+            FROM voucher_lines l JOIN accounting_vouchers v ON v.id=l.voucher_id
+            WHERE l.account_code=? AND v.accounting_period=? AND v.status='已记账'
+        """, (col["code"], period)).fetchone()
+        col_data[col["code"]] = {"debit": row["dr"], "credit": row["cr"], "net": row["dr"] - row["cr"]}
+
+    # 按凭证获取明细
+    detail_rows = []
+    total_dr = 0
+    total_cr = 0
+    for col in columns:
+        lines = conn.execute("""
+            SELECT v.voucher_no, v.voucher_date, v.summary,
+                   CAST(l.debit AS REAL) dr, CAST(l.credit AS REAL) cr
+            FROM voucher_lines l JOIN accounting_vouchers v ON v.id=l.voucher_id
+            WHERE l.account_code=? AND v.accounting_period=? AND v.status='已记账'
+            ORDER BY v.voucher_date
+        """, (col["code"], period)).fetchall()
+        for l in lines:
+            detail_rows.append(dict(l, account=col["code"], name=col["name"]))
+            total_dr += l["dr"]; total_cr += l["cr"]
+
+    conn.close()
+    return render_template("multi_column_ledger.html",
+        period=period, ledger_type=ledger_type,
+        columns=columns, col_data=col_data,
+        detail_rows=detail_rows, total_dr=total_dr, total_cr=total_cr)
+
+
+# ========== 审计日志 ==========
+
+@accounting_bp.route("/audit-log")
+def audit_log():
+    """审计日志查询"""
+    conn = get_db()
+    # Ensure table
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS audit_logs (
+            id TEXT PRIMARY KEY, user_name TEXT, action TEXT,
+            entity_type TEXT, entity_id TEXT, details TEXT, created_at TEXT
+        )
+    """)
+    conn.commit()
+
+    page = int(request.args.get("page", 1))
+    per_page = 30
+    offset = (page - 1) * per_page
+
+    rows = conn.execute("""
+        SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT ? OFFSET ?
+    """, (per_page, offset)).fetchall()
+    total = conn.execute("SELECT COUNT(*) FROM audit_logs").fetchone()[0]
+
+    conn.close()
+    return render_template("audit_log.html",
+        logs=[dict(r) for r in rows], total=total, page=page, per_page=per_page)

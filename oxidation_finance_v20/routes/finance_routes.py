@@ -348,3 +348,216 @@ def reports():
                            draft_vouchers=draft_vouchers, pending_review=pending_review,
                            order_status=order_status, recent_orders=recent_orders,
                            bank_balances=bank_balances)
+
+
+# ========== 银行对账 ==========
+
+@finance_bp.route("/bank-reconciliation", methods=["GET", "POST"])
+def bank_reconciliation():
+    """银行对账页面"""
+    conn = get_db()
+    # Ensure table exists
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS bank_reconciliations (
+            id TEXT PRIMARY KEY, bank_type TEXT NOT NULL, period TEXT NOT NULL,
+            book_item_type TEXT NOT NULL, book_item_id TEXT NOT NULL,
+            bank_item_id TEXT, amount REAL NOT NULL,
+            reconciled_at TEXT NOT NULL, reconciled_by TEXT DEFAULT '', notes TEXT
+        )
+    """)
+    conn.commit()
+
+    bank_type = request.args.get("bank_type", "N银行")
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+    message = None
+    error = None
+
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        now = datetime.now().isoformat()
+        operator = request.form.get("operator", "管理员")
+
+        try:
+            if action == "import_bank_stmt":
+                # Import bank statement items (or auto-generate from incomes/expenses)
+                items_added = 0
+                incomes = conn.execute(
+                    "SELECT id, customer_name, CAST(amount AS REAL) amount, bank_type, income_date "
+                    "FROM incomes WHERE bank_type=? AND income_date LIKE ?",
+                    (bank_type, period + "%")).fetchall()
+                expenses = conn.execute(
+                    "SELECT id, expense_type, supplier_name, CAST(amount AS REAL) amount, bank_type, expense_date "
+                    "FROM expenses WHERE bank_type=? AND expense_date LIKE ?",
+                    (bank_type, period + "%")).fetchall()
+
+                for inc in incomes:
+                    exist = conn.execute(
+                        "SELECT COUNT(*) FROM bank_transactions WHERE matched_income_id=?",
+                        (inc[0],)).fetchone()[0]
+                    if exist == 0:
+                        conn.execute("""
+                            INSERT INTO bank_transactions (id, bank_type, transaction_date, amount,
+                                counterparty, description, matched, matched_income_id, created_at)
+                            VALUES (?,?,?,?,?,?,0,?,?)
+                        """, (str(uuid.uuid4()), bank_type, inc[4], f"{inc[2]:.2f}",
+                              inc[1], f"收入-{inc[1]}", inc[0], now))
+                        items_added += 1
+
+                for exp in expenses:
+                    exist = conn.execute(
+                        "SELECT COUNT(*) FROM bank_transactions WHERE matched_expense_id=?",
+                        (exp[0],)).fetchone()[0]
+                    if exist == 0:
+                        conn.execute("""
+                            INSERT INTO bank_transactions (id, bank_type, transaction_date, amount,
+                                counterparty, description, matched, matched_expense_id, created_at)
+                            VALUES (?,?,?,?,?,?,0,?,?)
+                        """, (str(uuid.uuid4()), bank_type, exp[4], f"{exp[2]:.2f}",
+                              exp[2] or "供应商", f"支出-{exp[1]}", exp[0], now))
+                        items_added += 1
+
+                conn.commit()
+                message = f"已导入 {items_added} 条银行对账单项目"
+
+            elif action == "reconcile":
+                # Manual reconciliation
+                book_ids = request.form.getlist("book_id[]")
+                book_types = request.form.getlist("book_type[]")
+                bank_ids = request.form.getlist("bank_id[]")
+                amounts = request.form.getlist("amount[]")
+
+                reconciled = 0
+                for i in range(len(book_ids)):
+                    if i < len(bank_ids) and bank_ids[i]:
+                        rid = str(uuid.uuid4())
+                        conn.execute("""
+                            INSERT INTO bank_reconciliations
+                            (id, bank_type, period, book_item_type, book_item_id,
+                             bank_item_id, amount, reconciled_at, reconciled_by)
+                            VALUES (?,?,?,?,?,?,?,?,?)
+                        """, (rid, bank_type, period, book_types[i], book_ids[i],
+                              bank_ids[i], amounts[i], now, operator))
+
+                        # Mark bank transaction as matched
+                        conn.execute(
+                            "UPDATE bank_transactions SET matched=1 WHERE id=?",
+                            (bank_ids[i],))
+
+                        # If income, set matched_income_id; if expense, set matched_expense_id
+                        if book_types[i] == "income":
+                            conn.execute(
+                                "UPDATE bank_transactions SET matched_income_id=? WHERE id=?",
+                                (book_ids[i], bank_ids[i]))
+                        elif book_types[i] == "expense":
+                            conn.execute(
+                                "UPDATE bank_transactions SET matched_expense_id=? WHERE id=?",
+                                (book_ids[i], bank_ids[i]))
+
+                        reconciled += 1
+
+                conn.commit()
+                message = f"已对账 {reconciled} 笔"
+
+            elif action == "auto_match":
+                # Auto-match by exact amount + same date
+                matched = 0
+                bank_items = conn.execute(
+                    "SELECT * FROM bank_transactions WHERE bank_type=? AND matched=0",
+                    (bank_type,)).fetchall()
+                incomes = conn.execute(
+                    "SELECT * FROM incomes WHERE bank_type=? AND income_date LIKE ?",
+                    (bank_type, period + "%")).fetchall()
+                expenses = conn.execute(
+                    "SELECT * FROM expenses WHERE bank_type=? AND expense_date LIKE ?",
+                    (bank_type, period + "%")).fetchall()
+
+                for bt in bank_items:
+                    bank_amt = round(float(bt[3]), 2)
+                    bank_date = bt[2]
+                    bank_counter = (bt[4] or "").strip()
+                    # Try match income
+                    for inc in incomes:
+                        if abs(round(float(inc[4]), 2) - bank_amt) < 0.01 and inc[5] == bank_date:
+                            if inc[2] == bank_counter or True:
+                                rid = str(uuid.uuid4())
+                                conn.execute("""
+                                    INSERT INTO bank_reconciliations VALUES (?,?,?,?,?,?,?,?,?,?)
+                                """, (rid, bank_type, period, "income", inc[0], bt[0],
+                                      bank_amt, now, operator, ""))
+                                conn.execute(
+                                    "UPDATE bank_transactions SET matched=1, matched_income_id=? WHERE id=?",
+                                    (inc[0], bt[0]))
+                                matched += 1
+                                break
+                    # Try match expense
+                    if not conn.execute("SELECT matched FROM bank_transactions WHERE id=?",
+                                       (bt[0],)).fetchone()[0]:
+                        for exp in expenses:
+                            if abs(round(float(exp[4]), 2) - bank_amt) < 0.01 and exp[6] == bank_date:
+                                rid = str(uuid.uuid4())
+                                conn.execute("""
+                                    INSERT INTO bank_reconciliations VALUES (?,?,?,?,?,?,?,?,?,?)
+                                """, (rid, bank_type, period, "expense", exp[0], bt[0],
+                                      bank_amt, now, operator, ""))
+                                conn.execute(
+                                    "UPDATE bank_transactions SET matched=1, matched_expense_id=? WHERE id=?",
+                                    (exp[0], bt[0]))
+                                matched += 1
+                                break
+
+                conn.commit()
+                message = f"自动匹配了 {matched} 笔"
+
+        except Exception as e:
+            error = f"操作失败: {e}"
+
+    # Get bank statement items
+    bank_stmt = [dict(b) for b in conn.execute(
+        "SELECT * FROM bank_transactions WHERE bank_type=? ORDER BY transaction_date",
+        (bank_type,)).fetchall()]
+
+    # Get book items (incomes + expenses) not yet reconciled
+    reconciled_book_ids = set()
+    for r in conn.execute(
+        "SELECT book_item_id FROM bank_reconciliations WHERE bank_type=? AND period=?",
+        (bank_type, period)).fetchall():
+        reconciled_book_ids.add(r[0])
+
+    book_income = [dict(inc) for inc in conn.execute(
+        "SELECT id, customer_name as name, CAST(amount AS REAL) amount, bank_type, income_date as date "
+        "FROM incomes WHERE bank_type=? AND income_date LIKE ? ORDER BY income_date",
+        (bank_type, period + "%")).fetchall()
+        if inc["id"] not in reconciled_book_ids]
+
+    book_expense = [dict(exp) for exp in conn.execute(
+        "SELECT id, supplier_name as name, expense_type, CAST(amount AS REAL) amount, bank_type, expense_date as date "
+        "FROM expenses WHERE bank_type=? AND expense_date LIKE ? ORDER BY expense_date",
+        (bank_type, period + "%")).fetchall()
+        if exp["id"] not in reconciled_book_ids]
+
+    # Reconciled items for display
+    recon_items = [dict(r) for r in conn.execute(
+        "SELECT * FROM bank_reconciliations WHERE bank_type=? AND period=? ORDER BY reconciled_at",
+        (bank_type, period)).fetchall()]
+
+    # Reconciliation summary
+    bank_stmt_total = sum(float(b["amount"]) for b in bank_stmt if not b["matched"])
+    book_income_total = sum(i["amount"] for i in book_income)
+    book_expense_total = sum(e["amount"] for e in book_expense)
+    recon_total = sum(f["amount"] for f in recon_items)
+
+    # Available bank types
+    bank_types = [dict(r) for r in conn.execute(
+        "SELECT DISTINCT bank_type FROM bank_accounts UNION "
+        "SELECT DISTINCT bank_type FROM incomes UNION "
+        "SELECT DISTINCT bank_type FROM expenses").fetchall()]
+
+    conn.close()
+    return render_template("bank_reconciliation.html",
+        bank_type=bank_type, period=period, bank_types=bank_types,
+        bank_stmt=bank_stmt, book_income=book_income, book_expense=book_expense,
+        recon_items=recon_items, message=message, error=error,
+        bank_stmt_total=bank_stmt_total,
+        book_income_total=book_income_total,
+        book_expense_total=book_expense_total,
+        recon_total=recon_total)

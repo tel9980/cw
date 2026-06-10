@@ -115,25 +115,33 @@
 
             <!-- 凭证列表 -->
             <div class="tab-content" id="tab-list">
+                <div class="card" style="margin-bottom:10px;padding:10px 15px;">
+                    <form method="POST" action="/batch-vouchers" id="batchForm" style="display:inline;">
+                        <button type="button" class="btn btn-sm btn-warning" onclick="batchAction('batch_review')">批量审核</button>
+                        <button type="button" class="btn btn-sm btn-success" onclick="batchAction('batch_post')">批量记账</button>
+                        <span id="batchCount" style="font-size:12px;color:#999;margin-left:10px;">已选 0 条</span>
+                    </form>
+                    <a href="/voucher-templates" class="btn btn-sm btn-default" style="float:right;">凭证模板</a>
+                </div>
                 <table>
                     <thead>
                         <tr>
+                            <th style="width:30px;"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
                             <th style="width: 140px;">凭证编号</th>
                             <th style="width: 120px;">凭证日期</th>
-                            <th style="width: 100px;">会计期间</th>
                             <th>摘要</th>
                             <th class="num" style="width: 120px;">借方合计</th>
                             <th class="num" style="width: 120px;">贷方合计</th>
                             <th style="width: 100px;">状态</th>
-                            <th style="width: 200px;">操作</th>
+                            <th style="width: 220px;">操作</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for v in vouchers %}
                         <tr>
+                            <td><input type="checkbox" class="voucher-check" value="{{ v.id }}" data-status="{{ v.status }}" onchange="updateBatchCount()"></td>
                             <td><a href="/vouchers/{{ v.id }}" style="color:#1890ff;">{{ v.voucher_no }}</a></td>
                             <td>{{ v.voucher_date }}</td>
-                            <td>{{ v.accounting_period }}</td>
                             <td>{{ v.summary or '-' }}</td>
                             <td class="num">{{ '%.2f'|format(v.total_debit|float) }}</td>
                             <td class="num">{{ '%.2f'|format(v.total_credit|float) }}</td>
@@ -151,15 +159,18 @@
                                     <form method="POST" style="display:inline;">
                                         <input type="hidden" name="voucher_id" value="{{ v.id }}">
                                         <input type="hidden" name="action" value="post">
-                                        <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('确定记账此凭证？记账后不可修改。')">记账</button>
+                                        <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('确定记账此凭证？')">记账</button>
                                     </form>
                                     {% endif %}
+                                    <form method="POST" action="/copy-voucher/{{ v.id }}" style="display:inline;">
+                                        <button type="submit" class="btn btn-sm btn-default" onclick="return confirm('确定复制此凭证？')">复制</button>
+                                    </form>
                                 </div>
                             </td>
                         </tr>
                         {% endfor %}
                         {% if not vouchers %}
-                        <tr><td colspan="8" style="text-align:center; padding:40px; color:#999;">暂无凭证数据</td></tr>
+                        <tr><td colspan="9" style="text-align:center; padding:40px; color:#999;">暂无凭证数据</td></tr>
                         {% endif %}
                     </tbody>
                 </table>
@@ -397,6 +408,35 @@
         // 初始化：添加两行默认分录
         addLine();
         addLine();
+
+        // 批量操作
+        function toggleSelectAll() {
+            var all = document.getElementById('selectAll').checked;
+            document.querySelectorAll('.voucher-check').forEach(cb => { cb.checked = all; });
+            updateBatchCount();
+        }
+        function updateBatchCount() {
+            var cnt = document.querySelectorAll('.voucher-check:checked').length;
+            document.getElementById('batchCount').textContent = '已选 ' + cnt + ' 条';
+        }
+        function batchAction(action) {
+            var ids = [];
+            document.querySelectorAll('.voucher-check:checked').forEach(cb => { ids.push(cb.value); });
+            if (ids.length === 0) { alert('请先选择凭证'); return; }
+            var form = document.getElementById('batchForm');
+            // Clear existing hidden inputs
+            form.querySelectorAll('input[type=hidden]').forEach(el => el.remove());
+            var actionInput = document.createElement('input');
+            actionInput.type = 'hidden'; actionInput.name = 'action'; actionInput.value = action;
+            form.appendChild(actionInput);
+            ids.forEach(function(id) {
+                var inp = document.createElement('input');
+                inp.type = 'hidden'; inp.name = 'voucher_ids[]'; inp.value = id;
+                form.appendChild(inp);
+            });
+            var msg = action === 'batch_review' ? '确定批量审核 ' + ids.length + ' 条凭证？' : '确定批量记账 ' + ids.length + ' 条凭证？';
+            if (confirm(msg)) form.submit();
+        }
     </script>
 </body>
 </html>

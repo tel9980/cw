@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>凭证模板 - 氧化加工厂财务系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
+        .container { max-width: 1000px; margin: 0 auto; padding: 20px; }
+        .header { background: #1890ff; color: white; padding: 20px; margin-bottom: 20px; }
+        .header h1 { font-size: 22px; }
+        .nav { background: white; padding: 10px 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .nav a { color: #333; text-decoration: none; margin-right: 20px; font-size: 14px; }
+        .nav a:hover, .nav a.active { color: #1890ff; font-weight: 600; }
+        .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .card h2 { font-size: 18px; margin-bottom: 15px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { padding: 10px 12px; border-bottom: 1px solid #eee; text-align: left; }
+        th { background: #fafafa; font-weight: 600; color: #555; }
+        td.num { text-align: right; font-family: monospace; }
+        .btn { display: inline-block; padding: 7px 14px; background: #1890ff; color: white; border-radius: 4px; border: none; cursor: pointer; font-size: 13px; text-decoration: none; }
+        .btn:hover { background: #40a9ff; }
+        .btn-sm { padding: 5px 10px; font-size: 12px; }
+        .btn-danger { background: #f5222d; }
+        .btn-success { background: #52c41a; }
+        .btn-default { background: white; color: #333; border: 1px solid #d9d9d9; }
+        .flash { padding: 10px 15px; border-radius: 4px; margin-bottom: 12px; font-size: 13px; }
+        .flash-s { background: #f6ffed; border: 1px solid #b7eb8f; color: #52c41a; }
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; margin-bottom: 4px; font-weight: 500; font-size: 13px; }
+        .form-group input, .form-group select { width: 100%; padding: 7px 10px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 13px; }
+        .form-row { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 8px; align-items: end; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; }
+        .modal-content { background: white; max-width: 560px; margin: 60px auto; padding: 24px; border-radius: 8px; max-height: 80vh; overflow-y: auto; }
+    </style>
+</head>
+<body>
+<div class="header"><div class="container"><h1>凭证模板</h1></div></div>
+<div class="nav"><div class="container">
+    <a href="/">首页</a><a href="/orders">订单</a><a href="/reports">报表</a>
+    <a href="/vouchers">会计凭证</a><a href="/voucher-templates" class="active">凭证模板</a>
+    <a href="/accounting-books">会计账簿</a><a href="/fixed-assets">固定资产</a>
+    <a href="/system-settings">系统设置</a>
+</div></div>
+<div class="container">
+    {% if message %}<div class="flash flash-s">{{ message }}</div>{% endif %}
+    <div class="card">
+        <h2>新建模板</h2>
+        <form method="POST">
+            <input type="hidden" name="action" value="create">
+            <div class="form-row" style="grid-template-columns: 1fr 2fr;">
+                <div class="form-group"><label>模板名称</label><input type="text" name="template_name" required></div>
+                <div class="form-group"><label>摘要</label><input type="text" name="summary" required></div>
+            </div>
+            <div id="tmplLines"><div class="form-row">
+                <div><select name="line_account[]">{% for a in accounts_list %}<option value="{{ a.code }}">{{ a.code }} {{ a.name }}</option>{% endfor %}</select></div>
+                <div><input type="number" step="0.01" name="line_debit[]" placeholder="借方金额" value="0"></div>
+                <div><input type="number" step="0.01" name="line_credit[]" placeholder="贷方金额" value="0"></div>
+                <div><button type="button" class="btn btn-sm btn-default" onclick="addTmplLine()">+</button></div>
+            </div></div>
+            <button type="submit" class="btn btn-success btn-sm" style="margin-top:10px;">保存模板</button>
+        </form>
+    </div>
+    <div class="card">
+        <h2>已有模板 ({{ templates|length }})</h2>
+        {% if templates %}
+        {% for t in templates %}
+        <div style="border:1px solid #eee;border-radius:6px;padding:14px;margin-bottom:10px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <strong>{{ t.template_name }}</strong>
+                <form method="POST" style="display:inline;"><input type="hidden" name="action" value="delete"><input type="hidden" name="template_id" value="{{ t.id }}"><button class="btn btn-danger btn-sm" onclick="return confirm('删除模板 {{ t.template_name }}？')">删除</button></form>
+            </div>
+            <div style="color:#666;font-size:12px;">摘要：{{ t.summary }}</div>
+            <table style="margin-top:8px;">
+                <thead><tr><th>科目</th><th class="num">借方</th><th class="num">贷方</th></tr></thead>
+                <tbody>
+                {% for l in t.lines %}
+                <tr><td>{{ l.code }} {{ l.name }}</td><td class="num">{{ '%.2f'|format(l.debit) }}</td><td class="num">{{ '%.2f'|format(l.credit) }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endfor %}
+        {% else %}<div style="color:#999;text-align:center;padding:20px;">暂无模板</div>{% endif %}
+    </div>
+</div>
+<script>
+    function addTmplLine() {
+        var div = document.createElement('div');
+        div.className = 'form-row';
+        div.innerHTML = document.getElementById('tmplLines').querySelector('.form-row').innerHTML;
+        document.getElementById('tmplLines').appendChild(div);
+    }
+</script>
+</body>
+</html>

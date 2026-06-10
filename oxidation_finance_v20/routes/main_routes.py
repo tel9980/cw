@@ -16,90 +16,110 @@ def index():
     """首页 - 仪表盘"""
     conn = get_db()
     today = date.today().isoformat()
-
-    # 今日统计
-    today_income_row = conn.execute(
-        "SELECT SUM(CAST(amount AS REAL)) FROM incomes WHERE income_date = ?", (today,)
-    ).fetchone()[0]
-    today_income = to_float(today_income_row)
-
-    today_expense_row = conn.execute(
-        "SELECT SUM(CAST(amount AS REAL)) FROM expenses WHERE expense_date = ?", (today,)
-    ).fetchone()[0]
-    today_expense = to_float(today_expense_row)
-
-    pending_orders = (
-        conn.execute(
-            "SELECT COUNT(*) FROM processing_orders WHERE status IN ('待加工', '加工中')"
-        ).fetchone()[0]
-        or 0
-    )
-    unpaid_orders = (
-        conn.execute(
-            "SELECT COUNT(*) FROM processing_orders WHERE CAST(received_amount AS REAL) < CAST(total_amount AS REAL)"
-        ).fetchone()[0]
-        or 0
-    )
-
     month_start = date.today().replace(day=1).isoformat()
+
+    # 今日/本月统计
+    today_income = to_float(conn.execute(
+        "SELECT SUM(CAST(amount AS REAL)) FROM incomes WHERE income_date=?", (today,)
+    ).fetchone()[0])
+    today_expense = to_float(conn.execute(
+        "SELECT SUM(CAST(amount AS REAL)) FROM expenses WHERE expense_date=?", (today,)
+    ).fetchone()[0])
     month_income = to_float(conn.execute(
-        "SELECT SUM(CAST(amount AS REAL)) FROM incomes WHERE income_date >= ?", (month_start,)
+        "SELECT SUM(CAST(amount AS REAL)) FROM incomes WHERE income_date>=?", (month_start,)
     ).fetchone()[0])
     month_expense = to_float(conn.execute(
-        "SELECT SUM(CAST(amount AS REAL)) FROM expenses WHERE expense_date >= ?", (month_start,)
+        "SELECT SUM(CAST(amount AS REAL)) FROM expenses WHERE expense_date>=?", (month_start,)
     ).fetchone()[0])
+    total_income = to_float(conn.execute(
+        "SELECT SUM(CAST(amount AS REAL)) FROM incomes").fetchone()[0])
+    total_expense = to_float(conn.execute(
+        "SELECT SUM(CAST(amount AS REAL)) FROM expenses").fetchone()[0])
+
+    # 银行余额
+    bank_total = to_float(conn.execute(
+        "SELECT SUM(CAST(balance AS REAL)) FROM bank_accounts").fetchone()[0])
+
+    # 应收账款
+    ar_total = to_float(conn.execute("""
+        SELECT COALESCE(SUM(CAST(l.debit AS REAL)) - SUM(CAST(l.credit AS REAL)), 0)
+        FROM voucher_lines l JOIN accounting_vouchers v ON v.id=l.voucher_id
+        WHERE l.account_code='1122' AND v.status='已记账'
+    """).fetchone()[0])
+
+    # 应付账款
+    ap_total = to_float(conn.execute("""
+        SELECT COALESCE(SUM(CAST(l.credit AS REAL)) - SUM(CAST(l.debit AS REAL)), 0)
+        FROM voucher_lines l JOIN accounting_vouchers v ON v.id=l.voucher_id
+        WHERE (l.account_code LIKE '220%') AND v.status='已记账'
+    """).fetchone()[0])
+
+    # 订单统计
+    pending_orders = conn.execute(
+        "SELECT COUNT(*) FROM processing_orders WHERE status IN ('待加工','加工中')"
+    ).fetchone()[0] or 0
+    unpaid_orders = conn.execute(
+        "SELECT COUNT(*) FROM processing_orders WHERE CAST(received_amount AS REAL) < CAST(total_amount AS REAL)"
+    ).fetchone()[0] or 0
+
+    # 凭证状态
+    draft_count = conn.execute("SELECT COUNT(*) FROM accounting_vouchers WHERE status='草稿'").fetchone()[0] or 0
+    reviewed_count = conn.execute("SELECT COUNT(*) FROM accounting_vouchers WHERE status='已审核'").fetchone()[0] or 0
+    posted_count = conn.execute("SELECT COUNT(*) FROM accounting_vouchers WHERE status='已记账'").fetchone()[0] or 0
+
+    # 月度趋势(最近6个月)
+    monthly_rows = conn.execute("""
+        SELECT strftime('%Y-%m', income_date) m, SUM(CAST(amount AS REAL)) inc, 0 exp
+        FROM incomes GROUP BY m UNION ALL
+        SELECT strftime('%Y-%m', expense_date) m, 0 inc, SUM(CAST(amount AS REAL)) exp
+        FROM expenses GROUP BY m ORDER BY m
+    """).fetchall()
+    month_map = {}
+    for r in monthly_rows:
+        m = r[0]; month_map.setdefault(m, {"inc":0,"exp":0})
+        month_map[m]["inc"] += to_float(r[1]); month_map[m]["exp"] += to_float(r[2])
+    monthly_data = sorted([{"m":k, "inc":v["inc"], "exp":v["exp"],
+        "profit":v["inc"]-v["exp"]} for k,v in month_map.items()], key=lambda x:x["m"])[-6:]
+
+    # 支出分类Top5
+    expense_cats = [dict(r) for r in conn.execute(
+        "SELECT expense_type, SUM(CAST(amount AS REAL)) total FROM expenses "
+        "GROUP BY expense_type ORDER BY total DESC LIMIT 5").fetchall()]
+
+    # 最近5笔收支
+    recent_inc = [dict(r) for r in conn.execute(
+        "SELECT customer_name, CAST(amount AS REAL) amount, bank_type, income_date "
+        "FROM incomes ORDER BY income_date DESC LIMIT 5").fetchall()]
+    recent_exp = [dict(r) for r in conn.execute(
+        "SELECT expense_type, supplier_name, CAST(amount AS REAL) amount, bank_type, expense_date "
+        "FROM expenses ORDER BY expense_date DESC LIMIT 5").fetchall()]
 
     # 最近订单
-    recent_orders_raw = conn.execute("""
-        SELECT order_no, customer_name, total_amount, status, order_date
+    recent_orders = [dict(r) for r in conn.execute("""
+        SELECT order_no, customer_name, CAST(total_amount AS REAL) total_amount, status, order_date
         FROM processing_orders ORDER BY order_date DESC LIMIT 5
-    """).fetchall()
-    recent_orders = [{'order_no': r[0], 'customer_name': r[1],
-                       'total_amount': to_float(r[2]), 'status': r[3],
-                       'order_date': r[4]} for r in recent_orders_raw]
+    """).fetchall()]
 
-    # 最近收支
-    recent_incomes_raw = conn.execute(
-        "SELECT customer_name, amount, bank_type, income_date FROM incomes ORDER BY income_date DESC LIMIT 5"
-    ).fetchall()
-    recent_incomes = [{'customer_name': r[0], 'amount': to_float(r[1]),
-                        'bank_type': r[2], 'income_date': r[3]} for r in recent_incomes_raw]
-
-    recent_expenses_raw = conn.execute(
-        "SELECT expense_type, supplier_name, amount, bank_type, expense_date FROM expenses ORDER BY expense_date DESC LIMIT 5"
-    ).fetchall()
-    recent_expenses = [{'expense_type': r[0], 'supplier_name': r[1],
-                         'amount': to_float(r[2]), 'bank_type': r[3],
-                         'expense_date': r[4]} for r in recent_expenses_raw]
-
-    # 会计统计
-    account_count = conn.execute(
-        "SELECT COUNT(*) FROM chart_of_accounts WHERE is_active=1"
-    ).fetchone()[0] or 0
-    draft_count = conn.execute(
-        "SELECT COUNT(*) FROM accounting_vouchers WHERE status='草稿'"
-    ).fetchone()[0] or 0
-    reviewed_count = conn.execute(
-        "SELECT COUNT(*) FROM accounting_vouchers WHERE status='已审核'"
-    ).fetchone()[0] or 0
-    posted_count = conn.execute(
-        "SELECT COUNT(*) FROM accounting_vouchers WHERE status='已记账'"
-    ).fetchone()[0] or 0
+    # 固定资产
+    fa_count = conn.execute("SELECT COUNT(*) FROM fixed_assets WHERE status='使用中'").fetchone()[0] or 0
 
     conn.close()
 
-    return render_template(
-        "index.html",
+    import json
+    return render_template("index.html",
         today_income=today_income, today_expense=today_expense,
-        today_profit=today_income - today_expense,
-        pending_orders=pending_orders, unpaid_orders=unpaid_orders,
+        today_profit=today_income-today_expense,
         month_income=month_income, month_expense=month_expense,
-        month_profit=month_income - month_expense,
-        recent_orders=recent_orders, recent_incomes=recent_incomes,
-        recent_expenses=recent_expenses,
-        account_count=account_count, draft_count=draft_count,
-        reviewed_count=reviewed_count, posted_count=posted_count,
-    )
+        month_profit=month_income-month_expense,
+        total_income=total_income, total_expense=total_expense,
+        bank_total=bank_total, ar_total=ar_total, ap_total=ap_total,
+        pending_orders=pending_orders, unpaid_orders=unpaid_orders,
+        draft_count=draft_count, reviewed_count=reviewed_count,
+        posted_count=posted_count, fa_count=fa_count,
+        monthly_data=json.dumps(monthly_data),
+        expense_cats=expense_cats,
+        recent_inc=recent_inc, recent_exp=recent_exp,
+        recent_orders=recent_orders)
 
 
 @main_bp.route("/orders")
