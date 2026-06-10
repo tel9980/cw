@@ -1,19 +1,289 @@
-{% extends "base.html" %}
-
-{% block title %}报表中心 - 氧化加工厂财务系统{% endblock %}
-
-{% block content %}
-<div class="card">
-    <h2>报表中心</h2>
-    <p>请使用命令行工具生成详细报表：</p>
-    <div style="background: #f5f5f5; padding: 15px; border-radius: 4px; margin: 20px 0;">
-        <code>python oxidation_finance_v20/tools/report_exporter.py --all</code>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>报表中心 - 氧化加工厂财务系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f0f2f5; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .header { background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%); color: white; padding: 24px; margin-bottom: 0; }
+        .header h1 { font-size: 22px; }
+        .header .subtitle { font-size: 13px; opacity: 0.85; margin-top: 4px; }
+        .nav { background: white; padding: 0 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.06); position: sticky; top: 0; z-index: 100; }
+        .nav .container { display: flex; gap: 0; padding: 0; }
+        .nav a { color: #555; text-decoration: none; padding: 14px 18px; font-size: 14px; border-bottom: 2px solid transparent; transition: all 0.2s; }
+        .nav a:hover { color: #1890ff; border-bottom-color: #1890ff; }
+        .nav a.active { color: #1890ff; font-weight: 600; border-bottom-color: #1890ff; }
+        .summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px; }
+        .summary-card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+        .summary-card .label { font-size: 13px; color: #888; margin-bottom: 8px; }
+        .summary-card .value { font-size: 26px; font-weight: bold; }
+        .summary-card .value.positive { color: #52c41a; }
+        .summary-card .value.negative { color: #f5222d; }
+        .summary-card .value.primary { color: #1890ff; }
+        .summary-card .sub { font-size: 12px; color: #999; margin-top: 4px; }
+        .panel { background: white; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-bottom: 20px; overflow: hidden; }
+        .panel-header { padding: 16px 20px; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
+        .panel-header h2 { font-size: 16px; color: #333; }
+        .panel-body { padding: 20px; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+        .stat-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f5f5f5; font-size: 14px; }
+        .stat-row:last-child { border-bottom: none; }
+        .bar { display: inline-block; height: 8px; border-radius: 4px; margin-right: 8px; vertical-align: middle; }
+        .bar-blue { background: #1890ff; }
+        .bar-orange { background: #fa8c16; }
+        .bar-green { background: #52c41a; }
+        .bar-red { background: #f5222d; }
+        .bar-purple { background: #722ed1; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #f0f0f0; }
+        th { background: #fafafa; font-weight: 600; color: #555; }
+        td.num, th.num { text-align: right; font-family: "SF Mono", Monaco, monospace; }
+        tr:hover { background: #fafafa; }
+        .btn { display: inline-block; padding: 6px 14px; background: #1890ff; color: white; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; font-size: 13px; }
+        .btn:hover { background: #40a9ff; }
+        .btn-sm { padding: 4px 10px; font-size: 12px; }
+        .btn-outline { background: white; color: #1890ff; border: 1px solid #1890ff; }
+        .btn-outline:hover { background: #e6f7ff; }
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; }
+        .tag-blue { background: #e6f7ff; color: #1890ff; }
+        .tag-green { background: #f6ffed; color: #52c41a; }
+        .tag-orange { background: #fff7e6; color: #fa8c16; }
+        .tag-red { background: #fff1f0; color: #f5222d; }
+        .quick-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+        .quick-link { display: block; padding: 14px; background: #f8f9fa; border-radius: 6px; text-align: center; text-decoration: none; color: #333; font-size: 13px; transition: all 0.2s; border: 1px solid transparent; }
+        .quick-link:hover { border-color: #1890ff; color: #1890ff; background: #e6f7ff; }
+        .quick-link .icon { font-size: 20px; margin-bottom: 4px; display: block; }
+        @media print {
+            .nav, .header { position: static; }
+            .summary-cards, .panel { break-inside: avoid; }
+            body { background: white; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <h1>报表中心</h1>
+            <div class="subtitle">氧化加工厂财务系统 — 经营数据总览</div>
+        </div>
     </div>
-    <p>或在浏览器控制台运行：</p>
-    <div style="background: #f5f5f5; padding: 15px; border-radius: 4px; margin: 20px 0;">
-        <code>python oxidation_finance_v20/tools/quick_panel.py</code><br>
-        <code>python oxidation_finance_v20/tools/reminder_system.py</code>
+    <div class="nav"><div class="container">
+        <a href="/">首页</a><a href="/orders">订单</a><a href="/customers">客户</a>
+        <a href="/reports" class="active">报表</a>
+        <a href="/chart-of-accounts">会计科目</a><a href="/vouchers">会计凭证</a>
+        <a href="/accounting-books">会计账簿</a><a href="/fixed-assets">固定资产</a><a href="/system-settings">系统设置</a>
+    </div></div>
+    <div class="container">
+
+        <!-- 概览卡片 -->
+        <div class="summary-cards">
+            <div class="summary-card">
+                <div class="label">总收入（累计）</div>
+                <div class="value primary">{{ '%.2f'|format(total_income) }}</div>
+                <div class="sub">本月 {{ '%.2f'|format(month_income) }}</div>
+            </div>
+            <div class="summary-card">
+                <div class="label">总支出（累计）</div>
+                <div class="value negative">{{ '%.2f'|format(total_expense) }}</div>
+                <div class="sub">本月 {{ '%.2f'|format(month_expense) }}</div>
+            </div>
+            <div class="summary-card">
+                <div class="label">累计利润</div>
+                <div class="value {% if total_income - total_expense >= 0 %}positive{% else %}negative{% endif %}">{{ '%.2f'|format(total_income - total_expense) }}</div>
+                <div class="sub">本月 {{ '%.2f'|format(month_income - month_expense) }}</div>
+            </div>
+            <div class="summary-card">
+                <div class="label">银行余额</div>
+                <div class="value primary">{{ '%.2f'|format(total_bank) }}</div>
+                <div class="sub">订单数 {{ order_count }} | 凭证 {{ voucher_stats.total }} 张</div>
+            </div>
+        </div>
+
+        <!-- 快捷入口 -->
+        <div class="panel">
+            <div class="panel-header"><h2>快捷入口</h2></div>
+            <div class="panel-body">
+                <div class="quick-links">
+                    <a href="/accounting-books?type=balance" class="quick-link"><span class="icon">📊</span>科目余额表</a>
+                    <a href="/accounting-books?type=trial_balance" class="quick-link"><span class="icon">⚖</span>试算平衡表</a>
+                    <a href="/accounting-books?type=statement" class="quick-link"><span class="icon">📋</span>财务报表</a>
+                    <a href="/accounting-books?type=journal" class="quick-link"><span class="icon">📝</span>凭证序时簿</a>
+                    <a href="/accounting-books?type=aux_balance" class="quick-link"><span class="icon">🔍</span>辅助核算表</a>
+                    <a href="/export/balance" class="quick-link"><span class="icon">📥</span>导出余额表</a>
+                    <a href="/export/vouchers" class="quick-link"><span class="icon">📥</span>导出凭证</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- 月度趋势图 -->
+        <div class="grid-2">
+            <div class="panel">
+                <div class="panel-header"><h2>月度收入/支出趋势</h2></div>
+                <div class="panel-body">
+                    <canvas id="trendChart" style="width:100%; height:260px;"></canvas>
+                    {% if monthly_stats %}
+                    <table style="margin-top:10px;">
+                        <thead><tr><th>月份</th><th class="num">收入</th><th class="num">支出</th><th class="num">利润</th></tr></thead>
+                        <tbody>
+                            {% for m in monthly_stats[:6] %}
+                            <tr><td>{{ m.month }}</td>
+                                <td class="num">{{ '%.2f'|format(m.income) }}</td>
+                                <td class="num">{{ '%.2f'|format(m.expense) }}</td>
+                                <td class="num" style="color:{% if m.profit>=0 %}#52c41a{% else %}#f5222d{% endif %};">{{ '%.2f'|format(m.profit) }}</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header"><h2>业务状态分布</h2></div>
+                <div class="panel-body">
+                    {% if order_status %}
+                    {% set max_cnt = order_status[0].cnt %}
+                    {% for s in order_status %}
+                    <div class="stat-row">
+                        <span>{{ s.status }}</span>
+                        <span>
+                            <span class="bar {% if s.status=='待加工' %}bar-orange{% elif s.status=='加工中' %}bar-blue{% elif s.status=='已完工' %}bar-green{% elif s.status=='已交付' %}bar-purple{% else %}bar-red{% endif %}" style="width:{{ (s.cnt/max_cnt*200)|int }}px;"></span>
+                            {{ s.cnt }} 单
+                        </span>
+                    </div>
+                    {% endfor %}
+                    {% endif %}
+                    <table style="margin-top:12px;">
+                        <thead><tr><th>凭证状态</th><th class="num">数量</th></tr></thead>
+                        <tbody>
+                            <tr><td>草稿</td><td class="num"><span class="tag tag-orange">{{ draft_vouchers }}</span></td></tr>
+                            <tr><td>待记账</td><td class="num"><span class="tag tag-blue">{{ pending_review }}</span></td></tr>
+                            <tr><td>已记账</td><td class="num"><span class="tag tag-green">{{ voucher_stats.posted }}</span></td></tr>
+                            <tr><td>合计</td><td class="num" style="font-weight:bold;">{{ voucher_stats.total }}</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 收入/支出分布 -->
+        <div class="grid-2">
+            <div class="panel">
+                <div class="panel-header"><h2>收入客户排名</h2><a href="/customers" class="btn btn-sm btn-outline">全部客户</a></div>
+                <div class="panel-body">
+                    {% if income_by_customer %}
+                    {% set max_inc = income_by_customer[0].total %}
+                    <table>
+                        <thead><tr><th>客户</th><th class="num">收入金额</th><th>占比</th></tr></thead>
+                        <tbody>
+                            {% for ic in income_by_customer[:8] %}
+                            <tr><td>{{ ic.customer_name }}</td>
+                                <td class="num">{{ '%.2f'|format(ic.total) }}</td>
+                                <td><span class="bar bar-blue" style="width:{{ '%.0f'|format(ic.total/max_inc*120) }}px;"></span>{{ '%.1f'|format(ic.total/total_income*100) if total_income>0 else 0 }}%</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}<p style="color:#999;text-align:center;padding:20px;">暂无数据</p>{% endif %}
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header"><h2>支出分类</h2></div>
+                <div class="panel-body">
+                    {% if expense_by_type %}
+                    {% set max_exp = expense_by_type[0].total %}
+                    <table>
+                        <thead><tr><th>类别</th><th class="num">金额</th><th>占比</th></tr></thead>
+                        <tbody>
+                            {% for et in expense_by_type[:8] %}
+                            <tr><td>{{ et.expense_type }}</td>
+                                <td class="num">{{ '%.2f'|format(et.total) }}</td>
+                                <td><span class="bar bar-orange" style="width:{{ '%.0f'|format(et.total/max_exp*120) }}px;"></span>{{ '%.1f'|format(et.total/total_expense*100) if total_expense>0 else 0 }}%</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}<p style="color:#999;text-align:center;padding:20px;">暂无数据</p>{% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- 最近订单 -->
+        <div class="panel">
+            <div class="panel-header"><h2>最近订单</h2><a href="/orders" class="btn btn-sm btn-outline">全部订单</a></div>
+            <div class="panel-body">
+                <table>
+                    <thead><tr><th>订单号</th><th>客户</th><th class="num">金额</th><th>状态</th><th>日期</th></tr></thead>
+                    <tbody>
+                        {% for o in recent_orders %}
+                        <tr><td>{{ o.order_no }}</td><td>{{ o.customer_name }}</td>
+                            <td class="num">{{ '%.2f'|format(o.total_amount) }}</td>
+                            <td><span class="tag {% if o.status=='待加工' %}tag-orange{% elif o.status=='加工中' %}tag-blue{% elif o.status=='已完工' %}tag-green{% else %}tag-purple{% endif %}">{{ o.status }}</span></td>
+                            <td>{{ o.order_date }}</td></tr>
+                        {% endfor %}
+                        {% if not recent_orders %}<tr><td colspan="5" style="text-align:center;color:#999;padding:20px;">暂无订单</td></tr>{% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
-    <p>报表将生成在 <code>reports/</code> 目录下</p>
-</div>
-{% endblock %}
+
+    <script>
+        // 月度趋势柱状图
+        var chartData = {{ chart_data|safe }};
+        var canvas = document.getElementById('trendChart');
+        if (canvas && chartData.months.length > 0) {
+            var ctx = canvas.getContext('2d');
+            var W = canvas.parentElement.clientWidth - 40;
+            var H = 260;
+            canvas.width = W;
+            canvas.height = H;
+            var pad = {top: 20, right: 20, bottom: 40, left: 60};
+            var chartW = W - pad.left - pad.right;
+            var chartH = H - pad.top - pad.bottom;
+
+            var maxVal = Math.max.apply(null, chartData.income.concat(chartData.expense)) * 1.15 || 1;
+            var n = chartData.months.length;
+            var barW = Math.min(40, (chartW / n - 10) / 2);
+
+            // Y轴刻度
+            ctx.strokeStyle = '#e8e8e8';
+            ctx.fillStyle = '#999';
+            ctx.font = '11px sans-serif';
+            ctx.textAlign = 'right';
+            for (var i = 0; i <= 4; i++) {
+                var y = pad.top + chartH * (1 - i/4);
+                ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
+                ctx.fillText((maxVal * i/4).toFixed(0), pad.left - 6, y + 4);
+            }
+
+            // X轴标签
+            ctx.textAlign = 'center';
+            var gap = chartW / n;
+            chartData.months.forEach(function(m, i) {
+                ctx.fillText(m.substring(5), pad.left + gap * i + gap/2, H - pad.bottom + 18);
+            });
+
+            // 柱状图
+            chartData.income.forEach(function(v, i) {
+                var h = v / maxVal * chartH;
+                ctx.fillStyle = '#1890ff';
+                ctx.fillRect(pad.left + gap * i + gap/2 - barW - 2, pad.top + chartH - h, barW, h);
+            });
+            chartData.expense.forEach(function(v, i) {
+                var h = v / maxVal * chartH;
+                ctx.fillStyle = '#fa8c16';
+                ctx.fillRect(pad.left + gap * i + gap/2 + 2, pad.top + chartH - h, barW, h);
+            });
+
+            // 图例
+            ctx.fillStyle = '#1890ff'; ctx.fillRect(pad.left + 10, pad.top + 4, 12, 12);
+            ctx.fillStyle = '#333'; ctx.textAlign = 'left'; ctx.fillText('收入', pad.left + 26, pad.top + 15);
+            ctx.fillStyle = '#fa8c16'; ctx.fillRect(pad.left + 70, pad.top + 4, 12, 12);
+            ctx.fillStyle = '#333'; ctx.fillText('支出', pad.left + 86, pad.top + 15);
+        }
+    </script>
+</body>
+</html>

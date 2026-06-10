@@ -399,6 +399,30 @@ def create_tables(conn: sqlite3.Connection):
         )
     """)
 
+    # 18. 固定资产表
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fixed_assets (
+            id TEXT PRIMARY KEY,
+            asset_code TEXT UNIQUE NOT NULL,
+            asset_name TEXT NOT NULL,
+            category TEXT NOT NULL,
+            department TEXT,
+            purchase_date TEXT NOT NULL,
+            original_value REAL NOT NULL DEFAULT 0,
+            residual_value REAL NOT NULL DEFAULT 0,
+            useful_life_months INTEGER NOT NULL DEFAULT 60,
+            monthly_depreciation REAL NOT NULL DEFAULT 0,
+            accumulated_depreciation REAL NOT NULL DEFAULT 0,
+            net_value REAL NOT NULL DEFAULT 0,
+            account_code TEXT DEFAULT '1601',
+            status TEXT DEFAULT '使用中',
+            location TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
     # 新增表的索引
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_accounts_type ON chart_of_accounts(account_type)"

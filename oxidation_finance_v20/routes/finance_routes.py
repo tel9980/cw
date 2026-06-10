@@ -251,7 +251,23 @@ def reports():
     total_expense = to_float(conn.execute("SELECT SUM(CAST(amount AS REAL)) FROM expenses").fetchone()[0])
     order_count = conn.execute("SELECT COUNT(*) FROM processing_orders").fetchone()[0] or 0
 
-    # 月度统计
+    # 本月统计
+    month_start = date.today().replace(day=1).isoformat()
+    month_income = to_float(conn.execute(
+        "SELECT SUM(CAST(amount AS REAL)) FROM incomes WHERE income_date >= ?", (month_start,)).fetchone()[0])
+    month_expense = to_float(conn.execute(
+        "SELECT SUM(CAST(amount AS REAL)) FROM expenses WHERE expense_date >= ?", (month_start,)).fetchone()[0])
+
+    # 银行账户余额
+    bank_balances = [dict(b) for b in conn.execute(
+        "SELECT bank_type, CAST(balance AS REAL) as bal FROM bank_accounts ORDER BY bank_type").fetchall()]
+    total_bank = sum(b["bal"] for b in bank_balances)
+
+    # 未审核/未记账凭证数
+    draft_vouchers = conn.execute("SELECT COUNT(*) FROM accounting_vouchers WHERE status='草稿'").fetchone()[0] or 0
+    pending_review = conn.execute("SELECT COUNT(*) FROM accounting_vouchers WHERE status='已审核'").fetchone()[0] or 0
+
+    # 月度统计（最近12个月用于图表）
     monthly_rows = conn.execute("""
         SELECT strftime('%Y-%m', income_date) as month,
                COALESCE(SUM(CAST(i.amount AS REAL)), 0) as income, 0 as expense
@@ -277,11 +293,22 @@ def reports():
         key=lambda x: x["month"], reverse=True
     )[:12]
 
+    # 图表数据（按时间正序）
+    chart_months = [m["month"] for m in monthly_stats][::-1]
+    chart_income = [m["income"] for m in monthly_stats][::-1]
+    chart_expense = [m["expense"] for m in monthly_stats][::-1]
+
     # 客户排名
     top_customers = conn.execute("""
         SELECT c.name, COUNT(o.id) as order_count, COALESCE(SUM(CAST(o.total_amount AS REAL)), 0) as total
         FROM customers c LEFT JOIN processing_orders o ON c.id = o.customer_id
         GROUP BY c.id ORDER BY total DESC LIMIT 10
+    """).fetchall()
+
+    # 收入按客户分类
+    income_by_customer = conn.execute("""
+        SELECT customer_name, SUM(CAST(amount AS REAL)) as total
+        FROM incomes GROUP BY customer_name ORDER BY total DESC LIMIT 8
     """).fetchall()
 
     # 支出分类
@@ -296,10 +323,28 @@ def reports():
         "posted": conn.execute("SELECT COUNT(*) FROM accounting_vouchers WHERE status='已记账'").fetchone()[0] or 0,
     }
 
+    # 订单状态分布
+    order_status = [dict(r) for r in conn.execute("""
+        SELECT status, COUNT(*) as cnt FROM processing_orders GROUP BY status ORDER BY cnt DESC
+    """).fetchall()]
+
+    # 最近订单
+    recent_orders = [dict(r) for r in conn.execute("""
+        SELECT order_no, customer_name, CAST(total_amount AS REAL) as total_amount, status, order_date
+        FROM processing_orders ORDER BY order_date DESC LIMIT 5
+    """).fetchall()]
+
     conn.close()
 
+    import json
     return render_template("reports.html",
                            total_income=total_income, total_expense=total_expense,
-                           order_count=order_count, monthly_stats=monthly_stats,
-                           top_customers=top_customers, expense_by_type=expense_by_type,
-                           voucher_stats=voucher_stats)
+                           total_bank=total_bank, order_count=order_count,
+                           month_income=month_income, month_expense=month_expense,
+                           monthly_stats=monthly_stats,
+                           chart_data=json.dumps({"months": chart_months, "income": chart_income, "expense": chart_expense}),
+                           top_customers=top_customers, income_by_customer=income_by_customer,
+                           expense_by_type=expense_by_type, voucher_stats=voucher_stats,
+                           draft_vouchers=draft_vouchers, pending_review=pending_review,
+                           order_status=order_status, recent_orders=recent_orders,
+                           bank_balances=bank_balances)

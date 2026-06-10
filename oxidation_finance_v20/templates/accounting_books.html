@@ -45,6 +45,15 @@
         .stat-item { background: #f8f9fa; padding: 15px; border-radius: 6px; text-align: center; }
         .stat-value { font-size: 22px; font-weight: bold; color: #1890ff; }
         .stat-label { font-size: 12px; color: #666; margin-top: 5px; }
+        @media print {
+            .header { background: white; color: black; padding: 10px; margin-bottom: 10px; }
+            .nav, .tabs, .filter-bar, .btn, .flash, .empty-state { display: none; }
+            .tab-content { display: block !important; padding: 0; }
+            .card { box-shadow: none; border: 1px solid #ddd; page-break-inside: avoid; }
+            body { background: white; font-size: 12px; }
+            table { font-size: 11px; }
+            th, td { padding: 4px 6px; }
+        }
     </style>
 </head>
 <body>
@@ -53,6 +62,7 @@
         <a href="/">首页</a><a href="/orders">订单</a><a href="/customers">客户</a>
         <a href="/reports">报表</a><a href="/chart-of-accounts">会计科目</a>
         <a href="/vouchers">会计凭证</a><a href="/accounting-books" class="active">会计账簿</a>
+        <a href="/fixed-assets">固定资产</a><a href="/system-settings">系统设置</a>
     </div></div>
     <div class="container">
         <div class="flash flash-info">选择查询类型和会计期间，查看科目余额表、明细账、财务报表或管理期间。数据基于已记账凭证。</div>
@@ -66,6 +76,7 @@
                 <div class="tab {% if book_type == 'aux_detail' %}active{% endif %}" onclick="switchTab('aux_detail')">辅助核算明细账</div>
                 <div class="tab {% if book_type == 'aux_balance' %}active{% endif %}" onclick="switchTab('aux_balance')">辅助核算余额表</div>
                 <div class="tab {% if book_type == 'statement' %}active{% endif %}" onclick="switchTab('statement')">财务报表</div>
+                <div class="tab {% if book_type == 'aging' %}active{% endif %}" onclick="switchTab('aging')">账龄分析</div>
                 <div class="tab {% if book_type == 'periods' %}active{% endif %}" onclick="switchTab('periods')">期间管理</div>
             </div>
 
@@ -454,7 +465,117 @@
                         </table>
                     </div>
                 </div>
+                {% if statement_data.cf %}
+                <div style="margin-top:20px;">
+                    <div class="card" style="padding:15px;">
+                        <h2 style="text-align:center;">现金流量表</h2>
+                        <p style="text-align:center;color:#666;font-size:13px;margin-bottom:15px;">期间：{{ current_period }} | 单位：元</p>
+                        <table>
+                            <thead><tr><th style="background:#e6f7ff;">经营活动现金流量</th><th class="num">金额</th></tr></thead>
+                            <tbody>
+                                <tr><td>经营活动现金流入</td><td class="num">{{ '%.2f'|format(statement_data.cf.operating_in) }}</td></tr>
+                                <tr><td>经营活动现金流出</td><td class="num">({{ '%.2f'|format(statement_data.cf.operating_out) }})</td></tr>
+                                <tr style="font-weight:bold;background:#fafafa;"><td>经营活动现金流量净额</td><td class="num" style="color:{% if statement_data.cf.operating_net>=0 %}#52c41a{% else %}#f5222d{% endif %};">{{ '%.2f'|format(statement_data.cf.operating_net) }}</td></tr>
+                            </tbody>
+                            <thead><tr><th style="background:#fff7e6;">投资活动现金流量</th><th class="num">金额</th></tr></thead>
+                            <tbody>
+                                <tr><td>投资活动现金流入</td><td class="num">{{ '%.2f'|format(statement_data.cf.investing_in) }}</td></tr>
+                                <tr><td>投资活动现金流出</td><td class="num">({{ '%.2f'|format(statement_data.cf.investing_out) }})</td></tr>
+                                <tr style="font-weight:bold;background:#fafafa;"><td>投资活动现金流量净额</td><td class="num" style="color:{% if statement_data.cf.investing_net>=0 %}#52c41a{% else %}#f5222d{% endif %};">{{ '%.2f'|format(statement_data.cf.investing_net) }}</td></tr>
+                            </tbody>
+                            <thead><tr><th style="background:#f6ffed;">筹资活动现金流量</th><th class="num">金额</th></tr></thead>
+                            <tbody>
+                                <tr><td>筹资活动现金流入</td><td class="num">{{ '%.2f'|format(statement_data.cf.financing_in) }}</td></tr>
+                                <tr><td>筹资活动现金流出</td><td class="num">({{ '%.2f'|format(statement_data.cf.financing_out) }})</td></tr>
+                                <tr style="font-weight:bold;background:#fafafa;"><td>筹资活动现金流量净额</td><td class="num" style="color:{% if statement_data.cf.financing_net>=0 %}#52c41a{% else %}#f5222d{% endif %};">{{ '%.2f'|format(statement_data.cf.financing_net) }}</td></tr>
+                            </tbody>
+                            <tfoot><tr style="font-weight:bold;border-top:2px solid #333;background:#f0f0f0;font-size:15px;"><td>现金及现金等价物净增加额</td><td class="num" style="color:{% if statement_data.cf.net_increase>=0 %}#52c41a{% else %}#f5222d{% endif %};">{{ '%.2f'|format(statement_data.cf.net_increase) }}</td></tr></tfoot>
+                        </table>
+                    </div>
+                </div>
+                {% endif %}
                 {% else %}<div class="empty-state">请选择期间查看财务报表</div>{% endif %}
+            </div>
+
+            <!-- 账龄分析 -->
+            <div class="tab-content" id="tab-aging" style="{% if book_type != 'aging' %}display:none;{% endif %}">
+                <div class="filter-bar">
+                    <form method="GET" style="display:contents;">
+                        <input type="hidden" name="type" value="aging">
+                        <label>截至期间：</label>
+                        {% if periods %}
+                        <select name="period" onchange="this.form.submit()">{% for p in periods %}<option value="{{ p.accounting_period }}" {% if current_period==p.accounting_period %}selected{% endif %}>{{ p.accounting_period }}</option>{% endfor %}</select>
+                        {% else %}<input type="text" name="period" placeholder="2026-06" value="{{ current_period }}">{% endif %}
+                        <button type="submit" class="btn btn-sm">查询</button>
+                    </form>
+                </div>
+                {% if aging_data and (aging_data.ar or aging_data.ap) %}
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+                    <!-- 应收账款账龄 -->
+                    <div class="card" style="padding:15px;margin-bottom:0;">
+                        <h2 style="font-size:16px;">应收账款账龄分析</h2>
+                        <p style="color:#666;font-size:12px;margin-bottom:15px;">
+                            截至 {{ aging_data.as_of }} | 余额合计：<strong style="color:#1890ff;">{{ '%.2f'|format(aging_data.ar_total) }}</strong>
+                        </p>
+                        {% if aging_data.ar %}
+                        <table>
+                            <thead><tr><th>客户</th><th>账龄区间</th><th class="num">天数</th><th class="num">余额</th><th>最后交易</th></tr></thead>
+                            <tbody>
+                                {% for d in aging_data.ar %}
+                                <tr><td>{{ d.entity }}</td>
+                                    <td><span class="tag {% if d.bucket=='90天以上' %}tag-red{% elif d.bucket=='61-90天' %}tag-orange{% elif d.bucket=='31-60天' %}tag-blue{% else %}tag-green{% endif %}">{{ d.bucket }}</span></td>
+                                    <td class="num">{{ d.age_days }}</td>
+                                    <td class="num" style="font-weight:600;">{{ '%.2f'|format(d.balance) }}</td>
+                                    <td>{{ d.last_date }}</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        <div style="margin-top:12px;">
+                            <div style="font-size:12px;color:#666;margin-bottom:6px;">账龄区间汇总：</div>
+                            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                {% for bucket, amt in aging_data.ar_buckets.items() %}
+                                {% if amt > 0 %}
+                                <span style="padding:3px 8px;background:#f0f0f0;border-radius:4px;font-size:12px;">{{ bucket }}: <strong>{{ '%.2f'|format(amt) }}</strong></span>
+                                {% endif %}
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% else %}<p style="text-align:center;color:#999;padding:20px;">无应收账款</p>{% endif %}
+                    </div>
+
+                    <!-- 应付账款账龄 -->
+                    <div class="card" style="padding:15px;margin-bottom:0;">
+                        <h2 style="font-size:16px;">应付账款账龄分析</h2>
+                        <p style="color:#666;font-size:12px;margin-bottom:15px;">
+                            截至 {{ aging_data.as_of }} | 余额合计：<strong style="color:#f5222d;">{{ '%.2f'|format(aging_data.ap_total) }}</strong>
+                        </p>
+                        {% if aging_data.ap %}
+                        <table>
+                            <thead><tr><th>供应商</th><th>账龄区间</th><th class="num">天数</th><th class="num">余额</th><th>最后交易</th></tr></thead>
+                            <tbody>
+                                {% for d in aging_data.ap %}
+                                <tr><td>{{ d.entity }}</td>
+                                    <td><span class="tag {% if d.bucket=='90天以上' %}tag-red{% elif d.bucket=='61-90天' %}tag-orange{% elif d.bucket=='31-60天' %}tag-blue{% else %}tag-green{% endif %}">{{ d.bucket }}</span></td>
+                                    <td class="num">{{ d.age_days }}</td>
+                                    <td class="num" style="font-weight:600;">{{ '%.2f'|format(d.balance) }}</td>
+                                    <td>{{ d.last_date }}</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        <div style="margin-top:12px;">
+                            <div style="font-size:12px;color:#666;margin-bottom:6px;">账龄区间汇总：</div>
+                            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                {% for bucket, amt in aging_data.ap_buckets.items() %}
+                                {% if amt > 0 %}
+                                <span style="padding:3px 8px;background:#f0f0f0;border-radius:4px;font-size:12px;">{{ bucket }}: <strong>{{ '%.2f'|format(amt) }}</strong></span>
+                                {% endif %}
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% else %}<p style="text-align:center;color:#999;padding:20px;">无应付账款</p>{% endif %}
+                    </div>
+                </div>
+                {% else %}<div class="empty-state">请选择期间查看账龄分析</div>{% endif %}
             </div>
 
             <!-- 期间管理 -->

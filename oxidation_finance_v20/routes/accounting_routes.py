@@ -398,6 +398,7 @@ def accounting_books():
     journal_data = []
     aux_data = {}
     aux_detail_data = []
+    aging_data = {}
 
     # ---- 公共：获取期初余额 ----
     opening_map = {}
@@ -549,23 +550,121 @@ def accounting_books():
                 "entity_name": aux_entities.get(aux_entity_id, {}).get("name", aux_entity_id),
             }
 
-        elif book_type == "aux_balance":
-            rows = conn.execute("""
+        elif book_type == "aging":
+            # 账龄分析
+            aging_period = request.args.get("aging_period", period or date.today().strftime("%Y-%m"))
+            as_of = datetime.strptime(aging_period + "-01", "%Y-%m-%d").date()
+
+            # AR Aging - based on vouchers with aux accounting for customers
+            ar_rows = conn.execute("""
                 SELECT l.related_entity_id, l.related_entity_type,
-                       COALESCE(SUM(CAST(l.debit AS REAL)), 0) as total_debit,
-                       COALESCE(SUM(CAST(l.credit AS REAL)), 0) as total_credit
+                       SUM(CAST(l.debit AS REAL)) as total_debit,
+                       SUM(CAST(l.credit AS REAL)) as total_credit,
+                       MAX(v.voucher_date) as last_date
                 FROM voucher_lines l
                 JOIN accounting_vouchers v ON v.id = l.voucher_id
-                WHERE l.related_entity_type = ? AND v.accounting_period = ?
-                  AND v.status = '已记账' AND l.related_entity_id IS NOT NULL
+                WHERE l.account_code = '1122' AND l.related_entity_type = 'customer'
+                  AND v.status = '已记账'
                 GROUP BY l.related_entity_id
-                ORDER BY total_debit DESC
-            """, (aux_type, period)).fetchall()
-            aux_data = {
-                "type": aux_type,
-                "rows": [dict(r) for r in rows],
-                "entities": aux_entities,
+            """).fetchall()
+
+            ar_data = []
+            for r in ar_rows:
+                entity_id = r["related_entity_id"]
+                cust = conn.execute("SELECT name FROM customers WHERE id=?", (entity_id,)).fetchone()
+                name = cust["name"] if cust else entity_id
+                balance = r["total_debit"] - r["total_credit"]
+                if abs(balance) < 0.01:
+                    continue
+
+                last_date_str = r["last_date"]
+                age_days = 0
+                if last_date_str:
+                    last_date = datetime.strptime(last_date_str, "%Y-%m-%d").date()
+                    age_days = (as_of - last_date).days
+
+                if age_days <= 30: bucket = "0-30天"
+                elif age_days <= 60: bucket = "31-60天"
+                elif age_days <= 90: bucket = "61-90天"
+                else: bucket = "90天以上"
+
+                ar_data.append({
+                    "entity": name, "balance": round(balance, 2),
+                    "age_days": age_days, "bucket": bucket,
+                    "last_date": r["last_date"],
+                })
+
+            # AP Aging - based on vouchers with aux accounting for suppliers
+            ap_rows = conn.execute("""
+                SELECT l.related_entity_id, l.related_entity_type,
+                       SUM(CAST(l.debit AS REAL)) as total_debit,
+                       SUM(CAST(l.credit AS REAL)) as total_credit,
+                       MAX(v.voucher_date) as last_date
+                FROM voucher_lines l
+                JOIN accounting_vouchers v ON v.id = l.voucher_id
+                WHERE l.related_entity_type = 'supplier' AND v.status = '已记账'
+                GROUP BY l.related_entity_id
+            """).fetchall()
+
+            ap_data = []
+            for r in ap_rows:
+                entity_id = r["related_entity_id"]
+                supp = conn.execute("SELECT name FROM suppliers WHERE id=?", (entity_id,)).fetchone()
+                name = supp["name"] if supp else entity_id
+                balance = r["total_credit"] - r["total_debit"]
+                if abs(balance) < 0.01:
+                    continue
+
+                last_date_str = r["last_date"]
+                age_days = 0
+                if last_date_str:
+                    last_date = datetime.strptime(last_date_str, "%Y-%m-%d").date()
+                    age_days = (as_of - last_date).days
+
+                if age_days <= 30: bucket = "0-30天"
+                elif age_days <= 60: bucket = "31-60天"
+                elif age_days <= 90: bucket = "61-90天"
+                else: bucket = "90天以上"
+
+                ap_data.append({
+                    "entity": name, "balance": round(balance, 2),
+                    "age_days": age_days, "bucket": bucket,
+                    "last_date": r["last_date"],
+                })
+
+            def _bucket_summary(data):
+                result = {"0-30天": 0, "31-60天": 0, "61-90天": 0, "90天以上": 0}
+                for d in data:
+                    result[d["bucket"]] += abs(d["balance"])
+                return result
+
+            aging_data = {
+                "ar": sorted(ar_data, key=lambda x: -x["age_days"]),
+                "ap": sorted(ap_data, key=lambda x: -x["age_days"]),
+                "ar_total": sum(abs(d["balance"]) for d in ar_data),
+                "ap_total": sum(abs(d["balance"]) for d in ap_data),
+                "ar_buckets": _bucket_summary(ar_data),
+                "ap_buckets": _bucket_summary(ap_data),
+                "as_of": aging_period,
             }
+
+    elif book_type == "aux_balance":
+        rows = conn.execute("""
+            SELECT l.related_entity_id, l.related_entity_type,
+                   COALESCE(SUM(CAST(l.debit AS REAL)), 0) as total_debit,
+                   COALESCE(SUM(CAST(l.credit AS REAL)), 0) as total_credit
+            FROM voucher_lines l
+            JOIN accounting_vouchers v ON v.id = l.voucher_id
+            WHERE l.related_entity_type = ? AND v.accounting_period = ?
+              AND v.status = '已记账' AND l.related_entity_id IS NOT NULL
+            GROUP BY l.related_entity_id
+            ORDER BY total_debit DESC
+        """, (aux_type, period)).fetchall()
+        aux_data = {
+            "type": aux_type,
+            "rows": [dict(r) for r in rows],
+            "entities": aux_entities,
+        }
 
     elif book_type == "statement" and period:
         rows = get_period_amounts(period)
@@ -608,6 +707,95 @@ def accounting_books():
                    "net_profit": total_revenue - total_costs},
         }
 
+        # 现金流量表
+        cf_operating_in = 0.0
+        cf_operating_out = 0.0
+        cf_investing_in = 0.0
+        cf_investing_out = 0.0
+        cf_financing_in = 0.0
+        cf_financing_out = 0.0
+
+        cf_operating_items = []
+        cf_investing_items = []
+        cf_financing_items = []
+
+        for r in rows:
+            code = r["code"]
+            name = r["name"]
+            direction = r["balance_direction"] or "借"
+            opening = opening_map.get(code, 0.0)
+            debit = r["debit_sum"]
+            credit = r["credit_sum"]
+
+            # 经营活动 - 主营业务收入/其他业务收入（现金流入）
+            if code.startswith("5001") or code.startswith("5051") or code.startswith("5111"):
+                if credit > 0:
+                    cf_operating_in += credit
+                    cf_operating_items.append({"item": name, "amount": credit, "type": "in"})
+            # 经营活动 - 成本费用（现金流出）
+            elif code.startswith("540") or code.startswith("550") or code.startswith("560") or \
+                 code.startswith("570") or code.startswith("580") or code.startswith("5301"):
+                if debit > 0:
+                    cf_operating_out += debit
+                    cf_operating_items.append({"item": name, "amount": debit, "type": "out"})
+            # 经营活动 - 应收账款收回
+            elif code == "1122" or code.startswith("1123"):
+                if credit > 0:
+                    cf_operating_in += credit
+                    cf_operating_items.append({"item": f"{name}(收回)", "amount": credit, "type": "in"})
+            # 经营活动 - 应付账款支付
+            elif code.startswith("2201") or code.startswith("2202") or code.startswith("2203"):
+                if debit > 0:
+                    cf_operating_out += debit
+                    cf_operating_items.append({"item": f"{name}(支付)", "amount": debit, "type": "out"})
+            # 投资活动 - 固定资产购建/处置
+            elif code == "1601":
+                if debit > 0:
+                    cf_investing_out += debit
+                    cf_investing_items.append({"item": f"{name}(购建)", "amount": debit, "type": "out"})
+                if credit > 0:
+                    cf_investing_in += credit
+                    cf_investing_items.append({"item": f"{name}(处置)", "amount": credit, "type": "in"})
+            elif code.startswith("1604") or code.startswith("1701") or code.startswith("1702"):
+                if debit > 0:
+                    cf_investing_out += debit
+                    cf_investing_items.append({"item": f"{name}(支出)", "amount": debit, "type": "out"})
+            # 筹资活动 - 实收资本/借款
+            elif code == "3001":
+                if credit > 0:
+                    cf_financing_in += credit
+                    cf_financing_items.append({"item": name, "amount": credit, "type": "in"})
+            elif code.startswith("3002") or code.startswith("4001"):
+                if credit > 0:
+                    cf_financing_in += credit
+                    cf_financing_items.append({"item": f"{name}(借款)", "amount": credit, "type": "in"})
+                if debit > 0:
+                    cf_financing_out += debit
+                    cf_financing_items.append({"item": f"{name}(偿还)", "amount": debit, "type": "out"})
+
+        # 如果从账户维度算不出来，用利润表推算经营活动净现金流量
+        net_profit = total_revenue - total_costs
+        cf_operating_net = cf_operating_in - cf_operating_out
+        if abs(cf_operating_net) < 0.01 and abs(net_profit) > 0.01:
+            cf_operating_net = net_profit
+
+        cf_investing_net = cf_investing_in - cf_investing_out
+        cf_financing_net = cf_financing_in - cf_financing_out
+
+        statement_data["cf"] = {
+            "items": cf_operating_items + cf_investing_items + cf_financing_items,
+            "operating_in": cf_operating_in,
+            "operating_out": cf_operating_out,
+            "operating_net": cf_operating_net,
+            "investing_in": cf_investing_in,
+            "investing_out": cf_investing_out,
+            "investing_net": cf_investing_net,
+            "financing_in": cf_financing_in,
+            "financing_out": cf_financing_out,
+            "financing_net": cf_financing_net,
+            "net_increase": cf_operating_net + cf_investing_net + cf_financing_net,
+        }
+
     conn.close()
 
     # 获取辅助核算实体列表（用于筛选下拉）
@@ -632,7 +820,8 @@ def accounting_books():
                            aux_data=aux_data, aux_detail_data=aux_detail_data,
                            aux_type=aux_type, aux_entity=aux_entity,
                            aux_customers=aux_customers, aux_suppliers=aux_suppliers,
-                           aux_departments=aux_departments, aux_projects=aux_projects)
+                           aux_departments=aux_departments, aux_projects=aux_projects,
+                           aging_data=aging_data)
 
 
 # ========== 系统参数设置 ==========
@@ -998,3 +1187,217 @@ def export_trial_balance():
         mimetype='text/csv',
         headers={"Content-Disposition": f"attachment;filename=trial_balance_{period or 'all'}.csv"}
     )
+
+
+# ========== 固定资产管理 ==========
+
+@accounting_bp.route("/fixed-assets", methods=["GET", "POST"])
+def fixed_assets():
+    """固定资产管理"""
+    conn = get_db()
+    # 确保表存在
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS fixed_assets (
+            id TEXT PRIMARY KEY,
+            asset_code TEXT UNIQUE NOT NULL,
+            asset_name TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT '设备',
+            department TEXT,
+            purchase_date TEXT NOT NULL,
+            original_value REAL NOT NULL DEFAULT 0,
+            residual_value REAL NOT NULL DEFAULT 0,
+            useful_life_months INTEGER NOT NULL DEFAULT 60,
+            monthly_depreciation REAL NOT NULL DEFAULT 0,
+            accumulated_depreciation REAL NOT NULL DEFAULT 0,
+            net_value REAL NOT NULL DEFAULT 0,
+            account_code TEXT DEFAULT '1601',
+            status TEXT DEFAULT '使用中',
+            location TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+
+    message = None
+    error = None
+
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        now = datetime.now().isoformat()
+
+        try:
+            if action == "create":
+                asset_id = str(uuid.uuid4())
+                name = request.form.get("asset_name", "")
+                category = request.form.get("category", "设备")
+                original = float(request.form.get("original_value", 0))
+                residual = float(request.form.get("residual_value", 0))
+                months = int(request.form.get("useful_life_months", 60))
+                monthly_dep = round((original - residual) / months, 2) if months > 0 else 0
+                net_value = original
+
+                existing = conn.execute(
+                    "SELECT COALESCE(MAX(CAST(SUBSTR(asset_code,4) AS INTEGER)),0)+1 FROM fixed_assets"
+                ).fetchone()[0]
+                asset_code = f"FA{existing:04d}"
+
+                conn.execute("""
+                    INSERT INTO fixed_assets (id, asset_code, asset_name, category, department,
+                        purchase_date, original_value, residual_value, useful_life_months,
+                        monthly_depreciation, accumulated_depreciation, net_value,
+                        account_code, status, location, notes, created_at, updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """, (asset_id, asset_code, name, category,
+                      request.form.get("department", ""),
+                      request.form.get("purchase_date", date.today().isoformat()),
+                      original, residual, months, monthly_dep, 0, net_value,
+                      request.form.get("account_code", "1601"),
+                      request.form.get("status", "使用中"),
+                      request.form.get("location", ""),
+                      request.form.get("notes", ""), now, now))
+                conn.commit()
+                message = f"固定资产 {asset_code} 创建成功"
+
+            elif action == "update":
+                aid = request.form.get("asset_id", "")
+                original = float(request.form.get("original_value", 0))
+                residual = float(request.form.get("residual_value", 0))
+                months = int(request.form.get("useful_life_months", 60))
+                monthly_dep = round((original - residual) / months, 2) if months > 0 else 0
+
+                conn.execute("""
+                    UPDATE fixed_assets SET asset_name=?,category=?,department=?,
+                        purchase_date=?,original_value=?,residual_value=?,
+                        useful_life_months=?,monthly_depreciation=?,
+                        account_code=?,status=?,location=?,notes=?,updated_at=?
+                    WHERE id=?
+                """, (request.form.get("asset_name"), request.form.get("category"),
+                      request.form.get("department"), request.form.get("purchase_date"),
+                      original, residual, months, monthly_dep,
+                      request.form.get("account_code", "1601"),
+                      request.form.get("status"), request.form.get("location"),
+                      request.form.get("notes"), now, aid))
+                conn.commit()
+                message = "固定资产信息已更新"
+
+            elif action == "delete":
+                aid = request.form.get("asset_id", "")
+                conn.execute("DELETE FROM fixed_assets WHERE id=?", (aid,))
+                conn.commit()
+                message = "固定资产已删除"
+
+            elif action == "dispose":
+                aid = request.form.get("asset_id", "")
+                conn.execute(
+                    "UPDATE fixed_assets SET status='已处置', updated_at=? WHERE id=?",
+                    (now, aid))
+                conn.commit()
+                message = "固定资产已标记为处置"
+
+        except Exception as e:
+            error = f"操作失败: {e}"
+
+    assets = [dict(a) for a in conn.execute(
+        "SELECT * FROM fixed_assets ORDER BY status, purchase_date DESC").fetchall()]
+    depts = [dict(d) for d in conn.execute(
+        "SELECT DISTINCT name FROM departments ORDER BY name").fetchall()]
+
+    # 汇总
+    total_original = sum(a["original_value"] for a in assets if a["status"] == "使用中")
+    total_dep = sum(a["accumulated_depreciation"] for a in assets if a["status"] == "使用中")
+    total_net = sum(a["net_value"] for a in assets if a["status"] == "使用中")
+
+    conn.close()
+    return render_template("fixed_assets.html", assets=assets, depts=depts,
+                           total_original=total_original, total_dep=total_dep,
+                           total_net=total_net, message=message, error=error,
+                           today=date.today().isoformat())
+
+
+# ========== 自动计提折旧 ==========
+
+@accounting_bp.route("/depreciate-fixed-assets", methods=["POST"])
+def depreciate_fixed_assets():
+    """月末计提折旧 - 生成折旧凭证"""
+    period = request.form.get("period", "")
+    operator = request.form.get("operator", "管理员")
+    if not period:
+        period = date.today().strftime("%Y-%m")
+
+    conn = get_db()
+    now = datetime.now().isoformat()
+
+    # 只对使用中的固定资产计提
+    assets = [dict(a) for a in conn.execute(
+        "SELECT * FROM fixed_assets WHERE status='使用中' ORDER BY id").fetchall()]
+
+    if len(assets) == 0:
+        conn.close()
+        return redirect("/fixed-assets")
+
+    total_depreciation = sum(a["monthly_depreciation"] for a in assets)
+    if total_depreciation <= 0:
+        conn.close()
+        return redirect("/fixed-assets")
+
+    # 按部门汇总折旧费用
+    from collections import defaultdict
+    dept_map = defaultdict(float)
+    for a in assets:
+        dept = a["department"] or "管理部门"
+        dept_map[dept] += a["monthly_depreciation"]
+
+    # 更新累计折旧和净值
+    for a in assets:
+        dep = a["monthly_depreciation"]
+        new_accum = round(a["accumulated_depreciation"] + dep, 2)
+        new_net = round(a["original_value"] - new_accum, 2)
+        conn.execute(
+            "UPDATE fixed_assets SET accumulated_depreciation=?, net_value=?, updated_at=? WHERE id=?",
+            (new_accum, new_net, now, a["id"]))
+
+    # 生成折旧凭证
+    cursor = conn.cursor()
+    seq = cursor.execute(
+        "SELECT COUNT(*) FROM accounting_vouchers WHERE accounting_period=?", (period,)
+    ).fetchone()[0] + 1
+    voucher_no = f"{period}-ZJ{seq:03d}"
+    vid = str(uuid.uuid4())
+
+    cursor.execute("""
+        INSERT INTO accounting_vouchers
+        (id, voucher_no, voucher_date, accounting_period, summary,
+         total_debit, total_credit, created_by, status, created_at, updated_at)
+        VALUES (?, ?, date('now'), ?, ?, ?, ?, ?, '已记账', ?, ?)
+    """, (vid, voucher_no, period,
+          f"月末计提折旧 - {period} ({len(assets)}项资产)",
+          f"{total_depreciation:.2f}", f"{total_depreciation:.2f}",
+          operator, now, now))
+
+    # Debit lines (制造费用/管理费用)
+    for dept, amount in dept_map.items():
+        if amount > 0:
+            acc_code = "5101" if dept in ["生产部门"] else "6602"
+            acc_name = "制造费用" if acc_code == "5101" else "管理费用"
+            cursor.execute("""
+                INSERT INTO voucher_lines
+                (id, voucher_id, account_code, account_name, debit, credit, summary)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (str(uuid.uuid4()), vid, acc_code, acc_name,
+                  f"{amount:.2f}", "0.00",
+                  f"{dept}折旧({len(assets)}项)"))
+
+    # Credit line (累计折旧)
+    cursor.execute("""
+        INSERT INTO voucher_lines
+        (id, voucher_id, account_code, account_name, debit, credit, summary)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (str(uuid.uuid4()), vid, "1602", "累计折旧",
+          "0.00", f"{total_depreciation:.2f}",
+          f"计提折旧({len(assets)}项)"))
+
+    conn.commit()
+    conn.close()
+    return redirect("/fixed-assets")

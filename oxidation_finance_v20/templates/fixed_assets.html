@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>固定资产 - 氧化加工厂财务系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .header { background: #1890ff; color: white; padding: 20px; margin-bottom: 20px; }
+        .header h1 { font-size: 24px; }
+        .nav { background: white; padding: 10px 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .nav a { color: #333; text-decoration: none; margin-right: 20px; font-size: 14px; }
+        .nav a:hover { color: #1890ff; }
+        .nav a.active { color: #1890ff; font-weight: 600; border-bottom: 2px solid #1890ff; }
+        .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #fafafa; font-weight: 600; color: #555; }
+        td.num { text-align: right; font-family: monospace; }
+        tr:hover { background: #fafafa; }
+        .btn { display: inline-block; padding: 8px 16px; background: #1890ff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-decoration: none; }
+        .btn:hover { background: #40a9ff; }
+        .btn-sm { padding: 5px 10px; font-size: 12px; }
+        .btn-danger { background: #f5222d; }
+        .btn-danger:hover { background: #ff4d4f; }
+        .btn-warning { background: #fa8c16; }
+        .btn-warning:hover { background: #ffa940; }
+        .btn-default { background: white; color: #333; border: 1px solid #d9d9d9; }
+        .btn-default:hover { background: #fafafa; color: #1890ff; border-color: #1890ff; }
+        .flash { padding: 12px 15px; border-radius: 4px; margin-bottom: 15px; font-size: 14px; }
+        .flash-success { background: #f6ffed; border: 1px solid #b7eb8f; color: #52c41a; }
+        .flash-error { background: #fff1f0; border: 1px solid #ffa39e; color: #f5222d; }
+        .summary-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; }
+        .summary-card { background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .summary-card .label { font-size: 12px; color: #888; margin-bottom: 4px; }
+        .summary-card .value { font-size: 22px; font-weight: bold; color: #1890ff; }
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; }
+        .tag-green { background: #f6ffed; color: #52c41a; }
+        .tag-red { background: #fff1f0; color: #f5222d; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; }
+        .modal-content { background: white; max-width: 560px; margin: 60px auto; padding: 24px; border-radius: 8px; max-height: 80vh; overflow-y: auto; }
+        .modal-content h2 { margin-bottom: 16px; font-size: 18px; }
+        .form-group { margin-bottom: 14px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: 500; font-size: 13px; }
+        .form-group input, .form-group select { width: 100%; padding: 8px 12px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 13px; }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: #1890ff; }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .btn-group { display: flex; gap: 10px; margin-top: 16px; justify-content: flex-end; }
+    </style>
+</head>
+<body>
+    <div class="header"><div class="container"><h1>固定资产管理</h1></div></div>
+    <div class="nav"><div class="container">
+        <a href="/">首页</a><a href="/orders">订单</a><a href="/customers">客户</a>
+        <a href="/reports">报表</a><a href="/chart-of-accounts">会计科目</a>
+        <a href="/vouchers">会计凭证</a><a href="/accounting-books">会计账簿</a>
+        <a href="/fixed-assets" class="active">固定资产</a>
+        <a href="/system-settings">系统设置</a>
+    </div></div>
+    <div class="container">
+        {% if message %}<div class="flash flash-success">{{ message }}</div>{% endif %}
+        {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+
+        <div class="summary-cards">
+            <div class="summary-card"><div class="label">使用中资产原值</div><div class="value">{{ '%.2f'|format(total_original) }}</div></div>
+            <div class="summary-card"><div class="label">累计折旧</div><div class="value">{{ '%.2f'|format(total_dep) }}</div></div>
+            <div class="summary-card"><div class="label">净值合计</div><div class="value">{{ '%.2f'|format(total_net) }}</div></div>
+        </div>
+
+        <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                <span style="font-weight:600;">资产列表 ({{ assets|length }} 项)</span>
+                <button class="btn btn-sm" onclick="openModal('create')">+ 新增资产</button>
+            </div>
+            {% if assets %}
+            <table>
+                <thead>
+                    <tr><th>编号</th><th>名称</th><th>类别</th><th>部门</th><th class="num">原值</th><th class="num">月折旧</th><th class="num">累计折旧</th><th class="num">净值</th><th>状态</th><th style="width:120px;">操作</th></tr>
+                </thead>
+                <tbody>
+                    {% for a in assets %}
+                    <tr>
+                        <td>{{ a.asset_code }}</td>
+                        <td><strong>{{ a.asset_name }}</strong></td>
+                        <td>{{ a.category }}</td>
+                        <td>{{ a.department or '-' }}</td>
+                        <td class="num">{{ '%.2f'|format(a.original_value) }}</td>
+                        <td class="num">{{ '%.2f'|format(a.monthly_depreciation) }}</td>
+                        <td class="num">{{ '%.2f'|format(a.accumulated_depreciation) }}</td>
+                        <td class="num" style="font-weight:600;">{{ '%.2f'|format(a.net_value) }}</td>
+                        <td><span class="tag {% if a.status=='使用中' %}tag-green{% else %}tag-red{% endif %}">{{ a.status }}</span></td>
+                        <td>
+                            {% if a.status == '使用中' %}
+                            <button class="btn btn-sm btn-default" onclick="editAsset('{{ a.id }}','{{ a.asset_name }}','{{ a.category }}','{{ a.department or '' }}','{{ a.purchase_date }}','{{ a.original_value }}','{{ a.residual_value }}','{{ a.useful_life_months }}','{{ a.account_code }}','{{ a.location or '' }}','{{ a.notes or '' }}')">编辑</button>
+                            <button class="btn btn-sm btn-warning" onclick="disposeAsset('{{ a.id }}')">处置</button>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div style="text-align:center;padding:40px;color:#999;">暂无固定资产，点击"新增资产"添加</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 新增/编辑弹窗 -->
+    <div class="modal" id="assetModal">
+        <div class="modal-content">
+            <h2 id="modalTitle">新增固定资产</h2>
+            <form method="POST" id="assetForm">
+                <input type="hidden" name="action" id="formAction" value="create">
+                <input type="hidden" name="asset_id" id="formAssetId" value="">
+                <div class="form-group"><label>资产名称 *</label><input type="text" name="asset_name" id="formName" required></div>
+                <div class="form-grid">
+                    <div class="form-group"><label>类别</label>
+                        <select name="category" id="formCategory">
+                            <option value="设备">设备</option><option value="厂房">厂房</option>
+                            <option value="车辆">车辆</option><option value="电子设备">电子设备</option>
+                            <option value="其他">其他</option>
+                        </select></div>
+                    <div class="form-group"><label>使用部门</label>
+                        <select name="department" id="formDept">
+                            <option value="">-- 无 --</option>
+                            {% for d in depts %}<option value="{{ d.name }}">{{ d.name }}</option>{% endfor %}
+                        </select></div>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group"><label>购入日期</label><input type="date" name="purchase_date" id="formDate" value="{{ today }}"></div>
+                    <div class="form-group"><label>存放位置</label><input type="text" name="location" id="formLocation"></div>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group"><label>原值 *</label><input type="number" step="0.01" name="original_value" id="formOriginal" placeholder="0.00" required></div>
+                    <div class="form-group"><label>预计残值</label><input type="number" step="0.01" name="residual_value" id="formResidual" placeholder="0.00" value="0"></div>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group"><label>使用年限(月)</label><input type="number" name="useful_life_months" id="formMonths" value="60"></div>
+                    <div class="form-group"><label>会计科目</label>
+                        <select name="account_code" id="formAccount">
+                            <option value="1601">1601 固定资产</option>
+                            <option value="1604">1604 在建工程</option>
+                        </select></div>
+                </div>
+                <div class="form-group"><label>备注</label><input type="text" name="notes" id="formNotes"></div>
+                <div class="btn-group">
+                    <button type="button" class="btn btn-sm btn-default" onclick="closeModal()">取消</button>
+                    <button type="submit" class="btn btn-sm">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 处置确认 -->
+    <div class="modal" id="disposeModal">
+        <div class="modal-content" style="max-width:400px;">
+            <h2>确认处置</h2>
+            <p style="margin:15px 0;">确定要将此固定资产标记为"已处置"吗？</p>
+            <p style="color:#999;font-size:13px;">处置后将不再计提折旧。</p>
+            <form method="POST">
+                <input type="hidden" name="action" value="dispose">
+                <input type="hidden" name="asset_id" id="disposeAssetId">
+                <div class="btn-group">
+                    <button type="button" class="btn btn-sm btn-default" onclick="document.getElementById('disposeModal').style.display='none'">取消</button>
+                    <button type="submit" class="btn btn-sm btn-warning">确认处置</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function openModal(type) {
+            document.getElementById('modalTitle').textContent = type === 'create' ? '新增固定资产' : '编辑固定资产';
+            document.getElementById('formAction').value = type;
+            if (type === 'create') {
+                document.getElementById('assetForm').reset();
+                document.getElementById('formAssetId').value = '';
+                document.getElementById('formDate').value = '{{ today }}';
+                document.getElementById('formMonths').value = '60';
+            }
+            document.getElementById('assetModal').style.display = 'block';
+        }
+        function closeModal() {
+            document.getElementById('assetModal').style.display = 'none';
+        }
+        function editAsset(id, name, cat, dept, date, original, residual, months, acct, loc, notes) {
+            document.getElementById('formAssetId').value = id;
+            document.getElementById('formName').value = name;
+            document.getElementById('formCategory').value = cat;
+            document.getElementById('formDept').value = dept;
+            document.getElementById('formDate').value = date;
+            document.getElementById('formOriginal').value = original;
+            document.getElementById('formResidual').value = residual;
+            document.getElementById('formMonths').value = months;
+            document.getElementById('formAccount').value = acct;
+            document.getElementById('formLocation').value = loc;
+            document.getElementById('formNotes').value = notes;
+            openModal('update');
+        }
+        function disposeAsset(id) {
+            document.getElementById('disposeAssetId').value = id;
+            document.getElementById('disposeModal').style.display = 'block';
+        }
+        document.getElementById('assetModal').addEventListener('click', function(e) {
+            if (e.target === this) closeModal();
+        });
+    </script>
+</body>
+</html>
