@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>系统参数设置 - 氧化加工厂财务系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; padding: 20px; }
+        .header { background: #1890ff; color: white; padding: 20px; margin-bottom: 20px; }
+        .header h1 { font-size: 24px; }
+        .nav { background: white; padding: 10px 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .nav a { color: #333; text-decoration: none; margin-right: 20px; padding: 5px 10px; font-size: 14px; }
+        .nav a:hover { color: #1890ff; }
+        .nav a.active { color: #1890ff; font-weight: 600; border-bottom: 2px solid #1890ff; }
+        .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .card h2 { font-size: 18px; margin-bottom: 15px; color: #333; }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: 500; font-size: 14px; color: #333; }
+        .form-group input, .form-group select { width: 100%; padding: 8px 12px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: #1890ff; box-shadow: 0 0 0 2px rgba(24,144,255,0.2); }
+        .form-group .help-text { font-size: 12px; color: #999; margin-top: 4px; }
+        .btn { display: inline-block; padding: 10px 24px; background: #1890ff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .btn:hover { background: #40a9ff; }
+        .btn-default { background: #fff; color: #333; border: 1px solid #d9d9d9; }
+        .btn-default:hover { background: #fafafa; color: #1890ff; border-color: #1890ff; }
+        .flash { padding: 12px 15px; border-radius: 4px; margin-bottom: 15px; font-size: 14px; }
+        .flash-success { background: #f6ffed; border: 1px solid #b7eb8f; color: #52c41a; }
+        .flash-error { background: #fff1f0; border: 1px solid #ffa39e; color: #f5222d; }
+        .toggle-group { display: flex; align-items: center; gap: 12px; }
+        .toggle { position: relative; width: 44px; height: 22px; display: inline-block; }
+        .toggle input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #ccc; border-radius: 22px; transition: 0.3s; }
+        .toggle-slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: 0.3s; }
+        .toggle input:checked + .toggle-slider { background: #52c41a; }
+        .toggle input:checked + .toggle-slider:before { transform: translateX(22px); }
+        .toggle-label { font-size: 14px; color: #666; }
+        .btn-group { display: flex; gap: 10px; margin-top: 20px; }
+        .section { border-top: 1px solid #f0f0f0; padding-top: 20px; margin-top: 20px; }
+        .section-title { font-size: 16px; font-weight: 600; color: #1890ff; margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+    <div class="header"><div class="container"><h1>系统参数设置</h1></div></div>
+    <div class="nav"><div class="container">
+        <a href="/">首页</a><a href="/orders">订单</a><a href="/customers">客户</a>
+        <a href="/reports">报表</a><a href="/chart-of-accounts">会计科目</a>
+        <a href="/vouchers">会计凭证</a><a href="/accounting-books">会计账簿</a>
+        <a href="/system-settings" class="active">系统设置</a>
+    </div></div>
+    <div class="container">
+        {% if message %}<div class="flash flash-success">{{ message }}</div>{% endif %}
+        {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+
+        <form method="POST">
+            <div class="card">
+                <h2>基本信息</h2>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>公司名称</label>
+                        <input type="text" name="company_name" value="{{ settings.company_name }}">
+                        <div class="help-text">将显示在报表和凭证抬头</div>
+                    </div>
+                    <div class="form-group">
+                        <label>会计准则</label>
+                        <select name="accounting_standard">
+                            <option value="小企业会计准则" {% if settings.accounting_standard=='小企业会计准则' %}selected{% endif %}>小企业会计准则</option>
+                            <option value="企业会计准则" {% if settings.accounting_standard=='企业会计准则' %}selected{% endif %}>企业会计准则</option>
+                        </select>
+                        <div class="help-text">影响科目体系和报表格式</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>会计参数</h2>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>默认银行账户</label>
+                        <select name="default_bank">
+                            <option value="对公账户" {% if settings.default_bank=='对公账户' %}selected{% endif %}>对公账户</option>
+                            <option value="私人账户" {% if settings.default_bank=='私人账户' %}selected{% endif %}>私人账户</option>
+                            <option value="基本户" {% if settings.default_bank=='基本户' %}selected{% endif %}>基本户</option>
+                            {% for b in banks %}<option value="{{ b.bank_type }}" {% if settings.default_bank==b.bank_type %}selected{% endif %}>{{ b.bank_type }}</option>{% endfor %}
+                        </select>
+                        <div class="help-text">收入支出录入时的默认银行账户</div>
+                    </div>
+                    <div class="form-group">
+                        <label>增值税税率 (%)</label>
+                        <input type="number" step="0.5" name="vat_rate" value="{{ settings.vat_rate }}" min="0" max="20">
+                        <div class="help-text">用于计算含税/不含税金额</div>
+                    </div>
+                    <div class="form-group">
+                        <label>会计年度起始日期</label>
+                        <input type="text" name="fiscal_year_start" value="{{ settings.fiscal_year_start }}" placeholder="01-01">
+                        <div class="help-text">格式: MM-DD，默认为 01-01</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>自动化设置</h2>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>凭证自动审核</label>
+                        <div class="toggle-group">
+                            <label class="toggle">
+                                <input type="checkbox" name="auto_review" value="1" {% if settings.auto_review=='1' %}checked{% endif %}>
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <span class="toggle-label">{% if settings.auto_review=='1' %}已开启{% else %}已关闭{% endif %}</span>
+                        </div>
+                        <div class="help-text">系统自动生成的凭证创建后自动标记为"已审核"</div>
+                    </div>
+                    <div class="form-group">
+                        <label>凭证自动记账</label>
+                        <div class="toggle-group">
+                            <label class="toggle">
+                                <input type="checkbox" name="auto_post" value="1" {% if settings.auto_post=='1' %}checked{% endif %}>
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <span class="toggle-label">{% if settings.auto_post=='1' %}已开启{% else %}已关闭{% endif %}</span>
+                        </div>
+                        <div class="help-text">系统自动生成的凭证创建后自动标记为"已记账"</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="btn-group">
+                <button type="submit" class="btn">保存设置</button>
+                <a href="/" class="btn btn-default">返回首页</a>
+            </div>
+        </form>
+    </div>
+
+    <script>
+        document.querySelectorAll('.toggle input').forEach(checkbox => {
+            checkbox.addEventListener('change', function() {
+                const label = this.closest('.toggle-group').querySelector('.toggle-label');
+                label.textContent = this.checked ? '已开启' : '已关闭';
+            });
+        });
+    </script>
+</body>
+</html>

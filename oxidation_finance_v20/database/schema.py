@@ -389,6 +389,16 @@ def create_tables(conn: sqlite3.Connection):
         )
     """)
 
+    # 17. 系统参数表
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS system_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            description TEXT,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
     # 新增表的索引
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_accounts_type ON chart_of_accounts(account_type)"

@@ -2,9 +2,11 @@
 # -*- coding: utf-8 -*-
 """会计路由：科目管理、凭证管理、账簿查询"""
 
+import csv
+import io
 import uuid
 from datetime import date, datetime
-from flask import Blueprint, render_template, request, redirect
+from flask import Blueprint, Response, render_template, request, redirect
 
 from routes.helpers import get_db, to_float
 
@@ -139,6 +141,90 @@ def add_project():
     return redirect("/chart-of-accounts")
 
 
+# ========== 期初余额管理 ==========
+
+@accounting_bp.route("/chart-of-accounts/opening-balances", methods=["GET", "POST"])
+def opening_balances():
+    """期初余额录入页面"""
+    conn = get_db()
+    message = None
+    error = None
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+
+    if request.method == "POST":
+        account_codes = request.form.getlist("account_code[]")
+        balances = request.form.getlist("balance[]")
+        now = datetime.now().isoformat()
+
+        # 借贷平衡校验
+        total_debit_open = 0.0
+        total_credit_open = 0.0
+        account_balances_input = {}
+
+        accounts_map = {a["code"]: dict(a) for a in conn.execute(
+            "SELECT code, name, balance_direction FROM chart_of_accounts WHERE is_active=1"
+        ).fetchall()}
+
+        for i, code in enumerate(account_codes):
+            bal = float(balances[i] or 0)
+            if bal != 0 and code in accounts_map:
+                direction = accounts_map[code]["balance_direction"]
+                account_balances_input[code] = bal
+                if direction == "借":
+                    total_debit_open += bal
+                else:
+                    total_credit_open += bal
+
+        if abs(total_debit_open - total_credit_open) > 0.01:
+            error = f"借贷不平衡：借方期初 {total_debit_open:,.2f} ≠ 贷方期初 {total_credit_open:,.2f}，差额 {abs(total_debit_open-total_credit_open):,.2f}"
+        else:
+            try:
+                for code, bal in account_balances_input.items():
+                    exist = conn.execute(
+                        "SELECT id FROM account_balances WHERE account_code=? AND period_id=?",
+                        (code, period)).fetchone()
+                    if exist:
+                        conn.execute(
+                            "UPDATE account_balances SET opening_balance=?, updated_at=? WHERE id=?",
+                            (bal, now, exist["id"]))
+                    else:
+                        conn.execute(
+                            """INSERT INTO account_balances
+                               (id, account_code, period_id, opening_balance, debit_amount,
+                                credit_amount, closing_balance, created_at, updated_at)
+                               VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?)""",
+                            (str(uuid.uuid4()), code, period, bal, bal, now, now))
+                conn.commit()
+                message = f"期初余额保存成功，借方 {total_debit_open:,.2f} = 贷方 {total_credit_open:,.2f}"
+            except Exception as e:
+                error = f"保存失败: {e}"
+
+    # 获取科目列表（含已存的期初余额）
+    accounts = [dict(a) for a in conn.execute(
+        "SELECT code, name, account_type, balance_direction FROM chart_of_accounts WHERE is_active=1 ORDER BY code"
+    ).fetchall()]
+
+    # 获取已有的期初余额
+    saved_balances = {}
+    for b in conn.execute(
+        "SELECT account_code, opening_balance FROM account_balances WHERE period_id=?", (period,)
+    ).fetchall():
+        saved_balances[b["account_code"]] = b["opening_balance"]
+
+    # 分类统计
+    total_dr = sum(v for k, v in saved_balances.items()
+                   if any(a["code"] == k and a["balance_direction"] == "借" for a in accounts))
+    total_cr = sum(v for k, v in saved_balances.items()
+                   if any(a["code"] == k and a["balance_direction"] == "贷" for a in accounts))
+
+    conn.close()
+
+    return render_template("opening_balances.html",
+                           accounts=accounts, saved_balances=saved_balances,
+                           period=period, total_debit=total_dr, total_credit=total_cr,
+                           message=message, error=error)
+
+
 # ========== 会计凭证管理 ==========
 
 @accounting_bp.route("/vouchers", methods=["GET", "POST"])
@@ -175,6 +261,8 @@ def vouchers_page():
                 accounts = request.form.getlist("line_account[]")
                 debits = request.form.getlist("line_debit[]")
                 credits = request.form.getlist("line_credit[]")
+                aux_types = request.form.getlist("line_aux_type[]")
+                aux_ids = request.form.getlist("line_aux_id[]")
 
                 total_debit = sum(float(d or 0) for d in debits)
                 total_credit = sum(float(c or 0) for c in credits)
@@ -204,6 +292,8 @@ def vouchers_page():
                         account_code = accounts[i]
                         debit = float(debits[i] or 0)
                         credit = float(credits[i] or 0)
+                        aux_type = aux_types[i] if i < len(aux_types) else ""
+                        aux_id = aux_ids[i] if i < len(aux_ids) else ""
                         if debit > 0 or credit > 0:
                             acc = conn.execute(
                                 "SELECT name FROM chart_of_accounts WHERE code=?", (account_code,)
@@ -211,10 +301,12 @@ def vouchers_page():
                             acc_name = acc["name"] if acc else account_code
                             cursor.execute(
                                 """INSERT INTO voucher_lines
-                                   (id, voucher_id, account_code, account_name, debit, credit, summary)
-                                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                                   (id, voucher_id, account_code, account_name, debit, credit,
+                                    summary, related_entity_type, related_entity_id)
+                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                                 (str(uuid.uuid4()), vid, account_code, acc_name,
-                                 f"{debit:.2f}", f"{credit:.2f}", summary))
+                                 f"{debit:.2f}", f"{credit:.2f}", summary,
+                                 aux_type if aux_type else None, aux_id if aux_id else None))
                     conn.commit()
                     message = f"凭证 {voucher_no} 创建成功"
             except Exception as e:
@@ -226,8 +318,18 @@ def vouchers_page():
     """).fetchall()]
 
     accounts_list = [dict(a) for a in conn.execute(
-        "SELECT code, name, account_type FROM chart_of_accounts WHERE is_active=1 ORDER BY code"
+        "SELECT code, name, account_type, aux_customer, aux_supplier, aux_department, aux_project, aux_employee FROM chart_of_accounts WHERE is_active=1 ORDER BY code"
     ).fetchall()]
+
+    # 辅助核算：获取实体列表
+    customers_list = [dict(c) for c in conn.execute(
+        "SELECT id, name FROM customers ORDER BY name").fetchall()]
+    suppliers_list = [dict(s) for s in conn.execute(
+        "SELECT id, name FROM suppliers ORDER BY name").fetchall()]
+    departments_list = [dict(d) for d in conn.execute(
+        "SELECT id, code, name FROM departments ORDER BY code").fetchall()]
+    projects_list = [dict(p) for p in conn.execute(
+        "SELECT id, code, name FROM projects ORDER BY code").fetchall()]
 
     stats = {
         "total": len(vouchers),
@@ -241,6 +343,8 @@ def vouchers_page():
 
     conn.close()
     return render_template("vouchers.html", vouchers=vouchers, accounts_list=accounts_list,
+                           customers_list=customers_list, suppliers_list=suppliers_list,
+                           departments_list=departments_list, projects_list=projects_list,
                            stats=stats, periods=periods, message=message, error=error,
                            today=date.today().isoformat())
 
@@ -263,11 +367,13 @@ def voucher_detail(voucher_id):
 
 @accounting_bp.route("/accounting-books")
 def accounting_books():
-    """会计账簿查询页面（余额表/明细账/财务报表/期间管理）"""
+    """会计账簿查询页面（余额表/明细账/试算平衡/序时簿/财务报表/期间管理）"""
     conn = get_db()
     period = request.args.get("period", "")
     account_code = request.args.get("account_code", "")
     book_type = request.args.get("type", "balance")
+    aux_type = request.args.get("aux_type", "customer")
+    aux_entity = request.args.get("aux_entity", "")
 
     periods = [dict(p) for p in conn.execute(
         "SELECT DISTINCT accounting_period FROM accounting_vouchers ORDER BY accounting_period DESC"
@@ -277,7 +383,6 @@ def accounting_books():
         "SELECT code, name, account_type, balance_direction FROM chart_of_accounts WHERE is_active=1 ORDER BY code"
     ).fetchall()]
 
-    # 会计期间管理数据
     period_records = [dict(p) for p in conn.execute(
         "SELECT * FROM accounting_periods ORDER BY period_name DESC"
     ).fetchall()]
@@ -289,13 +394,25 @@ def accounting_books():
     detail_data = []
     acc_info = None
     statement_data = {}
+    trial_data = {}
+    journal_data = []
+    aux_data = {}
+    aux_detail_data = []
 
-    if period and book_type == "balance":
+    # ---- 公共：获取期初余额 ----
+    opening_map = {}
+    for b in conn.execute(
+        "SELECT account_code, opening_balance FROM account_balances WHERE period_id=?", (period or "",)
+    ).fetchall():
+        opening_map[b["account_code"]] = b["opening_balance"]
+
+    # ---- 公共：获取本期发生额 ----
+    def get_period_amounts(p):
         rows = conn.execute("""
             SELECT a.code, a.name, a.account_type, a.balance_direction,
-                COALESCE(SUM(CASE WHEN v.status='已记账' AND CAST(l.debit AS REAL) > 0
+                COALESCE(SUM(CASE WHEN v.status='已记账' AND CAST(l.debit AS REAL)>0
                     THEN CAST(l.debit AS REAL) ELSE 0 END), 0) as debit_sum,
-                COALESCE(SUM(CASE WHEN v.status='已记账' AND CAST(l.credit AS REAL) > 0
+                COALESCE(SUM(CASE WHEN v.status='已记账' AND CAST(l.credit AS REAL)>0
                     THEN CAST(l.credit AS REAL) ELSE 0 END), 0) as credit_sum
             FROM chart_of_accounts a
             LEFT JOIN voucher_lines l ON l.account_code = a.code
@@ -303,15 +420,21 @@ def accounting_books():
             WHERE a.is_active = 1
             GROUP BY a.code, a.name, a.account_type, a.balance_direction
             ORDER BY a.code
-        """, (period,)).fetchall()
+        """, (p,)).fetchall()
+        return [dict(r) for r in rows]
 
-        balance_data = []
+    if period and book_type == "balance":
+        rows = get_period_amounts(period)
         for r in rows:
-            r = dict(r)
+            r["opening_balance"] = opening_map.get(r["code"], 0.0)
             direction = r["balance_direction"] or "借"
-            closing = (r["debit_sum"] - r["credit_sum"]) if direction == "借" else (r["credit_sum"] - r["debit_sum"])
+            opening = r["opening_balance"]
+            if direction == "借":
+                closing = opening + r["debit_sum"] - r["credit_sum"]
+            else:
+                closing = opening + r["credit_sum"] - r["debit_sum"]
             r["closing_balance"] = closing
-            balance_data.append(r)
+        balance_data = rows
 
     elif period and account_code and book_type == "detail":
         detail_rows = conn.execute("""
@@ -329,70 +452,157 @@ def accounting_books():
             (account_code,)).fetchone()
         acc_info = dict(acc_info_row) if acc_info_row else None
 
-    elif book_type == "statement" and period:
-        # 计算科目余额用于财务报表
-        rows = conn.execute("""
-            SELECT a.code, a.name, a.account_type, a.balance_direction,
-                COALESCE(SUM(CASE WHEN v.status='已记账' AND CAST(l.debit AS REAL) > 0
-                    THEN CAST(l.debit AS REAL) ELSE 0 END), 0) as debit_sum,
-                COALESCE(SUM(CASE WHEN v.status='已记账' AND CAST(l.credit AS REAL) > 0
-                    THEN CAST(l.credit AS REAL) ELSE 0 END), 0) as credit_sum
-            FROM chart_of_accounts a
-            LEFT JOIN voucher_lines l ON l.account_code = a.code
-            LEFT JOIN accounting_vouchers v ON v.id = l.voucher_id AND v.accounting_period = ?
-            WHERE a.is_active = 1
-            GROUP BY a.code, a.name, a.account_type, a.balance_direction
-            ORDER BY a.code
-        """, (period,)).fetchall()
-
-        # 资产负债表
-        bs_assets = []
-        bs_liabilities = []
-        bs_equity = []
-        total_assets = 0.0
-        total_liabilities = 0.0
-        total_equity = 0.0
-
-        # 利润表
-        is_revenue = []
-        is_costs = []
-        total_revenue = 0.0
-        total_costs = 0.0
+    elif period and book_type == "trial_balance":
+        rows = get_period_amounts(period)
+        trial_rows = []
+        total_dr_open, total_cr_open = 0, 0
+        total_dr_curr, total_cr_curr = 0, 0
+        total_dr_close, total_cr_close = 0, 0
 
         for r in rows:
-            r = dict(r)
+            opening = opening_map.get(r["code"], 0.0)
             direction = r["balance_direction"] or "借"
             if direction == "借":
-                balance = r["debit_sum"] - r["credit_sum"]
+                dr_open = opening
+                cr_open = 0
+                closing = opening + r["debit_sum"] - r["credit_sum"]
             else:
-                balance = r["credit_sum"] - r["debit_sum"]
+                dr_open = 0
+                cr_open = opening
+                closing = opening + r["credit_sum"] - r["debit_sum"]
+
+            dr_close = closing if closing > 0 else 0
+            cr_close = abs(closing) if closing < 0 else 0
+
+            total_dr_open += dr_open
+            total_cr_open += cr_open
+            total_dr_curr += r["debit_sum"]
+            total_cr_curr += r["credit_sum"]
+            total_dr_close += dr_close
+            total_cr_close += cr_close
+
+            trial_rows.append({
+                "code": r["code"], "name": r["name"],
+                "dr_open": dr_open, "cr_open": cr_open,
+                "dr_current": r["debit_sum"], "cr_current": r["credit_sum"],
+                "dr_close": dr_close, "cr_close": cr_close,
+            })
+
+        trial_data = {
+            "rows": trial_rows,
+            "total_dr_open": total_dr_open, "total_cr_open": total_cr_open,
+            "total_dr_current": total_dr_curr, "total_cr_current": total_cr_curr,
+            "total_dr_close": total_dr_close, "total_cr_close": total_cr_close,
+        }
+
+    elif period and book_type == "journal":
+        journal_rows = conn.execute("""
+            SELECT v.voucher_no, v.voucher_date, v.accounting_period,
+                   l.account_code, l.account_name, v.summary,
+                   CAST(l.debit AS REAL) as debit, CAST(l.credit AS REAL) as credit,
+                   v.status, v.id as vid
+            FROM voucher_lines l
+            JOIN accounting_vouchers v ON v.id = l.voucher_id
+            WHERE v.accounting_period = ? AND v.status = '已记账'
+            ORDER BY v.voucher_date, v.voucher_no, l.id
+        """, (period,)).fetchall()
+        journal_data = [dict(j) for j in journal_rows]
+
+    elif period and book_type in ("aux_detail", "aux_balance"):
+        aux_type = request.args.get("aux_type", "customer")
+        aux_entity_id = request.args.get("aux_entity", "")
+
+        # 获取辅助核算实体列表
+        aux_entities = {}
+        if aux_type == "customer":
+            aux_entities = {c["id"]: c for c in [dict(r) for r in conn.execute(
+                "SELECT id, name FROM customers ORDER BY name").fetchall()]}
+        elif aux_type == "supplier":
+            aux_entities = {s["id"]: s for s in [dict(r) for r in conn.execute(
+                "SELECT id, name FROM suppliers ORDER BY name").fetchall()]}
+        elif aux_type == "department":
+            aux_entities = {d["id"]: d for d in [dict(r) for r in conn.execute(
+                "SELECT id, code, name FROM departments ORDER BY code").fetchall()]}
+            for eid, ed in aux_entities.items():
+                ed["display"] = f"{ed.get('code','')} {ed['name']}"
+        elif aux_type == "project":
+            aux_entities = {p["id"]: p for p in [dict(r) for r in conn.execute(
+                "SELECT id, code, name FROM projects ORDER BY code").fetchall()]}
+            for eid, ed in aux_entities.items():
+                ed["display"] = f"{ed.get('code','')} {ed['name']}"
+
+        if book_type == "aux_detail" and aux_entity_id:
+            aux_detail_rows = conn.execute("""
+                SELECT v.voucher_no, v.voucher_date, v.summary,
+                       l.account_code, l.account_name,
+                       CAST(l.debit AS REAL) as debit, CAST(l.credit AS REAL) as credit,
+                       l.related_entity_type, v.status, v.id as vid
+                FROM voucher_lines l
+                JOIN accounting_vouchers v ON v.id = l.voucher_id
+                WHERE l.related_entity_type = ? AND l.related_entity_id = ?
+                  AND v.accounting_period = ? AND v.status = '已记账'
+                ORDER BY v.voucher_date, v.voucher_no
+            """, (aux_type, aux_entity_id, period)).fetchall()
+            aux_detail_data = [dict(d) for d in aux_detail_rows]
+            aux_data = {
+                "type": aux_type,
+                "entity_name": aux_entities.get(aux_entity_id, {}).get("name", aux_entity_id),
+            }
+
+        elif book_type == "aux_balance":
+            rows = conn.execute("""
+                SELECT l.related_entity_id, l.related_entity_type,
+                       COALESCE(SUM(CAST(l.debit AS REAL)), 0) as total_debit,
+                       COALESCE(SUM(CAST(l.credit AS REAL)), 0) as total_credit
+                FROM voucher_lines l
+                JOIN accounting_vouchers v ON v.id = l.voucher_id
+                WHERE l.related_entity_type = ? AND v.accounting_period = ?
+                  AND v.status = '已记账' AND l.related_entity_id IS NOT NULL
+                GROUP BY l.related_entity_id
+                ORDER BY total_debit DESC
+            """, (aux_type, period)).fetchall()
+            aux_data = {
+                "type": aux_type,
+                "rows": [dict(r) for r in rows],
+                "entities": aux_entities,
+            }
+
+    elif book_type == "statement" and period:
+        rows = get_period_amounts(period)
+        bs_assets, bs_liabilities, bs_equity = [], [], []
+        total_assets = total_liabilities = total_equity = 0.0
+        is_revenue, is_costs = [], []
+        total_revenue = total_costs = 0.0
+
+        for r in rows:
+            direction = r["balance_direction"] or "借"
+            opening = opening_map.get(r["code"], 0.0)
+            if direction == "借":
+                balance = opening + r["debit_sum"] - r["credit_sum"]
+            else:
+                balance = opening + r["credit_sum"] - r["debit_sum"]
 
             entry = {"code": r["code"], "name": r["name"], "balance": balance}
 
             if r["account_type"] == "资产类":
-                bs_assets.append(entry)
-                total_assets += balance
+                bs_assets.append(entry); total_assets += balance
             elif r["account_type"] == "负债类":
-                bs_liabilities.append(entry)
-                total_liabilities += balance
+                bs_liabilities.append(entry); total_liabilities += balance
             elif r["account_type"] == "权益类":
-                bs_equity.append(entry)
-                total_equity += balance
+                bs_equity.append(entry); total_equity += balance
             elif r["account_type"] == "成本类":
-                is_costs.append(entry)
-                total_costs += r["debit_sum"]
+                is_costs.append(entry); total_costs += r["debit_sum"]
             elif r["account_type"] == "损益类":
-                if r["code"].startswith("5"):  # 收入类
-                    is_revenue.append(entry)
-                    total_revenue += r["credit_sum"]
-                else:  # 费用类
-                    is_costs.append(entry)
-                    total_costs += r["debit_sum"]
+                if r["code"].startswith("5"):
+                    is_revenue.append(entry); total_revenue += r["credit_sum"]
+                else:
+                    is_costs.append(entry); total_costs += r["debit_sum"]
 
         statement_data = {
             "bs": {"assets": bs_assets, "liabilities": bs_liabilities, "equity": bs_equity,
                    "total_assets": total_assets, "total_liabilities": total_liabilities,
-                   "total_equity": total_equity, "balanced": abs(total_assets - total_liabilities - total_equity) < 0.01},
+                   "total_equity": total_equity,
+                   "balanced": abs(total_assets - total_liabilities - total_equity) < 0.01},
             "is": {"revenue": is_revenue, "costs": is_costs,
                    "total_revenue": total_revenue, "total_costs": total_costs,
                    "net_profit": total_revenue - total_costs},
@@ -400,9 +610,391 @@ def accounting_books():
 
     conn.close()
 
+    # 获取辅助核算实体列表（用于筛选下拉）
+    conn2 = get_db()
+    aux_customers = [dict(c) for c in conn2.execute(
+        "SELECT id, name FROM customers ORDER BY name").fetchall()]
+    aux_suppliers = [dict(s) for s in conn2.execute(
+        "SELECT id, name FROM suppliers ORDER BY name").fetchall()]
+    aux_departments = [dict(d) for d in conn2.execute(
+        "SELECT id, code, name FROM departments ORDER BY code").fetchall()]
+    aux_projects = [dict(p) for p in conn2.execute(
+        "SELECT id, code, name FROM projects ORDER BY code").fetchall()]
+    conn2.close()
+
     return render_template("accounting_books.html",
                            periods=periods, current_period=period,
                            accounts_list=accounts_list, current_account=account_code,
                            book_type=book_type, balance_data=balance_data,
                            detail_data=detail_data, acc_info=acc_info,
-                           period_records=period_records, statement_data=statement_data)
+                           period_records=period_records, statement_data=statement_data,
+                           trial_data=trial_data, journal_data=journal_data,
+                           aux_data=aux_data, aux_detail_data=aux_detail_data,
+                           aux_type=aux_type, aux_entity=aux_entity,
+                           aux_customers=aux_customers, aux_suppliers=aux_suppliers,
+                           aux_departments=aux_departments, aux_projects=aux_projects)
+
+
+# ========== 系统参数设置 ==========
+
+DEFAULT_SETTINGS = {
+    "company_name": "氧化加工厂",
+    "default_bank": "对公账户",
+    "vat_rate": "13",
+    "auto_review": "0",
+    "auto_post": "0",
+    "fiscal_year_start": "01-01",
+    "accounting_standard": "小企业会计准则",
+}
+
+
+def get_setting(conn, key):
+    """获取系统参数值"""
+    row = conn.execute("SELECT value FROM system_settings WHERE key=?", (key,)).fetchone()
+    return row["value"] if row else DEFAULT_SETTINGS.get(key, "")
+
+
+def ensure_default_settings(conn):
+    """确保默认设置存在"""
+    now = datetime.now().isoformat()
+    for key, value in DEFAULT_SETTINGS.items():
+        exist = conn.execute("SELECT key FROM system_settings WHERE key=?", (key,)).fetchone()
+        if not exist:
+            conn.execute(
+                "INSERT INTO system_settings (key, value, description, updated_at) VALUES (?, ?, ?, ?)",
+                (key, value, "", now))
+
+
+@accounting_bp.route("/system-settings", methods=["GET", "POST"])
+def system_settings():
+    """系统参数设置页面"""
+    conn = get_db()
+    # 确保表存在
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS system_settings (
+            key TEXT PRIMARY KEY, value TEXT NOT NULL,
+            description TEXT, updated_at TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    ensure_default_settings(conn)
+    conn.commit()
+
+    message = None
+    error = None
+
+    if request.method == "POST":
+        now = datetime.now().isoformat()
+        try:
+            for key in DEFAULT_SETTINGS:
+                value = request.form.get(key, DEFAULT_SETTINGS[key])
+                conn.execute(
+                    "INSERT INTO system_settings (key, value, description, updated_at) VALUES (?, ?, '', ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=?, updated_at=?",
+                    (key, value, now, value, now))
+            conn.commit()
+            message = "系统参数保存成功"
+        except Exception as e:
+            error = f"保存失败: {e}"
+
+    settings = {}
+    for row in conn.execute("SELECT key, value FROM system_settings").fetchall():
+        settings[row["key"]] = row["value"]
+
+    # 填充默认值
+    for key, value in DEFAULT_SETTINGS.items():
+        if key not in settings:
+            settings[key] = value
+
+    banks = [dict(b) for b in conn.execute(
+        "SELECT DISTINCT bank_type FROM bank_accounts UNION SELECT DISTINCT bank_type FROM bank_transactions"
+    ).fetchall()]
+
+    conn.close()
+    return render_template("system_settings.html", settings=settings,
+                           banks=banks, message=message, error=error,
+                           defaults=DEFAULT_SETTINGS)
+
+
+# ========== 损益结转（月末结账） ==========
+
+@accounting_bp.route("/period-close", methods=["POST"])
+def period_close():
+    """月末损益结转 - 将损益类科目余额转入本年利润"""
+    conn = get_db()
+    period = request.form.get("period", "")
+    operator = request.form.get("operator", "管理员")
+    now = datetime.now().isoformat()
+
+    if not period:
+        conn.close()
+        return redirect("/accounting-books?type=periods")
+
+    try:
+        # 1. 获取所有已记账凭证的损益类科目发生额汇总
+        revenue_rows = conn.execute("""
+            SELECT l.account_code, l.account_name,
+                   COALESCE(SUM(CAST(l.debit AS REAL)), 0) as dr,
+                   COALESCE(SUM(CAST(l.credit AS REAL)), 0) as cr
+            FROM voucher_lines l
+            JOIN accounting_vouchers v ON v.id = l.voucher_id
+            WHERE v.accounting_period = ? AND v.status = '已记账'
+              AND l.account_code LIKE '5%'
+            GROUP BY l.account_code
+        """, (period,)).fetchall()
+
+        expense_rows = conn.execute("""
+            SELECT l.account_code, l.account_name,
+                   COALESCE(SUM(CAST(l.debit AS REAL)), 0) as dr,
+                   COALESCE(SUM(CAST(l.credit AS REAL)), 0) as cr
+            FROM voucher_lines l
+            JOIN accounting_vouchers v ON v.id = l.voucher_id
+            WHERE v.accounting_period = ? AND v.status = '已记账'
+              AND (l.account_code LIKE '5%' AND l.account_code NOT LIKE '50%' AND l.account_code NOT LIKE '51%')
+            GROUP BY l.account_code
+        """, (period,)).fetchall()
+
+        lines_to_create = []
+
+        # 收入类科目（5001, 5051, 5111, 5301）- 贷方余额转入本年利润借方
+        for r in revenue_rows:
+            code = r["account_code"]
+            net = r["cr"] - r["dr"]  # 收入类贷方余额
+            if abs(net) > 0.01:
+                lines_to_create.append({
+                    "code": code,
+                    "debit": net,  # 借：收入（减少）
+                    "credit": 0,
+                })
+
+        # 费用类科目（5401-5801）- 借方余额转入本年利润贷方
+        for r in expense_rows:
+            code = r["account_code"]
+            net = r["dr"] - r["cr"]  # 费用类借方余额
+            if abs(net) > 0.01:
+                lines_to_create.append({
+                    "code": code,
+                    "debit": 0,
+                    "credit": net,  # 贷：费用（减少）
+                })
+
+        if not lines_to_create:
+            conn.close()
+            return redirect("/accounting-books?type=periods")
+
+        # 计算本年利润发生额
+        total_revenue_dr = sum(l["debit"] for l in lines_to_create)
+        total_expense_cr = sum(l["credit"] for l in lines_to_create)
+
+        # 添加本年利润分录（借贷差额）
+        if total_revenue_dr > total_expense_cr:
+            # 盈利：本年利润在贷方
+            lines_to_create.append({
+                "code": "3103",
+                "debit": 0,
+                "credit": total_revenue_dr - total_expense_cr,
+            })
+        elif total_expense_cr > total_revenue_dr:
+            # 亏损：本年利润在借方
+            lines_to_create.append({
+                "code": "3103",
+                "debit": total_expense_cr - total_revenue_dr,
+                "credit": 0,
+            })
+
+        # 2. 创建结转凭证
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) FROM accounting_vouchers WHERE accounting_period=?",
+            (period,))
+        seq = cursor.fetchone()[0] + 1
+        voucher_no = f"{period}-{seq:03d}"
+        vid = str(uuid.uuid4())
+
+        total_debit = sum(l["debit"] for l in lines_to_create)
+        total_credit = sum(l["credit"] for l in lines_to_create)
+
+        cursor.execute(
+            """INSERT INTO accounting_vouchers
+               (id, voucher_no, voucher_date, accounting_period, summary,
+                total_debit, total_credit, created_by, status, created_at, updated_at)
+               VALUES (?, ?, date('now'), ?, ?, ?, ?, ?, '已记账', ?, ?)""",
+            (vid, voucher_no, period, f"月末损益结转 - {period}",
+             f"{total_debit:.2f}", f"{total_credit:.2f}", operator, now, now))
+
+        for line in lines_to_create:
+            acc = conn.execute(
+                "SELECT name FROM chart_of_accounts WHERE code=?", (line["code"],)
+            ).fetchone()
+            acc_name = acc["name"] if acc else line["code"]
+            cursor.execute(
+                """INSERT INTO voucher_lines
+                   (id, voucher_id, account_code, account_name, debit, credit, summary)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (str(uuid.uuid4()), vid, line["code"], acc_name,
+                 f"{line['debit']:.2f}", f"{line['credit']:.2f}",
+                 f"月末损益结转 - {period}"))
+
+        # 3. 关闭会计期间
+        conn.execute(
+            "UPDATE accounting_periods SET status='关闭', is_closed=1, "
+            "closed_by=?, closed_at=? WHERE period_name=? OR id=?",
+            (operator, now, period, period))
+
+        conn.commit()
+    except Exception as e:
+        pass
+
+    conn.close()
+    return redirect("/accounting-books?type=periods")
+
+
+# ========== 数据导出 ==========
+
+@accounting_bp.route("/export/vouchers")
+def export_vouchers():
+    """导出凭证列表为CSV"""
+    conn = get_db()
+    period = request.args.get("period", "")
+
+    if period:
+        rows = conn.execute("""
+            SELECT voucher_no, voucher_date, accounting_period, summary,
+                   total_debit, total_credit, created_by, status, created_at
+            FROM accounting_vouchers WHERE accounting_period=?
+            ORDER BY voucher_date, voucher_no
+        """, (period,)).fetchall()
+    else:
+        rows = conn.execute("""
+            SELECT voucher_no, voucher_date, accounting_period, summary,
+                   total_debit, total_credit, created_by, status, created_at
+            FROM accounting_vouchers ORDER BY voucher_date DESC, voucher_no DESC
+        """).fetchall()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["凭证编号", "日期", "期间", "摘要", "借方合计", "贷方合计", "制单人", "状态", "创建时间"])
+    for r in rows:
+        writer.writerow([r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8]])
+
+    conn.close()
+    output.seek(0)
+    return Response(
+        output.getvalue().encode('utf-8-sig'),
+        mimetype='text/csv',
+        headers={"Content-Disposition": f"attachment;filename=vouchers_{period or 'all'}.csv"}
+    )
+
+
+@accounting_bp.route("/export/balance")
+def export_balance():
+    """导出科目余额表为CSV"""
+    conn = get_db()
+    period = request.args.get("period", "")
+
+    # 获取期初余额
+    opening_map = {}
+    for b in conn.execute(
+        "SELECT account_code, opening_balance FROM account_balances WHERE period_id=?", (period,)
+    ).fetchall():
+        opening_map[b["account_code"]] = b["opening_balance"]
+
+    rows = conn.execute("""
+        SELECT a.code, a.name, a.account_type, a.balance_direction,
+            COALESCE(SUM(CASE WHEN v.status='已记账' AND CAST(l.debit AS REAL)>0
+                THEN CAST(l.debit AS REAL) ELSE 0 END), 0) as debit_sum,
+            COALESCE(SUM(CASE WHEN v.status='已记账' AND CAST(l.credit AS REAL)>0
+                THEN CAST(l.credit AS REAL) ELSE 0 END), 0) as credit_sum
+        FROM chart_of_accounts a
+        LEFT JOIN voucher_lines l ON l.account_code = a.code
+        LEFT JOIN accounting_vouchers v ON v.id = l.voucher_id AND v.accounting_period = ?
+        WHERE a.is_active = 1
+        GROUP BY a.code, a.name, a.account_type, a.balance_direction
+        ORDER BY a.code
+    """, (period,)).fetchall()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["科目编码", "科目名称", "类型", "方向", "期初余额", "借方发生额", "贷方发生额", "期末余额"])
+
+    for r in rows:
+        opening = opening_map.get(r[0], 0.0)
+        direction = r[3] or "借"
+        if direction == "借":
+            closing = opening + r[4] - r[5]
+        else:
+            closing = opening + r[5] - r[4]
+        writer.writerow([r[0], r[1], r[2], r[3],
+                         f"{opening:.2f}", f"{r[4]:.2f}",
+                         f"{r[5]:.2f}", f"{closing:.2f}"])
+
+    conn.close()
+    output.seek(0)
+    return Response(
+        output.getvalue().encode('utf-8-sig'),
+        mimetype='text/csv',
+        headers={"Content-Disposition": f"attachment;filename=balance_{period or 'all'}.csv"}
+    )
+
+
+@accounting_bp.route("/export/trial-balance")
+def export_trial_balance():
+    """导出试算平衡表为CSV"""
+    conn = get_db()
+    period = request.args.get("period", "")
+
+    opening_map = {}
+    for b in conn.execute(
+        "SELECT account_code, opening_balance FROM account_balances WHERE period_id=?", (period,)
+    ).fetchall():
+        opening_map[b["account_code"]] = b["opening_balance"]
+
+    rows = conn.execute("""
+        SELECT a.code, a.name, a.balance_direction,
+            COALESCE(SUM(CASE WHEN v.status='已记账' AND CAST(l.debit AS REAL)>0
+                THEN CAST(l.debit AS REAL) ELSE 0 END), 0) as debit_sum,
+            COALESCE(SUM(CASE WHEN v.status='已记账' AND CAST(l.credit AS REAL)>0
+                THEN CAST(l.credit AS REAL) ELSE 0 END), 0) as credit_sum
+        FROM chart_of_accounts a
+        LEFT JOIN voucher_lines l ON l.account_code = a.code
+        LEFT JOIN accounting_vouchers v ON v.id = l.voucher_id AND v.accounting_period = ?
+        WHERE a.is_active = 1
+        GROUP BY a.code, a.name, a.balance_direction
+        ORDER BY a.code
+    """, (period,)).fetchall()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["科目编码", "科目名称",
+                     "期初借方", "期初贷方", "本期借方", "本期贷方", "期末借方", "期末贷方"])
+
+    totals = [0.0] * 6
+    for r in rows:
+        opening = opening_map.get(r[0], 0.0)
+        direction = r[2] or "借"
+        if direction == "借":
+            dr_open, cr_open = opening, 0.0
+            closing = opening + r[3] - r[4]
+        else:
+            dr_open, cr_open = 0.0, opening
+            closing = opening + r[4] - r[3]
+        dr_close = closing if closing > 0 else 0.0
+        cr_close = abs(closing) if closing < 0 else 0.0
+
+        row_vals = [r[0], r[1], dr_open, cr_open, r[3], r[4], dr_close, cr_close]
+        writer.writerow([r[0], r[1],
+                         f"{dr_open:.2f}" if dr_open else "", f"{cr_open:.2f}" if cr_open else "",
+                         f"{r[3]:.2f}" if r[3] else "", f"{r[4]:.2f}" if r[4] else "",
+                         f"{dr_close:.2f}" if dr_close else "", f"{cr_close:.2f}" if cr_close else ""])
+        for i in range(6):
+            totals[i] += row_vals[i + 2]
+
+    writer.writerow(["合计", "", totals[0], totals[1], totals[2], totals[3], totals[4], totals[5]])
+
+    conn.close()
+    output.seek(0)
+    return Response(
+        output.getvalue().encode('utf-8-sig'),
+        mimetype='text/csv',
+        headers={"Content-Disposition": f"attachment;filename=trial_balance_{period or 'all'}.csv"}
+    )

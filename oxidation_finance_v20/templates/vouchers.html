@@ -191,9 +191,10 @@
                     <table class="voucher-lines" id="voucherLinesTable">
                         <thead>
                             <tr>
-                                <th style="width:45%;">科目</th>
-                                <th style="width:25%;" class="num">借方金额</th>
-                                <th style="width:25%;" class="num">贷方金额</th>
+                                <th style="width:25%;">科目</th>
+                                <th style="width:20%;">辅助核算</th>
+                                <th style="width:20%;" class="num">借方金额</th>
+                                <th style="width:20%;" class="num">贷方金额</th>
                                 <th style="width:5%;">操作</th>
                             </tr>
                         </thead>
@@ -203,6 +204,7 @@
                         <tfoot>
                             <tr style="background:#fafafa; font-weight:bold;">
                                 <td>合计</td>
+                                <td></td>
                                 <td class="num" id="debitTotal">0.00</td>
                                 <td class="num" id="creditTotal">0.00</td>
                                 <td></td>
@@ -224,6 +226,22 @@
 
     <script>
         const accounts_list = {{ accounts_list|tojson }};
+        const customers_list = {{ customers_list|tojson }};
+        const suppliers_list = {{ suppliers_list|tojson }};
+        const departments_list = {{ departments_list|tojson }};
+        const projects_list = {{ projects_list|tojson }};
+
+        // Build a map: account_code -> aux flags
+        const accountAuxMap = {};
+        accounts_list.forEach(a => {
+            accountAuxMap[a.code] = {
+                customer: a.aux_customer,
+                supplier: a.aux_supplier,
+                department: a.aux_department,
+                project: a.aux_project,
+                employee: a.aux_employee
+            };
+        });
 
         function switchTab(name, event) {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -239,6 +257,82 @@
             }).join('');
         }
 
+        function buildAuxOptions(auxType, selected) {
+            let list = [], label = '';
+            if (auxType === 'customer') { list = customers_list; label = '客户'; }
+            else if (auxType === 'supplier') { list = suppliers_list; label = '供应商'; }
+            else if (auxType === 'department') { list = departments_list; label = '部门'; }
+            else if (auxType === 'project') { list = projects_list; label = '项目'; }
+            else if (auxType === 'employee') {
+                // Use departments' managers as employee list
+                list = departments_list.filter(d => d.manager).map(d => ({id: d.manager, name: d.manager + ' (' + d.name + ')'}));
+                label = '员工';
+            }
+            if (list.length === 0) return '';
+            let html = `<select name="line_aux_type[]" class="aux-type-select" style="width:100%; padding:6px; border:1px solid #d9d9d9; border-radius:4px; font-size:13px;" onchange="onAuxTypeChange(this, '${auxType}')">`;
+            html += `<option value="">-- ${label} --</option>`;
+            list.forEach(e => {
+                const sel = (selected === e.id) ? 'selected' : '';
+                html += `<option value="${e.id}" ${sel}>${e.name}</option>`;
+            });
+            html += '</select>';
+            return html;
+        }
+
+        function onAccountChange(selectEl) {
+            const code = selectEl.value;
+            const row = selectEl.closest('tr');
+            const auxCell = row.querySelector('td:nth-child(2)');
+            const flags = accountAuxMap[code];
+            if (flags && (flags.customer || flags.supplier || flags.department || flags.project || flags.employee)) {
+                let html = '<div style="display:flex;flex-direction:column;gap:3px;">';
+                if (flags.customer) html += buildAuxOptions('customer', '');
+                if (flags.supplier) html += buildAuxOptions('supplier', '');
+                if (flags.department) html += buildAuxOptions('department', '');
+                if (flags.project) html += buildAuxOptions('project', '');
+                if (flags.employee) html += buildAuxOptions('employee', '');
+                html += '</div>';
+                auxCell.innerHTML = html;
+            } else {
+                auxCell.innerHTML = '<span style="color:#ccc;font-size:12px;">无</span>';
+            }
+        }
+
+        function onAuxTypeChange(selectEl, auxType) {
+            // Sync the hidden aux_id with the first selected value
+            updateHiddenAuxFields();
+        }
+
+        function updateHiddenAuxFields() {
+            const rows = document.querySelectorAll('#voucherLinesBody tr');
+            rows.forEach(row => {
+                const auxSelects = row.querySelectorAll('.aux-type-select');
+                // Remove old hidden fields
+                row.querySelectorAll('input.aux-hidden').forEach(el => el.remove());
+
+                if (auxSelects.length > 0) {
+                    const firstSelect = auxSelects[0];
+                    const auxType = firstSelect.getAttribute('onchange').match(/'(.*?)'/)?.[1] || '';
+                    const auxValue = firstSelect.value;
+                    if (auxValue) {
+                        const hiddenType = document.createElement('input');
+                        hiddenType.type = 'hidden';
+                        hiddenType.name = 'line_aux_type[]';
+                        hiddenType.value = auxType;
+                        hiddenType.className = 'aux-hidden';
+                        row.appendChild(hiddenType);
+
+                        const hiddenId = document.createElement('input');
+                        hiddenId.type = 'hidden';
+                        hiddenId.name = 'line_aux_id[]';
+                        hiddenId.value = auxValue;
+                        hiddenId.className = 'aux-hidden';
+                        row.appendChild(hiddenId);
+                    }
+                }
+            });
+        }
+
         let lineCounter = 0;
         function addLine() {
             lineCounter++;
@@ -246,11 +340,12 @@
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td>
-                    <select name="line_account[]" required style="width:100%; padding:6px; border:1px solid #d9d9d9; border-radius:4px;">
+                    <select name="line_account[]" required style="width:100%; padding:6px; border:1px solid #d9d9d9; border-radius:4px;" onchange="onAccountChange(this)">
                         <option value="">请选择科目</option>
                         ${buildAccountOptions('')}
                     </select>
                 </td>
+                <td><span style="color:#ccc;font-size:12px;">无</span></td>
                 <td><input type="number" step="0.01" name="line_debit[]" class="debit-input" style="width:100%;" placeholder="0.00" oninput="updateTotals()"></td>
                 <td><input type="number" step="0.01" name="line_credit[]" class="credit-input" style="width:100%;" placeholder="0.00" oninput="updateTotals()"></td>
                 <td><button type="button" class="remove-btn" onclick="removeLine(this)">删除</button></td>
@@ -293,6 +388,8 @@
                 alert(`借贷不平衡：借方 ${dTotal.toFixed(2)} ≠ 贷方 ${cTotal.toFixed(2)}`);
                 return false;
             }
+            // Sync aux hidden fields before submit
+            updateHiddenAuxFields();
             return true;
         }
 

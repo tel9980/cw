@@ -61,6 +61,10 @@
             <div class="tabs">
                 <div class="tab {% if book_type == 'balance' %}active{% endif %}" onclick="switchTab('balance')">科目余额表</div>
                 <div class="tab {% if book_type == 'detail' %}active{% endif %}" onclick="switchTab('detail')">明细账</div>
+                <div class="tab {% if book_type == 'trial_balance' %}active{% endif %}" onclick="switchTab('trial_balance')">试算平衡表</div>
+                <div class="tab {% if book_type == 'journal' %}active{% endif %}" onclick="switchTab('journal')">凭证序时簿</div>
+                <div class="tab {% if book_type == 'aux_detail' %}active{% endif %}" onclick="switchTab('aux_detail')">辅助核算明细账</div>
+                <div class="tab {% if book_type == 'aux_balance' %}active{% endif %}" onclick="switchTab('aux_balance')">辅助核算余额表</div>
                 <div class="tab {% if book_type == 'statement' %}active{% endif %}" onclick="switchTab('statement')">财务报表</div>
                 <div class="tab {% if book_type == 'periods' %}active{% endif %}" onclick="switchTab('periods')">期间管理</div>
             </div>
@@ -78,6 +82,7 @@
                         </select>
                         {% else %}<input type="text" name="period" placeholder="2024-01" value="{{ current_period }}">{% endif %}
                         <button type="submit" class="btn btn-sm">查询</button>
+                        {% if current_period %}<a href="/export/balance?period={{ current_period }}" class="btn btn-sm btn-default" style="margin-left:10px;">导出CSV</a>{% endif %}
                     </form>
                 </div>
                 {% if current_period %}<h3 style="font-size:15px;margin:10px 0;color:#666;">期间：<strong>{{ current_period }}</strong> ({{ balance_data|length }} 个科目)</h3>{% endif %}
@@ -89,16 +94,17 @@
                 </div>
                 {% endif %}
                 <table>
-                    <thead><tr><th>科目编码</th><th>科目名称</th><th>类型</th><th class="num">借方发生额</th><th class="num">贷方发生额</th><th class="num">期末余额</th><th>方向</th></tr></thead>
+                    <thead><tr><th>科目编码</th><th>科目名称</th><th>类型</th><th class="num">期初余额</th><th class="num">借方发生额</th><th class="num">贷方发生额</th><th class="num">期末余额</th><th>方向</th></tr></thead>
                     <tbody>
                         {% for b in balance_data %}
                         <tr><td><strong>{{ b.code }}</strong></td><td>{{ b.name }}</td>
                             <td><span class="type-tag type-{{ b.account_type }}">{{ b.account_type }}</span></td>
+                            <td class="num">{% if b.opening_balance|float != 0 %}{{ '%.2f'|format(b.opening_balance|float) }}{% else %}-{% endif %}</td>
                             <td class="num">{% if b.debit_sum|float > 0 %}{{ '%.2f'|format(b.debit_sum|float) }}{% else %}-{% endif %}</td>
                             <td class="num">{% if b.credit_sum|float > 0 %}{{ '%.2f'|format(b.credit_sum|float) }}{% else %}-{% endif %}</td>
                             <td class="num" style="font-weight:600;">{{ '%.2f'|format(b.closing_balance|float) }}</td><td>{{ b.balance_direction }}</td></tr>
                         {% endfor %}
-                        {% if not balance_data %}<tr><td colspan="7" class="empty-state">暂无数据，请先创建并记账凭证</td></tr>{% endif %}
+                        {% if not balance_data %}<tr><td colspan="8" class="empty-state">暂无数据，请先创建并记账凭证</td></tr>{% endif %}
                     </tbody>
                 </table>
             </div>
@@ -132,6 +138,262 @@
                         {% elif not current_account %}<tr><td colspan="6" class="empty-state">请选择科目进行查询</td></tr>{% endif %}
                     </tbody>
                 </table>
+            </div>
+
+            <!-- 试算平衡表 -->
+            <div class="tab-content" id="tab-trial_balance" style="{% if book_type != 'trial_balance' %}display:none;{% endif %}">
+                <div class="filter-bar">
+                    <form method="GET" style="display:contents;">
+                        <input type="hidden" name="type" value="trial_balance">
+                        <label>会计期间：</label>
+                        {% if periods %}
+                        <select name="period" onchange="this.form.submit()">{% for p in periods %}<option value="{{ p.accounting_period }}" {% if current_period==p.accounting_period %}selected{% endif %}>{{ p.accounting_period }}</option>{% endfor %}</select>
+                        {% else %}<input type="text" name="period" placeholder="2024-01" value="{{ current_period }}">{% endif %}
+                        <button type="submit" class="btn btn-sm">查询</button>
+                        {% if current_period %}<a href="/export/trial-balance?period={{ current_period }}" class="btn btn-sm btn-default" style="margin-left:10px;">导出CSV</a>{% endif %}
+                    </form>
+                </div>
+                {% if trial_data and trial_data.rows %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th rowspan="2" style="width:100px;">科目编码</th>
+                            <th rowspan="2">科目名称</th>
+                            <th colspan="2" style="text-align:center;background:#e6f7ff;">期初余额</th>
+                            <th colspan="2" style="text-align:center;background:#fff7e6;">本期发生额</th>
+                            <th colspan="2" style="text-align:center;background:#f6ffed;">期末余额</th>
+                        </tr>
+                        <tr>
+                            <th class="num" style="background:#e6f7ff;">借方</th><th class="num" style="background:#e6f7ff;">贷方</th>
+                            <th class="num" style="background:#fff7e6;">借方</th><th class="num" style="background:#fff7e6;">贷方</th>
+                            <th class="num" style="background:#f6ffed;">借方</th><th class="num" style="background:#f6ffed;">贷方</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for t in trial_data.rows %}
+                        <tr>
+                            <td><strong>{{ t.code }}</strong></td><td>{{ t.name }}</td>
+                            <td class="num">{% if t.dr_open>0 %}{{ '%.2f'|format(t.dr_open) }}{% endif %}</td>
+                            <td class="num">{% if t.cr_open>0 %}{{ '%.2f'|format(t.cr_open) }}{% endif %}</td>
+                            <td class="num">{% if t.dr_current>0 %}{{ '%.2f'|format(t.dr_current) }}{% endif %}</td>
+                            <td class="num">{% if t.cr_current>0 %}{{ '%.2f'|format(t.cr_current) }}{% endif %}</td>
+                            <td class="num">{% if t.dr_close>0 %}{{ '%.2f'|format(t.dr_close) }}{% endif %}</td>
+                            <td class="num">{% if t.cr_close>0 %}{{ '%.2f'|format(t.cr_close) }}{% endif %}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr style="font-weight:bold;background:#fafafa;border-top:2px solid #333;">
+                            <td colspan="2">合计</td>
+                            <td class="num">{{ '%.2f'|format(trial_data.total_dr_open) }}</td>
+                            <td class="num">{{ '%.2f'|format(trial_data.total_cr_open) }}</td>
+                            <td class="num">{{ '%.2f'|format(trial_data.total_dr_current) }}</td>
+                            <td class="num">{{ '%.2f'|format(trial_data.total_cr_current) }}</td>
+                            <td class="num">{{ '%.2f'|format(trial_data.total_dr_close) }}</td>
+                            <td class="num">{{ '%.2f'|format(trial_data.total_cr_close) }}</td>
+                        </tr>
+                        <tr style="font-weight:bold;{% if (trial_data.total_dr_open-trial_data.total_cr_open)|abs<0.01 %}background:#f6ffed;{% else %}background:#fff1f0;{% endif %}">
+                            <td colspan="2">期初校验</td>
+                            <td colspan="2" style="text-align:center;">
+                                {% if (trial_data.total_dr_open-trial_data.total_cr_open)|abs<0.01 %}
+                                <span style="color:#52c41a;">平衡</span>
+                                {% else %}
+                                <span style="color:#f5222d;">不平衡(差{{ '%.2f'|format(trial_data.total_dr_open-trial_data.total_cr_open) }})</span>
+                                {% endif %}
+                            </td>
+                            <td colspan="2" style="text-align:center;">
+                                {% if (trial_data.total_dr_current-trial_data.total_cr_current)|abs<0.01 %}
+                                <span style="color:#52c41a;">平衡</span>
+                                {% else %}
+                                <span style="color:#f5222d;">不平衡</span>
+                                {% endif %}
+                            </td>
+                            <td colspan="2" style="text-align:center;">
+                                {% if (trial_data.total_dr_close-trial_data.total_cr_close)|abs<0.01 %}
+                                <span style="color:#52c41a;">平衡</span>
+                                {% else %}
+                                <span style="color:#f5222d;">不平衡</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    </tfoot>
+                </table>
+                {% else %}<div class="empty-state">请选择期间查看试算平衡表</div>{% endif %}
+            </div>
+
+            <!-- 凭证序时簿 -->
+            <div class="tab-content" id="tab-journal" style="{% if book_type != 'journal' %}display:none;{% endif %}">
+                <div class="filter-bar">
+                    <form method="GET" style="display:contents;">
+                        <input type="hidden" name="type" value="journal">
+                        <label>会计期间：</label>
+                        {% if periods %}
+                        <select name="period" onchange="this.form.submit()">{% for p in periods %}<option value="{{ p.accounting_period }}" {% if current_period==p.accounting_period %}selected{% endif %}>{{ p.accounting_period }}</option>{% endfor %}</select>
+                        {% else %}<input type="text" name="period" placeholder="2024-01" value="{{ current_period }}">{% endif %}
+                        <button type="submit" class="btn btn-sm">查询</button>
+                        {% if current_period %}<a href="/export/vouchers?period={{ current_period }}" class="btn btn-sm btn-default" style="margin-left:10px;">导出CSV</a>{% endif %}
+                    </form>
+                </div>
+                {% if journal_data %}
+                <p style="color:#666;margin-bottom:10px;">共 <strong>{{ journal_data|length }}</strong> 条分录记录（仅显示已记账凭证）</p>
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:120px;">凭证编号</th>
+                            <th style="width:100px;">日期</th>
+                            <th style="width:100px;">科目编码</th>
+                            <th>科目名称</th>
+                            <th style="width:200px;">摘要</th>
+                            <th class="num" style="width:110px;">借方金额</th>
+                            <th class="num" style="width:110px;">贷方金额</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% set ns = namespace(dr=0, cr=0) %}
+                        {% for j in journal_data %}
+                        <tr>
+                            <td><a href="/vouchers/{{ j.vid }}" style="color:#1890ff;">{{ j.voucher_no }}</a></td>
+                            <td>{{ j.voucher_date }}</td>
+                            <td>{{ j.account_code }}</td>
+                            <td>{{ j.account_name }}</td>
+                            <td>{{ j.summary or '-' }}</td>
+                            <td class="num">{% if j.debit|float>0 %}{{ '%.2f'|format(j.debit|float) }}{% endif %}</td>
+                            <td class="num">{% if j.credit|float>0 %}{{ '%.2f'|format(j.credit|float) }}{% endif %}</td>
+                        </tr>
+                        {% set ns.dr = ns.dr + j.debit|float %}
+                        {% set ns.cr = ns.cr + j.credit|float %}
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr style="font-weight:bold;background:#fafafa;border-top:2px solid #333;">
+                            <td colspan="5">合计</td>
+                            <td class="num">{{ '%.2f'|format(ns.dr) }}</td>
+                            <td class="num">{{ '%.2f'|format(ns.cr) }}</td>
+                        </tr>
+                    </tfoot>
+                </table>
+                {% else %}<div class="empty-state">该期间暂无已记账凭证</div>{% endif %}
+            </div>
+
+            <!-- 辅助核算明细账 -->
+            <div class="tab-content" id="tab-aux_detail" style="{% if book_type != 'aux_detail' %}display:none;{% endif %}">
+                <div class="filter-bar">
+                    <form method="GET" style="display:contents;">
+                        <input type="hidden" name="type" value="aux_detail">
+                        <label>核算维度：</label>
+                        <select name="aux_type" onchange="onAuxTypeFilterChange(this, 'aux_detail')">
+                            <option value="customer" {% if aux_type=='customer' %}selected{% endif %}>客户</option>
+                            <option value="supplier" {% if aux_type=='supplier' %}selected{% endif %}>供应商</option>
+                            <option value="department" {% if aux_type=='department' %}selected{% endif %}>部门</option>
+                            <option value="project" {% if aux_type=='project' %}selected{% endif %}>项目</option>
+                        </select>
+                        <label>核算对象：</label>
+                        <select name="aux_entity" id="aux_detail_entity">
+                            <option value="">-- 请选择 --</option>
+                        </select>
+                        <label>期间：</label>
+                        {% if periods %}
+                        <select name="period">{% for p in periods %}<option value="{{ p.accounting_period }}" {% if current_period==p.accounting_period %}selected{% endif %}>{{ p.accounting_period }}</option>{% endfor %}</select>
+                        {% else %}<input type="text" name="period" placeholder="2024-01" value="{{ current_period }}">{% endif %}
+                        <button type="submit" class="btn btn-sm">查询</button>
+                    </form>
+                </div>
+                {% if aux_detail_data %}
+                <h3 style="font-size:15px;margin:10px 0;color:#666;">
+                    核算维度：<strong>{{ {'customer':'客户','supplier':'供应商','department':'部门','project':'项目'}.get(aux_type, aux_type) }}</strong>
+                    &nbsp;|&nbsp; 核算对象：<strong>{{ aux_data.entity_name }}</strong>
+                    &nbsp;|&nbsp; 期间：<strong>{{ current_period }}</strong>
+                </h3>
+                <table>
+                    <thead><tr><th>凭证编号</th><th>日期</th><th>科目</th><th>摘要</th><th class="num">借方</th><th class="num">贷方</th><th>状态</th></tr></thead>
+                    <tbody>
+                        {% set ns = namespace(dr=0, cr=0) %}
+                        {% for d in aux_detail_data %}
+                        <tr>
+                            <td><a href="/vouchers/{{ d.vid }}" style="color:#1890ff;">{{ d.voucher_no }}</a></td>
+                            <td>{{ d.voucher_date }}</td>
+                            <td>{{ d.account_code }} {{ d.account_name }}</td>
+                            <td>{{ d.summary or '-' }}</td>
+                            <td class="num">{% if d.debit|float>0 %}{{ '%.2f'|format(d.debit|float) }}{% endif %}</td>
+                            <td class="num">{% if d.credit|float>0 %}{{ '%.2f'|format(d.credit|float) }}{% endif %}</td>
+                            <td>{{ d.status }}</td>
+                        </tr>
+                        {% set ns.dr = ns.dr + d.debit|float %}
+                        {% set ns.cr = ns.cr + d.credit|float %}
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr style="font-weight:bold;background:#fafafa;border-top:2px solid #333;">
+                            <td colspan="4">合计</td>
+                            <td class="num">{{ '%.2f'|format(ns.dr) }}</td>
+                            <td class="num">{{ '%.2f'|format(ns.cr) }}</td>
+                            <td></td>
+                        </tr>
+                    </tfoot>
+                </table>
+                {% else %}<div class="empty-state">请选择核算维度和核算对象后查询</div>{% endif %}
+            </div>
+
+            <!-- 辅助核算余额表 -->
+            <div class="tab-content" id="tab-aux_balance" style="{% if book_type != 'aux_balance' %}display:none;{% endif %}">
+                <div class="filter-bar">
+                    <form method="GET" style="display:contents;">
+                        <input type="hidden" name="type" value="aux_balance">
+                        <label>核算维度：</label>
+                        <select name="aux_type" onchange="this.form.submit()">
+                            <option value="customer" {% if aux_type=='customer' %}selected{% endif %}>客户</option>
+                            <option value="supplier" {% if aux_type=='supplier' %}selected{% endif %}>供应商</option>
+                            <option value="department" {% if aux_type=='department' %}selected{% endif %}>部门</option>
+                            <option value="project" {% if aux_type=='project' %}selected{% endif %}>项目</option>
+                        </select>
+                        <label>期间：</label>
+                        {% if periods %}
+                        <select name="period" onchange="this.form.submit()">{% for p in periods %}<option value="{{ p.accounting_period }}" {% if current_period==p.accounting_period %}selected{% endif %}>{{ p.accounting_period }}</option>{% endfor %}</select>
+                        {% else %}<input type="text" name="period" placeholder="2024-01" value="{{ current_period }}">{% endif %}
+                        <button type="submit" class="btn btn-sm">查询</button>
+                    </form>
+                </div>
+                {% if aux_data and aux_data.rows %}
+                <h3 style="font-size:15px;margin:10px 0;color:#666;">
+                    核算维度：<strong>{{ {'customer':'客户','supplier':'供应商','department':'部门','project':'项目'}.get(aux_type, aux_type) }}</strong>
+                    &nbsp;|&nbsp; 期间：<strong>{{ current_period }}</strong>
+                    &nbsp;|&nbsp; {{ aux_data.rows|length }} 个核算对象
+                </h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>核算对象</th>
+                            <th class="num">借方发生额</th>
+                            <th class="num">贷方发生额</th>
+                            <th class="num">余额</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% set ns = namespace(tdr=0, tcr=0) %}
+                        {% for r in aux_data.rows %}
+                        {% set eid = r.related_entity_id %}
+                        {% set ename = aux_data.entities.get(eid, {}).get('name', eid) if aux_data.entities else eid %}
+                        {% set bal = r.total_debit|float - r.total_credit|float %}
+                        <tr>
+                            <td><a href="/accounting-books?type=aux_detail&aux_type={{ aux_type }}&aux_entity={{ eid }}&period={{ current_period }}" style="color:#1890ff;">{{ ename }}</a></td>
+                            <td class="num">{{ '%.2f'|format(r.total_debit|float) }}</td>
+                            <td class="num">{{ '%.2f'|format(r.total_credit|float) }}</td>
+                            <td class="num" style="font-weight:600;">{{ '%.2f'|format(bal) }}</td>
+                        </tr>
+                        {% set ns.tdr = ns.tdr + r.total_debit|float %}
+                        {% set ns.tcr = ns.tcr + r.total_credit|float %}
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr style="font-weight:bold;background:#fafafa;border-top:2px solid #333;">
+                            <td>合计</td>
+                            <td class="num">{{ '%.2f'|format(ns.tdr) }}</td>
+                            <td class="num">{{ '%.2f'|format(ns.tcr) }}</td>
+                            <td class="num">{{ '%.2f'|format(ns.tdr - ns.tcr) }}</td>
+                        </tr>
+                    </tfoot>
+                </table>
+                {% else %}<div class="empty-state">请选择核算维度和期间后查询</div>{% endif %}
             </div>
 
             <!-- 财务报表 -->
@@ -197,7 +459,13 @@
 
             <!-- 期间管理 -->
             <div class="tab-content" id="tab-periods" style="{% if book_type != 'periods' %}display:none;{% endif %}">
-                <div class="filter-bar"><button class="btn btn-sm btn-success">+ 新增期间</button></div>
+                <div class="filter-bar">
+                    <form method="POST" action="/period-close" style="display:inline-block;">
+                        <input type="text" name="period" placeholder="期间 (如: 2026-06)" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;" required>
+                        <input type="hidden" name="operator" value="管理员">
+                        <button type="submit" class="btn btn-sm btn-warning" onclick="return confirm('确定要执行月末损益结转吗？\n\n系统将自动生成结转凭证并关闭该期间。\n结转后损益类科目余额将转入本年利润。')">执行月末结转</button>
+                    </form>
+                </div>
                 {% if period_records %}
                 <table><thead><tr><th>会计期间</th><th>开始日期</th><th>结束日期</th><th>状态</th><th>操作</th></tr></thead>
                     <tbody>
@@ -213,7 +481,49 @@
         </div>
     </div>
     <script>
-        function switchTab(name){document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));document.querySelectorAll('.tab-content').forEach(c=>c.style.display='none');event.target.classList.add('active');document.getElementById('tab-'+name).style.display='block';}
+        const auxCustomers = {{ aux_customers|tojson }};
+        const auxSuppliers = {{ aux_suppliers|tojson }};
+        const auxDepartments = {{ aux_departments|tojson }};
+        const auxProjects = {{ aux_projects|tojson }};
+
+        function switchTab(name){
+            document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c=>c.style.display='none');
+            event.target.classList.add('active');
+            document.getElementById('tab-'+name).style.display='block';
+        }
+
+        function onAuxTypeFilterChange(selectEl, tabName) {
+            const auxType = selectEl.value;
+            const entitySelect = document.getElementById(tabName + '_entity');
+            if (!entitySelect) return;
+            let list = [];
+            if (auxType === 'customer') list = auxCustomers;
+            else if (auxType === 'supplier') list = auxSuppliers;
+            else if (auxType === 'department') list = auxDepartments.map(d => ({id: d.id, name: (d.code||'') + ' ' + d.name}));
+            else if (auxType === 'project') list = auxProjects.map(p => ({id: p.id, name: (p.code||'') + ' ' + p.name}));
+            entitySelect.innerHTML = '<option value="">-- 请选择 --</option>' +
+                list.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+        }
+
+        // Initialize entity dropdown on page load if on aux_detail tab
+        document.addEventListener('DOMContentLoaded', function() {
+            const auxDetailTab = document.getElementById('tab-aux_detail');
+            if (auxDetailTab && auxDetailTab.style.display !== 'none') {
+                const auxTypeSelect = auxDetailTab.querySelector('select[name="aux_type"]');
+                if (auxTypeSelect) onAuxTypeFilterChange(auxTypeSelect, 'aux_detail');
+                // Set preselected entity
+                const preselected = '{{ aux_entity }}';
+                if (preselected) {
+                    const entitySelect = document.getElementById('aux_detail_entity');
+                    if (entitySelect) {
+                        for (let opt of entitySelect.options) {
+                            if (opt.value === preselected) { opt.selected = true; break; }
+                        }
+                    }
+                }
+            }
+        });
     </script>
 </body>
 </html>
