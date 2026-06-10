@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>月末结转损益 - 氧化加工厂财务系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
+        .container { max-width: 1000px; margin: 0 auto; padding: 20px; }
+        .header { background: #1890ff; color: white; padding: 20px; margin-bottom: 20px; }
+        .header h1 { font-size: 24px; }
+        .nav { background: white; padding: 10px 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .nav a { color: #333; text-decoration: none; margin-right: 20px; padding: 5px 10px; font-size: 14px; }
+        .nav a:hover { color: #1890ff; }
+        .nav a.active { color: #1890ff; font-weight: 600; border-bottom: 2px solid #1890ff; }
+        .card { background: white; padding: 25px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .card h2 { font-size: 18px; margin-bottom: 15px; color: #333; }
+        .btn { display: inline-block; padding: 10px 24px; background: #1890ff; color: white; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; font-size: 14px; }
+        .btn:hover { background: #40a9ff; }
+        .btn-success { background: #52c41a; }
+        .btn-success:hover { background: #73d13d; }
+        .btn-warning { background: #faad14; color: #fff; }
+        .btn-warning:hover { background: #ffc53d; }
+        .btn-danger { background: #f5222d; }
+        .btn-danger:hover { background: #ff4d4f; }
+        .btn-default { background: #fff; color: #333; border: 1px solid #d9d9d9; }
+        .btn-default:hover { background: #fafafa; color: #1890ff; border-color: #1890ff; }
+        .btn-sm { padding: 6px 14px; font-size: 12px; }
+        .btn:disabled { background: #d9d9d9; cursor: not-allowed; }
+        .flash { padding: 12px 15px; border-radius: 4px; margin-bottom: 15px; font-size: 14px; }
+        .flash-success { background: #f6ffed; border: 1px solid #b7eb8f; color: #52c41a; }
+        .flash-error { background: #fff1f0; border: 1px solid #ffa39e; color: #f5222d; }
+        .flash-info { background: #e6f7ff; border: 1px solid #91d5ff; color: #1890ff; }
+
+        /* 步骤条 */
+        .steps { display: flex; margin-bottom: 30px; }
+        .step { flex: 1; text-align: center; position: relative; }
+        .step::after { content: ''; position: absolute; top: 18px; left: 60%; width: 80%; height: 3px; background: #e8e8e8; }
+        .step:last-child::after { display: none; }
+        .step.active::after { background: #1890ff; }
+        .step.done::after { background: #52c41a; }
+        .step-circle { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 50%; background: #e8e8e8; color: #999; font-size: 16px; font-weight: 600; position: relative; z-index: 1; }
+        .step.active .step-circle { background: #1890ff; color: white; }
+        .step.done .step-circle { background: #52c41a; color: white; }
+        .step-label { display: block; margin-top: 8px; font-size: 13px; color: #999; }
+        .step.active .step-label { color: #1890ff; font-weight: 600; }
+        .step.done .step-label { color: #52c41a; }
+
+        table { width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 15px; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #fafafa; font-weight: 600; }
+        td.num, th.num { text-align: right; font-family: "SF Mono", Monaco, monospace; }
+        tr.total-row { background: #fafafa; font-weight: bold; border-top: 2px solid #ddd; }
+        .summary-box { background: #f8f9fa; padding: 20px; border-radius: 6px; margin-bottom: 20px; }
+        .info-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed #e8e8e8; font-size: 14px; }
+        .info-row:last-child { border: none; }
+        .info-label { color: #666; }
+        .info-value { font-weight: 600; color: #333; }
+        .highlight { color: #f5222d; font-weight: bold; }
+        .checklist { margin: 10px 0; }
+        .checklist li { padding: 6px 0; font-size: 14px; list-style: none; }
+        .checklist li::before { content: '✓ '; color: #52c41a; font-weight: bold; margin-right: 8px; }
+        .checklist li.fail::before { content: '✗ '; color: #f5222d; }
+        .btn-group { display: flex; gap: 10px; margin-top: 15px; }
+        .empty-state { text-align: center; padding: 40px; color: #999; }
+
+        @media print {
+            .header, .nav, .btn, .flash, .btn-group { display: none; }
+            .card { box-shadow: none; border: 1px solid #ddd; page-break-inside: avoid; }
+            body { background: white; font-size: 12px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header"><div class="container"><h1>月末结转损益向导</h1></div></div>
+    <div class="nav"><div class="container">
+        <a href="/">首页</a>
+        <a href="/vouchers">会计凭证</a>
+        <a href="/accounting-books">会计账簿</a>
+        <a href="/financial-reports">财务报表</a>
+        <a href="/system-settings">系统设置</a>
+        <a href="/profit-carry-forward" class="active">结转损益</a>
+    </div></div>
+    <div class="container">
+        {% if message %}<div class="flash flash-success">{{ message }}</div>{% endif %}
+        {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+
+        {% if not step or step == 'init' %}
+        <!-- ===== 初始页：选择期间 ===== -->
+        <div class="card">
+            <h2>选择结转期间</h2>
+            <div class="flash flash-info" style="margin-bottom:20px;">
+                本向导将引导您完成月末损益结转，分步生成结转凭证。请确保当期所有凭证已审核记账。
+            </div>
+            <form method="POST">
+                <input type="hidden" name="action" value="start">
+                <div style="margin-bottom:20px;">
+                    <label style="font-weight:600;display:block;margin-bottom:8px;">会计期间</label>
+                    <select name="period" style="padding:10px;border:1px solid #d9d9d9;border-radius:4px;font-size:14px;min-width:200px;">
+                        {% for p in periods %}
+                        <option value="{{ p.period_name }}">{{ p.period_name }} {% if p.is_closed %}(已结账){% endif %}</option>
+                        {% endfor %}
+                        {% if not periods %}
+                        <option value="">暂无可用期间</option>
+                        {% endif %}
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-success">开始结转向导</button>
+                <a href="/" class="btn btn-default">返回首页</a>
+            </form>
+        </div>
+
+        {% elif step == 'preview' %}
+        <!-- ===== 步骤向导首页：预览概览 ===== -->
+        <div class="steps">
+            <div class="step active"><span class="step-circle">1</span><span class="step-label">损益预览</span></div>
+            <div class="step"><span class="step-circle">2</span><span class="step-label">结转收入</span></div>
+            <div class="step"><span class="step-circle">3</span><span class="step-label">结转费用</span></div>
+            <div class="step"><span class="step-circle">4</span><span class="step-label">完成</span></div>
+        </div>
+
+        <div class="card">
+            <h2>损益预览 - {{ period }}</h2>
+            <div class="flash flash-info">以下为当期损益类科目发生额汇总（仅统计已记账凭证）</div>
+
+            <div class="summary-box">
+                <div class="info-row"><span class="info-label">收入类科目合计数</span><span class="info-value" style="color:#52c41a;">{{ "%.2f"|format(revenue_total) }}</span></div>
+                <div class="info-row"><span class="info-label">成本类科目合计数</span><span class="info-value" style="color:#f5222d;">{{ "%.2f"|format(cost_total) }}</span></div>
+                <div class="info-row"><span class="info-label">费用类科目合计数</span><span class="info-value" style="color:#f5222d;">{{ "%.2f"|format(expense_total) }}</span></div>
+                <div class="info-row" style="font-size:16px;font-weight:bold;margin-top:5px;padding-top:8px;border-top:2px solid #ccc;">
+                    <span>本期利润（收入-成本-费用）</span>
+                    <span class="{% if net_profit >= 0 %}info-value{% else %}highlight{% endif %}">{{ "%.2f"|format(net_profit) }}</span>
+                </div>
+            </div>
+
+            {% if revenue_items %}
+            <h3 style="margin:15px 0 10px;">收入类科目</h3>
+            <table>
+                <thead><tr><th>科目编码</th><th>科目名称</th><th class="num">贷方发生额</th></tr></thead>
+                <tbody>
+                    {% for r in revenue_items %}
+                    <tr><td>{{ r.code }}</td><td>{{ r.name }}</td><td class="num">{{ "%.2f"|format(r.amount) }}</td></tr>
+                    {% endfor %}
+                    <tr class="total-row"><td colspan="2">合计</td><td class="num">{{ "%.2f"|format(revenue_total) }}</td></tr>
+                </tbody>
+            </table>
+            {% endif %}
+
+            {% if cost_items or expense_items %}
+            <h3 style="margin:15px 0 10px;">成本及费用类科目</h3>
+            <table>
+                <thead><tr><th>科目编码</th><th>科目名称</th><th class="num">借方发生额</th></tr></thead>
+                <tbody>
+                    {% for r in cost_items + expense_items %}
+                    <tr><td>{{ r.code }}</td><td>{{ r.name }}</td><td class="num">{{ "%.2f"|format(r.amount) }}</td></tr>
+                    {% endfor %}
+                    <tr class="total-row"><td colspan="2">合计</td><td class="num">{{ "%.2f"|format(cost_total + expense_total) }}</td></tr>
+                </tbody>
+            </table>
+            {% endif %}
+
+            <div class="card" style="margin-top:20px;background:#fafafa;">
+                <h2>结转前检查</h2>
+                <ul class="checklist">
+                    <li class="{% if checks.has_revenue %}fail{% endif %}">当期有收入/成本/费用发生额</li>
+                    <li class="{% if checks.no_unposted %}fail{% endif %}">当期无未记账凭证</li>
+                    <li class="{% if checks.no_pending %}fail{% endif %}">当期无待审核凭证</li>
+                    <li class="{% if not checks.has_revenue and checks.no_unposted and checks.no_pending %}fail{% endif %}">检查通过，可以结转</li>
+                </ul>
+            </div>
+
+            <div class="btn-group">
+                <form method="POST" style="display:contents;">
+                    <input type="hidden" name="action" value="execute">
+                    <input type="hidden" name="period" value="{{ period }}">
+                    <button type="submit" class="btn btn-success" {% if not can_execute %}disabled{% endif %}>一键结转损益</button>
+                </form>
+                <a href="/profit-carry-forward" class="btn btn-default">重新选择期间</a>
+            </div>
+        </div>
+
+        {% elif step == 'result' %}
+        <!-- ===== 结转结果 ===== -->
+        <div class="steps">
+            <div class="step done"><span class="step-circle">✓</span><span class="step-label">损益预览</span></div>
+            <div class="step done"><span class="step-circle">✓</span><span class="step-label">结转收入</span></div>
+            <div class="step done"><span class="step-circle">✓</span><span class="step-label">结转费用</span></div>
+            <div class="step active"><span class="step-circle">✓</span><span class="step-label">完成</span></div>
+        </div>
+
+        <div class="card">
+            <h2>损益结转完成 - {{ period }}</h2>
+            <div class="flash flash-success">
+                已成功生成本月损益结转凭证！
+            </div>
+
+            {% if result_data %}
+            <div class="summary-box">
+                <div class="info-row"><span class="info-label">结转凭证编号</span><span class="info-value">{{ result_data.voucher_no }}</span></div>
+                <div class="info-row"><span class="info-label">收入结转</span><span class="info-value" style="color:#52c41a;">{{ "%.2f"|format(result_data.revenue) }}</span></div>
+                <div class="info-row"><span class="info-label">成本费用结转</span><span class="info-value" style="color:#f5222d;">{{ "%.2f"|format(result_data.cost_expense) }}</span></div>
+                <div class="info-row" style="font-size:15px;font-weight:bold;padding-top:8px;border-top:2px solid #ccc;">
+                    <span>结转结果</span>
+                    <span>{{ "%.2f"|format(result_data.revenue - result_data.cost_expense) }}</span>
+                </div>
+            </div>
+            {% endif %}
+
+            {% if result_lines %}
+            <h3 style="margin:15px 0 10px;">结转凭证分录</h3>
+            <table>
+                <thead><tr><th>科目编码</th><th>科目名称</th><th class="num">借方金额</th><th class="num">贷方金额</th></tr></thead>
+                <tbody>
+                    {% for l in result_lines %}
+                    <tr>
+                        <td>{{ l.code }}</td>
+                        <td>{{ l.name }}</td>
+                        <td class="num">{% if l.debit > 0 %}{{ "%.2f"|format(l.debit) }}{% else %}-{% endif %}</td>
+                        <td class="num">{% if l.credit > 0 %}{{ "%.2f"|format(l.credit) }}{% else %}-{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+
+            <div class="btn-group">
+                <a href="/vouchers" class="btn">查看凭证列表</a>
+                <a href="/accounting-books" class="btn btn-default">查看会计账簿</a>
+                <a href="/profit-carry-forward" class="btn btn-default">下次结转</a>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        // 自动提交期间选择的select
+        document.querySelectorAll('select[name="period"]').forEach(function(sel) {
+            // 如果是closed的期间，标记disabled
+            var options = sel.options;
+            for (var i = 0; i < options.length; i++) {
+                if (options[i].text.indexOf('已结账') >= 0) {
+                    options[i].disabled = true;
+                }
+            }
+        });
+    </script>
+</body>
+</html>

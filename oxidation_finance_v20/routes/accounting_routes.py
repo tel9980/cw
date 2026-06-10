@@ -275,11 +275,7 @@ def vouchers_page():
                     error = "至少需要一条分录"
                 else:
                     cursor = conn.cursor()
-                    cursor.execute(
-                        "SELECT COUNT(*) FROM accounting_vouchers WHERE accounting_period=?",
-                        (accounting_period,))
-                    seq = cursor.fetchone()[0] + 1
-                    voucher_no = f"{accounting_period}-{seq:03d}"
+                    voucher_no = generate_voucher_number(conn, accounting_period)
                     vid = str(uuid.uuid4())
 
                     cursor.execute(
@@ -443,7 +439,7 @@ def accounting_books():
         detail_rows = conn.execute("""
             SELECT v.voucher_no, v.voucher_date, v.summary,
                 l.account_code, l.account_name,
-                CAST(l.debit AS REAL) as debit, CAST(l.credit AS REAL) as credit, v.status
+                CAST(l.debit AS REAL) as debit, CAST(l.credit AS REAL) as credit, v.status, v.id as vid
             FROM voucher_lines l
             JOIN accounting_vouchers v ON v.id = l.voucher_id
             WHERE l.account_code = ? AND v.accounting_period = ?
@@ -836,6 +832,7 @@ DEFAULT_SETTINGS = {
     "auto_post": "0",
     "fiscal_year_start": "01-01",
     "accounting_standard": "小企业会计准则",
+    "voucher_number_rule": "prefix:记-,date_fmt:%Y%m%d,seq_digits:3,reset:daily",
 }
 
 
@@ -854,6 +851,47 @@ def ensure_default_settings(conn):
             conn.execute(
                 "INSERT INTO system_settings (key, value, description, updated_at) VALUES (?, ?, ?, ?)",
                 (key, value, "", now))
+
+
+def generate_voucher_number(conn, accounting_period):
+    """根据凭证编号规则生成凭证编号"""
+    rule_str = get_setting(conn, "voucher_number_rule")
+    # 解析规则: prefix:记-,date_fmt:%Y%m%d,seq_digits:3,reset:daily
+    rule = {}
+    for part in rule_str.split(","):
+        if ":" in part:
+            k, v = part.split(":", 1)
+            rule[k.strip()] = v.strip()
+    
+    prefix = rule.get("prefix", "记-")
+    date_fmt = rule.get("date_fmt", "%Y%m%d")
+    seq_digits = int(rule.get("seq_digits", "3"))
+    reset_mode = rule.get("reset", "daily")
+    
+    from datetime import datetime
+    date_part = datetime.now().strftime(date_fmt)
+    
+    if reset_mode == "daily":
+        # 按日重置：统计当天已有凭证数
+        today = datetime.now().strftime("%Y-%m-%d")
+        count = conn.execute(
+            "SELECT COUNT(*) FROM accounting_vouchers WHERE DATE(voucher_date)=?", (today,)
+        ).fetchone()[0]
+    elif reset_mode == "monthly":
+        # 按月重置：统计当月已有凭证数
+        count = conn.execute(
+            "SELECT COUNT(*) FROM accounting_vouchers WHERE accounting_period=?", (accounting_period,)
+        ).fetchone()[0]
+    else:
+        # 按年或从不重置
+        count = conn.execute(
+            "SELECT COUNT(*) FROM accounting_vouchers WHERE accounting_period LIKE ?",
+            (accounting_period[:4] + "%",)
+        ).fetchone()[0]
+    
+    seq = count + 1
+    voucher_no = f"{prefix}{date_part}-{str(seq).zfill(seq_digits)}"
+    return voucher_no
 
 
 @accounting_bp.route("/system-settings", methods=["GET", "POST"])
@@ -878,7 +916,15 @@ def system_settings():
         now = datetime.now().isoformat()
         try:
             for key in DEFAULT_SETTINGS:
-                value = request.form.get(key, DEFAULT_SETTINGS[key])
+                if key == "voucher_number_rule":
+                    # 从表单构建凭证编号规则字符串
+                    vn_prefix = request.form.get("vn_prefix", "记-")
+                    vn_date_fmt = request.form.get("vn_date_fmt", "%Y%m%d")
+                    vn_seq_digits = request.form.get("vn_seq_digits", "3")
+                    vn_reset = request.form.get("vn_reset", "daily")
+                    value = f"prefix:{vn_prefix},date_fmt:{vn_date_fmt},seq_digits:{vn_seq_digits},reset:{vn_reset}"
+                else:
+                    value = request.form.get(key, DEFAULT_SETTINGS[key])
                 conn.execute(
                     "INSERT INTO system_settings (key, value, description, updated_at) VALUES (?, ?, '', ?) "
                     "ON CONFLICT(key) DO UPDATE SET value=?, updated_at=?",
@@ -897,13 +943,27 @@ def system_settings():
         if key not in settings:
             settings[key] = value
 
+    # 解析凭证编号规则供模板使用
+    rule_str = settings.get("voucher_number_rule", DEFAULT_SETTINGS["voucher_number_rule"])
+    vn_rule = {}
+    for part in rule_str.split(","):
+        if ":" in part:
+            k, v = part.split(":", 1)
+            vn_rule[k.strip()] = v.strip()
+    # 生成预览
+    from datetime import datetime as dt
+    prefix = vn_rule.get("prefix", "记-")
+    date_fmt = vn_rule.get("date_fmt", "%Y%m%d")
+    seq_digits = int(vn_rule.get("seq_digits", "3"))
+    vn_rule["preview"] = f"{prefix}{dt.now().strftime(date_fmt)}-{'1'.zfill(seq_digits)}"
+
     banks = [dict(b) for b in conn.execute(
         "SELECT DISTINCT bank_type FROM bank_accounts UNION SELECT DISTINCT bank_type FROM bank_transactions"
     ).fetchall()]
 
     conn.close()
     return render_template("system_settings.html", settings=settings,
-                           banks=banks, message=message, error=error,
+                           vn_rule=vn_rule, banks=banks, message=message, error=error,
                            defaults=DEFAULT_SETTINGS)
 
 
@@ -995,11 +1055,7 @@ def period_close():
 
         # 2. 创建结转凭证
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT COUNT(*) FROM accounting_vouchers WHERE accounting_period=?",
-            (period,))
-        seq = cursor.fetchone()[0] + 1
-        voucher_no = f"{period}-{seq:03d}"
+        voucher_no = generate_voucher_number(conn, period)
         vid = str(uuid.uuid4())
 
         total_debit = sum(l["debit"] for l in lines_to_create)
@@ -1038,6 +1094,206 @@ def period_close():
 
     conn.close()
     return redirect("/accounting-books?type=periods")
+
+
+# ========== 月末结转损益向导 ==========
+
+@accounting_bp.route("/profit-carry-forward", methods=["GET", "POST"])
+def profit_carry_forward():
+    """月末结转损益向导：预览 → 一键结转 → 结果"""
+    conn = get_db()
+    message = None
+    error = None
+    
+    # 获取所有会计期间
+    periods = [dict(p) for p in conn.execute(
+        "SELECT * FROM accounting_periods ORDER BY period_name DESC"
+    ).fetchall()]
+    
+    if not periods:
+        conn.close()
+        return render_template("profit_carry_forward.html", step="init",
+                               periods=[], message=None, error="没有可用的会计期间，请先创建期间。")
+
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        period = request.form.get("period", "")
+        
+        if action == "start":
+            # 预览损益汇总
+            return _carry_forward_preview(conn, period)
+        elif action == "execute":
+            # 执行结转
+            return _carry_forward_execute(conn, period)
+
+    conn.close()
+    return render_template("profit_carry_forward.html", step="init",
+                           periods=periods, message=message, error=error)
+
+
+def _carry_forward_preview(conn, period):
+    """预览损益类科目发生额"""
+    # 获取损益类科目的本期发生额
+    def get_pl_sum(conn, period, code_pattern, is_credit=True):
+        """获取损益类科目的贷方(收入)或借方(成本费用)发生额"""
+        field = "cr" if is_credit else "dr"
+        rows = conn.execute(f"""
+            SELECT l.account_code as code, l.account_name as name,
+                   COALESCE(SUM(CAST(l.{field} AS REAL)), 0) as amount
+            FROM voucher_lines l
+            JOIN accounting_vouchers v ON v.id = l.voucher_id
+            WHERE v.accounting_period = ? AND v.status = '已记账'
+              AND l.account_code LIKE ?
+            GROUP BY l.account_code
+            ORDER BY l.account_code
+        """, (period, code_pattern)).fetchall()
+        return [{"code": r["code"], "name": r["name"], "amount": float(r["amount"] or 0)} for r in rows]
+
+    # 收入类: 5开头但不是5401(主营业务成本)和54开头(成本)和55/56(费用), 即贷方发生额
+    # 简化: 收入类 = 5001(主营业务收入)开头的科目
+    revenue_items = get_pl_sum(conn, period, "5001%", is_credit=True)
+    # 成本类: 5401(主营业务成本)
+    cost_items = get_pl_sum(conn, period, "5401%", is_credit=False)
+    # 费用类: 55/56开头的科目
+    expense_items = get_pl_sum(conn, period, "55%", is_credit=False)
+    expense_items += get_pl_sum(conn, period, "56%", is_credit=False)
+    expense_items += get_pl_sum(conn, period, "53%", is_credit=False)  # 营业外支出等
+
+    revenue_total = sum(r["amount"] for r in revenue_items)
+    cost_total = sum(r["amount"] for r in cost_items)
+    expense_total = sum(r["amount"] for r in expense_items)
+    net_profit = revenue_total - cost_total - expense_total
+
+    # 检查条件
+    unposted_count = conn.execute("""
+        SELECT COUNT(*) FROM accounting_vouchers 
+        WHERE accounting_period=? AND status NOT IN ('已记账')
+    """, (period,)).fetchone()[0]
+
+    pending_count = conn.execute("""
+        SELECT COUNT(*) FROM accounting_vouchers 
+        WHERE accounting_period=? AND status = '待审核'
+    """, (period,)).fetchone()[0]
+
+    has_pl_data = revenue_total > 0 or cost_total > 0 or expense_total > 0
+    checks = {
+        "has_revenue": not has_pl_data,
+        "no_unposted": unposted_count > 0,
+        "no_pending": pending_count > 0,
+    }
+    can_execute = has_pl_data and unposted_count == 0 and pending_count == 0
+
+    periods = [dict(p) for p in conn.execute(
+        "SELECT * FROM accounting_periods ORDER BY period_name DESC"
+    ).fetchall()]
+    conn.close()
+
+    return render_template("profit_carry_forward.html", step="preview",
+                           period=period, periods=periods,
+                           revenue_items=revenue_items, cost_items=cost_items,
+                           expense_items=expense_items,
+                           revenue_total=revenue_total, cost_total=cost_total,
+                           expense_total=expense_total, net_profit=net_profit,
+                           checks=checks, can_execute=can_execute)
+
+
+def _carry_forward_execute(conn, period):
+    """执行损益结转：生成结转凭证"""
+    now = datetime.now().isoformat()
+    
+    # 获取收入类科目贷方发生额（转入本年利润贷方）
+    def get_dr_cr(conn, period, code_pattern):
+        rows = conn.execute("""
+            SELECT l.account_code as code, l.account_name as name,
+                   COALESCE(SUM(CAST(l.debit AS REAL)), 0) as dr,
+                   COALESCE(SUM(CAST(l.credit AS REAL)), 0) as cr
+            FROM voucher_lines l
+            JOIN accounting_vouchers v ON v.id = l.voucher_id
+            WHERE v.accounting_period = ? AND v.status = '已记账'
+              AND l.account_code LIKE ?
+            GROUP BY l.account_code
+        """, (period, code_pattern)).fetchall()
+        return [{"code": r["code"], "name": r["name"],
+                 "dr": float(r["dr"] or 0), "cr": float(r["cr"] or 0)} for r in rows]
+
+    revenue = get_dr_cr(conn, period, "5001%")
+    costs = get_dr_cr(conn, period, "5401%")
+    expenses = get_dr_cr(conn, period, "55%") + get_dr_cr(conn, period, "56%") + get_dr_cr(conn, period, "53%")
+
+    revenue_total = sum(r["cr"] for r in revenue)
+    cost_total = sum(c["dr"] for c in costs)
+    expense_total = sum(e["dr"] for e in expenses)
+
+    lines_to_create = []
+    result_lines = []
+
+    # 借：主营业务收入 → 贷：本年利润
+    for r in revenue:
+        if r["cr"] > 0:
+            lines_to_create.append({"code": r["code"], "name": r["name"], "debit": r["cr"], "credit": 0})
+            result_lines.append({"code": r["code"], "name": r["name"], "debit": r["cr"], "credit": 0})
+
+    # 借：本年利润 → 贷：主营业务成本/管理费用等
+    profit_dr = 0
+    for c in costs + expenses:
+        if c["dr"] > 0:
+            lines_to_create.append({"code": c["code"], "name": c["name"], "debit": 0, "credit": c["dr"]})
+            result_lines.append({"code": c["code"], "name": c["name"], "debit": 0, "credit": c["dr"]})
+            profit_dr += c["dr"]
+
+    # 本年利润结转
+    net = revenue_total - cost_total - expense_total
+    if net > 0:
+        # 盈利：贷方增加
+        lines_to_create.append({"code": "3103", "name": "本年利润", "debit": 0, "credit": net})
+    else:
+        # 亏损：借方增加
+        lines_to_create.append({"code": "3103", "name": "本年利润", "debit": abs(net), "credit": 0})
+
+    # 创建凭证
+    cursor = conn.cursor()
+    voucher_no = generate_voucher_number(conn, period) + "-JZSY"
+    vid = str(uuid.uuid4())
+    total_debit = sum(l["debit"] for l in lines_to_create)
+    total_credit = sum(l["credit"] for l in lines_to_create)
+
+    cursor.execute("""
+        INSERT INTO accounting_vouchers
+        (id, voucher_no, voucher_date, accounting_period, summary,
+         total_debit, total_credit, created_by, status, created_at, updated_at)
+        VALUES (?, ?, date('now'), ?, ?, ?, ?, '系统', '已记账', ?, ?)
+    """, (vid, voucher_no, period, f"月末损益结转 - {period}",
+          f"{total_debit:.2f}", f"{total_credit:.2f}", now, now))
+
+    for line in lines_to_create:
+        cursor.execute("""
+            INSERT INTO voucher_lines
+            (id, voucher_id, account_code, account_name, debit, credit, summary)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (str(uuid.uuid4()), vid, line["code"], line["name"],
+              f"{line['debit']:.2f}", f"{line['credit']:.2f}",
+              f"月末损益结转 - {period}"))
+
+    # 更新期间状态为已结转
+    conn.execute("UPDATE accounting_periods SET status='已结转' WHERE period_name=? AND is_closed=0",
+                 (period,))
+    conn.commit()
+    
+    result_data = {
+        "voucher_no": voucher_no,
+        "revenue": revenue_total,
+        "cost_expense": cost_total + expense_total,
+    }
+
+    periods = [dict(p) for p in conn.execute(
+        "SELECT * FROM accounting_periods ORDER BY period_name DESC"
+    ).fetchall()]
+    conn.close()
+
+    return render_template("profit_carry_forward.html", step="result",
+                           period=period, periods=periods,
+                           result_data=result_data, result_lines=result_lines,
+                           message="损益结转凭证已生成！")
 
 
 # ========== 数据导出 ==========
@@ -1362,10 +1618,7 @@ def depreciate_fixed_assets():
 
     # 生成折旧凭证
     cursor = conn.cursor()
-    seq = cursor.execute(
-        "SELECT COUNT(*) FROM accounting_vouchers WHERE accounting_period=?", (period,)
-    ).fetchone()[0] + 1
-    voucher_no = f"{period}-ZJ{seq:03d}"
+    voucher_no = generate_voucher_number(conn, period) + "-ZJ"
     vid = str(uuid.uuid4())
 
     cursor.execute("""
@@ -1502,9 +1755,7 @@ def copy_voucher(voucher_id):
 
     orig_lines = conn.execute("SELECT * FROM voucher_lines WHERE voucher_id=?", (voucher_id,)).fetchall()
     vid = str(uuid.uuid4())
-    seq = conn.execute("SELECT COUNT(*) FROM accounting_vouchers WHERE accounting_period=?",
-                       (orig["accounting_period"],)).fetchone()[0] + 1
-    voucher_no = f"{orig['accounting_period']}-{seq:03d}"
+    voucher_no = generate_voucher_number(conn, orig["accounting_period"]) + "-COPY"
 
     conn.execute("""
         INSERT INTO accounting_vouchers

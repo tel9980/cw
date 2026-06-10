@@ -128,6 +128,47 @@
                 </div>
             </div>
 
+            <div class="card">
+                <div class="section-title" style="border-top:none;margin-top:0;padding-top:0;">凭证编号规则</div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>编号前缀</label>
+                        <input type="text" name="vn_prefix" value="{{ vn_rule.prefix }}" placeholder="记-">
+                        <div class="help-text">如：记-、记字、银收- 等</div>
+                    </div>
+                    <div class="form-group">
+                        <label>日期格式</label>
+                        <select name="vn_date_fmt">
+                            <option value="%Y%m%d" {% if vn_rule.date_fmt=='%Y%m%d' %}selected{% endif %}>20260610 (年月日)</option>
+                            <option value="%Y%m" {% if vn_rule.date_fmt=='%Y%m' %}selected{% endif %}>202606 (年月)</option>
+                            <option value="%Y-%m-%d" {% if vn_rule.date_fmt=='%Y-%m-%d' %}selected{% endif %}>2026-06-10</option>
+                            <option value="%Y" {% if vn_rule.date_fmt=='%Y' %}selected{% endif %}>2026 (年)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>序数位数</label>
+                        <select name="vn_seq_digits">
+                            <option value="3" {% if vn_rule.seq_digits=='3' %}selected{% endif %}>3位 (001)</option>
+                            <option value="4" {% if vn_rule.seq_digits=='4' %}selected{% endif %}>4位 (0001)</option>
+                            <option value="5" {% if vn_rule.seq_digits=='5' %}selected{% endif %}>5位 (00001)</option>
+                        </select>
+                        <div class="help-text">序号的最小显示位数</div>
+                    </div>
+                    <div class="form-group">
+                        <label>序号重置</label>
+                        <select name="vn_reset">
+                            <option value="daily" {% if vn_rule.reset=='daily' %}selected{% endif %}>每日重置</option>
+                            <option value="monthly" {% if vn_rule.reset=='monthly' %}selected{% endif %}>每月重置</option>
+                            <option value="yearly" {% if vn_rule.reset=='yearly' %}selected{% endif %}>每年重置</option>
+                        </select>
+                        <div class="help-text">编号序数重置周期</div>
+                    </div>
+                </div>
+                <div style="margin-top:10px;padding:10px;background:#f6ffed;border-radius:4px;font-size:13px;color:#52c41a;">
+                    预览：<strong>{{ vn_rule.preview }}</strong>
+                </div>
+            </div>
+
             <div class="btn-group">
                 <button type="submit" class="btn">保存设置</button>
                 <a href="/" class="btn btn-default">返回首页</a>

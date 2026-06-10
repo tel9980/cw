@@ -33,6 +33,29 @@
         .status-已审核 { background: #e6f7ff; color: #1890ff; border: 1px solid #91d5ff; }
         .status-已记账 { background: #f6ffed; color: #52c41a; border: 1px solid #b7eb8f; }
         tr.total-row { background: #fafafa; font-weight: bold; border-top: 2px solid #ddd; }
+        .signature-area { display: flex; gap: 20px; margin-top: 30px; padding: 15px; border-top: 1px solid #eee; font-size: 14px; }
+        .sig-item { flex: 1; }
+        .sig-item span { color: #999; }
+        .sig-item div { height: 24px; border-bottom: 1px solid #333; margin-top: 5px; }
+        @media print {
+            body { background: white; font-size: 12px; }
+            .header, .nav { display: none; }
+            .container { max-width: 100%; padding: 0; margin: 0; }
+            .card { box-shadow: none; border: 1px solid #000; padding: 10px; margin-bottom: 5px; border-radius: 0; page-break-inside: avoid; }
+            .card:last-of-type { border: none; padding: 5px 10px; }
+            .card h2 { font-size: 14px; margin-bottom: 8px; text-align: center; }
+            .btn { display: none !important; }
+            .info-grid { grid-template-columns: 1fr 1fr 1fr 1fr; gap: 5px; }
+            .info-item { padding: 5px 8px; background: none; border: 1px solid #ccc; border-radius: 0; text-align: center; }
+            .info-label { font-size: 10px; }
+            .info-value { font-size: 13px; }
+            table { font-size: 11px; border: 1px solid #333; }
+            th { background: #eee; }
+            th, td { padding: 4px 6px; border: 1px solid #ccc; }
+            tr.total-row { border-top: 2px solid #000; }
+            .signature-area { margin-top: 20px; border-top: 1px solid #000; padding-top: 10px; }
+            @page { size: A4; margin: 10mm; }
+        }
     </style>
 </head>
 <body>
@@ -135,7 +158,17 @@
         </div>
 
         <div class="card">
+            <div class="signature-area">
+                <div class="sig-item"><span>制单人：</span><div>{{ voucher.created_by or '&nbsp;'|safe }}</div></div>
+                <div class="sig-item"><span>审核人：</span><div>{{ voucher.reviewed_by or '&nbsp;'|safe }}</div></div>
+                <div class="sig-item"><span>记账人：</span><div>{{ voucher.posted_by or '&nbsp;'|safe }}</div></div>
+            </div>
+        </div>
+
+        <div class="card">
             <a href="/vouchers" class="btn btn-default">← 返回凭证列表</a>
+            <a href="/accounting-books" class="btn btn-default" style="margin-left:10px;">返回会计账簿</a>
+            <button onclick="window.print()" class="btn" style="margin-left:10px;background:#52c41a;">打印凭证</button>
         </div>
     </div>
 </body>

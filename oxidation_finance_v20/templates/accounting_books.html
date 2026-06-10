@@ -108,7 +108,7 @@
                     <thead><tr><th>科目编码</th><th>科目名称</th><th>类型</th><th class="num">期初余额</th><th class="num">借方发生额</th><th class="num">贷方发生额</th><th class="num">期末余额</th><th>方向</th></tr></thead>
                     <tbody>
                         {% for b in balance_data %}
-                        <tr><td><strong>{{ b.code }}</strong></td><td>{{ b.name }}</td>
+                        <tr><td><a href="/accounting-books?type=detail&account_code={{ b.code }}&period={{ current_period }}" style="color:#1890ff;text-decoration:none;" title="点击查看明细账"><strong>{{ b.code }}</strong></a></td><td>{{ b.name }}</td>
                             <td><span class="type-tag type-{{ b.account_type }}">{{ b.account_type }}</span></td>
                             <td class="num">{% if b.opening_balance|float != 0 %}{{ '%.2f'|format(b.opening_balance|float) }}{% else %}-{% endif %}</td>
                             <td class="num">{% if b.debit_sum|float > 0 %}{{ '%.2f'|format(b.debit_sum|float) }}{% else %}-{% endif %}</td>
@@ -141,7 +141,7 @@
                     <thead><tr><th>凭证编号</th><th>凭证日期</th><th>摘要</th><th class="num">借方金额</th><th class="num">贷方金额</th><th>状态</th></tr></thead>
                     <tbody>
                         {% for d in detail_data %}
-                        <tr><td>{{ d.voucher_no }}</td><td>{{ d.voucher_date }}</td><td>{{ d.summary or '-' }}</td>
+                        <tr><td><a href="/vouchers/{{ d.vid }}" style="color:#1890ff;text-decoration:none;">{{ d.voucher_no }}</a></td><td>{{ d.voucher_date }}</td><td>{{ d.summary or '-' }}</td>
                             <td class="num">{% if d.debit|float > 0 %}{{ '%.2f'|format(d.debit|float) }}{% else %}-{% endif %}</td>
                             <td class="num">{% if d.credit|float > 0 %}{{ '%.2f'|format(d.credit|float) }}{% else %}-{% endif %}</td><td>{{ d.status }}</td></tr>
                         {% endfor %}
@@ -183,7 +183,7 @@
                     <tbody>
                         {% for t in trial_data.rows %}
                         <tr>
-                            <td><strong>{{ t.code }}</strong></td><td>{{ t.name }}</td>
+                            <td><a href="/accounting-books?type=detail&account_code={{ t.code }}&period={{ current_period }}" style="color:#1890ff;text-decoration:none;" title="点击查看明细账"><strong>{{ t.code }}</strong></a></td><td>{{ t.name }}</td>
                             <td class="num">{% if t.dr_open>0 %}{{ '%.2f'|format(t.dr_open) }}{% endif %}</td>
                             <td class="num">{% if t.cr_open>0 %}{{ '%.2f'|format(t.cr_open) }}{% endif %}</td>
                             <td class="num">{% if t.dr_current>0 %}{{ '%.2f'|format(t.dr_current) }}{% endif %}</td>
