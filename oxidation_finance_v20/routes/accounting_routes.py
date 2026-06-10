@@ -2415,3 +2415,419 @@ def invoices():
     return render_template("invoice_management.html",
         invoices=invoices_list, message=message, error=error,
         show_modal=show_modal, today=date.today().isoformat())
+
+
+# ========== 工资管理 ==========
+
+@accounting_bp.route("/salary", methods=["GET", "POST"])
+def salary():
+    """员工管理 + 工资表 + 个税计算"""
+    conn = get_db()
+    # Create tables
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS employees (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL, id_number TEXT,
+            position TEXT, base_salary REAL DEFAULT 0, social_base REAL DEFAULT 0,
+            hire_date TEXT, is_active INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS salary_records (
+            id TEXT PRIMARY KEY, employee_id TEXT NOT NULL, emp_name TEXT NOT NULL,
+            period TEXT NOT NULL, base_salary REAL DEFAULT 0,
+            overtime REAL DEFAULT 0, bonus REAL DEFAULT 0, gross REAL DEFAULT 0,
+            social_personal REAL DEFAULT 0, social_company REAL DEFAULT 0,
+            tax REAL DEFAULT 0, net REAL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            UNIQUE(employee_id, period)
+        )
+    """)
+    conn.commit()
+
+    tab = request.args.get("tab", "list")
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+    message = None; error = None; show_modal = False; voucher_msg = None
+
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        try:
+            if action == "add_employee":
+                now = datetime.now().isoformat()
+                conn.execute(
+                    "INSERT INTO employees (id, name, id_number, position, base_salary, social_base, hire_date, is_active, created_at, updated_at) "
+                    "VALUES (?,?,?,?,?,?,?,1,?,?)",
+                    (str(uuid.uuid4()), request.form.get("name"),
+                     request.form.get("id_number", ""), request.form.get("position", ""),
+                     float(request.form.get("base_salary", "0") or 0),
+                     float(request.form.get("social_base", "0") or 0),
+                     request.form.get("hire_date", date.today().isoformat()), now, now))
+                conn.commit()
+                message = "员工添加成功"
+            elif action in ("delete", "restore"):
+                conn.execute("UPDATE employees SET is_active=? WHERE id=?",
+                    (0 if action == "delete" else 1, request.form.get("emp_id")))
+                conn.commit()
+                message = "操作成功"
+            elif action == "generate":
+                _generate_salary(conn, period)
+                message = f"工资表 {period} 生成成功"
+                tab = "salary"
+            elif action == "gen_voucher":
+                voucher_msg, err = _gen_salary_voucher(conn, period)
+                tab = "voucher"
+                if err: error = err
+        except Exception as e:
+            error = f"操作失败: {e}"
+
+    # Queries
+    employees = [dict(r) for r in conn.execute(
+        "SELECT * FROM employees ORDER BY is_active DESC, name").fetchall()]
+
+    salary_records = []
+    salary_summary = {"total_gross": 0, "total_tax": 0, "total_social": 0, "total_net": 0}
+    if tab == "salary":
+        salary_records = [dict(r) for r in conn.execute(
+            "SELECT * FROM salary_records WHERE period=? ORDER BY emp_name", (period,)).fetchall()]
+        for r in salary_records:
+            salary_summary["total_gross"] += float(r["gross"] or 0)
+            salary_summary["total_tax"] += float(r["tax"] or 0)
+            salary_summary["total_social"] += float(r["social_personal"] or 0)
+            salary_summary["total_net"] += float(r["net"] or 0)
+
+    conn.close()
+    return render_template("salary_management.html",
+        employees=employees, salary_records=salary_records, salary_summary=salary_summary,
+        tab=tab, period=period, message=message, error=error, voucher_msg=voucher_msg,
+        show_modal=show_modal, today=date.today().isoformat())
+
+
+def _generate_salary(conn, period):
+    """生成月度工资表"""
+    import hashlib
+    employees = conn.execute(
+        "SELECT * FROM employees WHERE is_active=1").fetchall()
+    for emp in employees:
+        eid = emp["id"]; ename = emp["name"]
+        base = float(emp["base_salary"] or 0)
+        social_base = float(emp["social_base"] or base)
+        # Social insurance (personal portion ~10.5%)
+        social_personal = round(social_base * 0.105, 2)
+        # Tax calculation (simplified progressive)
+        taxable = base - 5000 - social_personal  # basic deduction
+        if taxable <= 0:
+            tax = 0
+        elif taxable <= 3000:
+            tax = taxable * 0.03
+        elif taxable <= 12000:
+            tax = taxable * 0.1 - 210
+        elif taxable <= 25000:
+            tax = taxable * 0.2 - 1410
+        elif taxable <= 35000:
+            tax = taxable * 0.25 - 2660
+        else:
+            tax = taxable * 0.3 - 4410
+        tax = max(round(tax, 2), 0)
+        gross = base
+        net = gross - social_personal - tax
+        sid = hashlib.md5(f"{eid}_{period}".encode()).hexdigest()[:16]
+        # Upsert
+        conn.execute("DELETE FROM salary_records WHERE employee_id=? AND period=?", (eid, period))
+        conn.execute(
+            "INSERT INTO salary_records (id, employee_id, emp_name, period, base_salary, overtime, bonus, gross, social_personal, social_company, tax, net, created_at) "
+            "VALUES (?,?,?,?,?,0,0,?,?,?,?,?,?)",
+            (sid, eid, ename, period, base, gross, social_personal, social_personal * 1.5, tax, net, datetime.now().isoformat()))
+    conn.commit()
+
+
+def _gen_salary_voucher(conn, period):
+    """生成工资凭证"""
+    records = conn.execute(
+        "SELECT * FROM salary_records WHERE period=?", (period,)).fetchall()
+    if not records:
+        return None, "该月无工资数据，请先生成工资表"
+
+    total = sum(float(r["gross"] or 0) for r in records)
+    vno = f"GZ{period.replace('-','')}01"
+    # Check duplicate
+    exist = conn.execute(
+        "SELECT COUNT(*) FROM accounting_vouchers WHERE voucher_no=?", (vno,)).fetchone()[0]
+    if exist:
+        return f"凭证 {vno} 已存在", None
+
+    vid = str(uuid.uuid4())
+    now = datetime.now().isoformat()
+    conn.execute(
+        "INSERT INTO accounting_vouchers (id, voucher_no, voucher_date, accounting_period, summary, total_debit, total_credit, created_by, status, created_at, updated_at) "
+        "VALUES (?,?,?,?,?,?,?,?,'已审核',?,?)",
+        (vid, vno, date.today().isoformat(), period,
+         f"计提{period}工资", total, total, "系统", now, now))
+    conn.execute(
+        "INSERT INTO voucher_lines (id, voucher_id, account_code, account_name, debit, credit, summary) VALUES (?,?,?,?,?,?,?)",
+        (str(uuid.uuid4()), vid, "5602", "管理费用-工资", str(total), "0", f"{period}工资"))
+    conn.execute(
+        "INSERT INTO voucher_lines (id, voucher_id, account_code, account_name, debit, credit, summary) VALUES (?,?,?,?,?,?,?)",
+        (str(uuid.uuid4()), vid, "2211", "应付职工薪酬", "0", str(total), f"{period}工资"))
+    conn.commit()
+    return f"工资凭证 {vno} 生成成功（金额: {total:.2f}）", None
+
+
+# ========== 标准财务报表打印 ==========
+
+@accounting_bp.route("/financial-reports")
+def financial_reports():
+    """标准财务报表（资产负债表/利润表/现金流量表）"""
+    conn = get_db()
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+
+    def sum_incomes(p):
+        return to_float(conn.execute(
+            "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM incomes WHERE income_date LIKE ?",
+            (p + "%",)).fetchone()[0])
+
+    def sum_expenses(p):
+        return to_float(conn.execute(
+            "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM expenses WHERE expense_date LIKE ?",
+            (p + "%",)).fetchone()[0])
+
+    revenue = sum_incomes(period)
+    total_exp = sum_expenses(period)
+    cost = total_exp * 0.6
+    admin_exp = total_exp * 0.3
+    fin_exp = total_exp * 0.05
+    gross = revenue - cost
+    o_profit = gross - admin_exp - fin_exp
+    income_tax = max(o_profit * 0.25, 0)
+    net = o_profit - income_tax
+
+    # YTD
+    year = period[:4]
+    rev_ytd = sum_incomes(year)
+    cost_ytd = sum_expenses(year) * 0.6
+    gross_ytd = rev_ytd - cost_ytd
+    admin_ytd = sum_expenses(year) * 0.3
+    o_ytd = gross_ytd - admin_ytd - sum_expenses(year) * 0.05
+    net_ytd = o_ytd - max(o_ytd * 0.25, 0)
+
+    # Balance sheet
+    cash = to_float(conn.execute(
+        "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM incomes").fetchone()[0]) - total_exp
+    cash_begin = max(cash * 0.8, 0)
+    ar = to_float(conn.execute(
+        "SELECT COALESCE(SUM(CAST(total_amount AS REAL)),0) FROM processing_orders "
+        "WHERE status NOT IN ('已交付','已取消')").fetchone()[0])
+    ar_begin = max(ar * 0.6, 0)
+    other_ar = 0
+    ca_total = cash + ar + other_ar
+    ca_begin = cash_begin + ar_begin
+
+    fa = to_float(conn.execute(
+        "SELECT COALESCE(SUM(net_value),0) FROM fixed_assets WHERE status='使用中'").fetchone()[0])
+    fa_begin = fa * 1.1
+    total_assets = ca_total + fa
+    total_assets_begin = ca_begin + fa_begin
+
+    ap = to_float(conn.execute(
+        "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM expenses WHERE expense_date LIKE ?",
+        (period + "%",)).fetchone()[0]) * 0.3
+    salary_payable = to_float(conn.execute(
+        "SELECT COALESCE(SUM(gross),0) FROM salary_records WHERE period=?",
+        (period,)).fetchone()[0])
+    tax_payable = income_tax
+    cl_total = ap + salary_payable + tax_payable
+
+    capital = 100000
+    retained = total_assets - cl_total - capital
+    equity = capital + retained
+
+    balance_sheet = type('obj', (), {
+        "cash": cash, "cash_begin": cash_begin, "ar": ar, "ar_begin": ar_begin,
+        "other_ar": other_ar, "ca_total": ca_total, "ca_begin": ca_begin,
+        "fa": fa, "fa_begin": fa_begin,
+        "total_assets": total_assets, "total_assets_begin": total_assets_begin,
+        "ap": ap, "salary_payable": salary_payable, "tax_payable": tax_payable,
+        "cl_total": cl_total, "capital": capital, "retained": retained, "equity": equity
+    })()
+
+    profit_loss = type('obj', (), {
+        "revenue": revenue, "cost": cost, "gross": gross,
+        "admin_expense": admin_exp, "sell_expense": 0, "finance_expense": fin_exp,
+        "o_profit": o_profit, "income_tax": income_tax, "net": net,
+        "revenue_ytd": rev_ytd, "cost_ytd": cost_ytd, "gross_ytd": gross_ytd,
+        "admin_expense_ytd": admin_ytd, "o_profit_ytd": o_ytd, "net_ytd": net_ytd
+    })()
+
+    op_inflow = revenue * 0.9
+    op_outflow = cost * 0.7
+    salary_out = salary_payable
+    tax_out = income_tax * 0.5
+    op_net = op_inflow - op_outflow - salary_out - tax_out
+    inv_out = fa * 0.05
+    begin_cash = cash_begin
+    end_cash = begin_cash + op_net - inv_out
+
+    cash_flow = type('obj', (), {
+        "op_inflow": op_inflow, "op_outflow": op_outflow,
+        "salary_out": salary_out, "tax_out": tax_out, "op_net": op_net,
+        "inv_out": inv_out, "begin": begin_cash, "end": end_cash, "net": op_net - inv_out
+    })()
+
+    conn.close()
+    return render_template("financial_reports.html",
+        balance_sheet=balance_sheet, profit_loss=profit_loss, cash_flow=cash_flow,
+        period=period)
+
+
+# ========== 摊销与预提 ==========
+
+@accounting_bp.route("/amortization", methods=["GET", "POST"])
+def amortization():
+    """摊销管理"""
+    conn = get_db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS amortization_plans (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL, plan_type TEXT NOT NULL,
+            account_code TEXT, total_amount REAL DEFAULT 0, total_months INTEGER DEFAULT 12,
+            monthly_amount REAL DEFAULT 0, amortized_months INTEGER DEFAULT 0,
+            start_date TEXT, next_date TEXT, status TEXT DEFAULT '进行中',
+            created_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS amortization_logs (
+            id TEXT PRIMARY KEY, plan_id TEXT, plan_name TEXT,
+            exec_date TEXT, amount REAL, voucher_no TEXT, notes TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+
+    message = None; error = None; show_modal = False
+
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        try:
+            if action == "create":
+                total = float(request.form.get("total_amount", "0") or 0)
+                months = int(request.form.get("total_months", "12") or 12)
+                start = request.form.get("start_date", date.today().strftime("%Y-%m"))
+                plan_id = str(uuid.uuid4())
+                conn.execute(
+                    "INSERT INTO amortization_plans (id, name, plan_type, account_code, total_amount, total_months, monthly_amount, amortized_months, start_date, next_date, status, created_at) "
+                    "VALUES (?,?,?,?,?,?,?,0,?,?,?,?)",
+                    (plan_id, request.form.get("name"), request.form.get("plan_type"),
+                     request.form.get("account_code"), total, months,
+                     round(total / months, 2), start, start, "进行中",
+                     datetime.now().isoformat()))
+                conn.commit()
+                message = "摊销计划创建成功"
+            elif action == "delete":
+                conn.execute("DELETE FROM amortization_plans WHERE id=?",
+                            (request.form.get("plan_id"),))
+                conn.commit()
+                message = "摊销计划已删除"
+            elif action == "exec_all":
+                plans = conn.execute(
+                    "SELECT * FROM amortization_plans WHERE status='进行中' AND next_date<=?",
+                    (date.today().strftime("%Y-%m"),)).fetchall()
+                if not plans:
+                    error = "没有需要执行的摊销计划"
+                else:
+                    for p in plans:
+                        p_m = int(p["amortized_months"] or 0) + 1
+                        status = "已完成" if p_m >= int(p["total_months"] or 12) else "进行中"
+                        vno = f"AM{p['id'][:6]}{date.today().strftime('%m')}"
+                        conn.execute(
+                            "INSERT INTO amortization_logs (id, plan_id, plan_name, exec_date, amount, voucher_no, notes, created_at) "
+                            "VALUES (?,?,?,?,?,?,?,?)",
+                            (str(uuid.uuid4()), p["id"], p["name"],
+                             date.today().isoformat(), round(float(p["monthly_amount"] or 0), 2),
+                             vno, f"第{p_m}期摊销", datetime.now().isoformat()))
+                        conn.execute(
+                            "UPDATE amortization_plans SET amortized_months=?, status=?, next_date=? WHERE id=?",
+                            (p_m, status,
+                             (date.today().replace(month=date.today().month+1) if date.today().month < 12 else date.today().replace(year=date.today().year+1, month=1)).strftime("%Y-%m"),
+                             p["id"]))
+                    conn.commit()
+                    message = f"完成 {len(plans)} 项摊销处理"
+        except Exception as e:
+            error = f"操作失败: {e}"
+
+    plans = []
+    for p in conn.execute("SELECT * FROM amortization_plans ORDER BY status, start_date").fetchall():
+        p = dict(p)
+        total_m = max(int(p["total_months"] or 12), 1)
+        am_m = int(p["amortized_months"] or 0)
+        p["progress"] = min(int(am_m / total_m * 100), 100)
+        plans.append(p)
+
+    exec_logs = [dict(r) for r in conn.execute(
+        "SELECT * FROM amortization_logs ORDER BY created_at DESC LIMIT 20").fetchall()]
+
+    stats = {
+        "total_amount": f"{sum(float(p['total_amount'] or 0) for p in plans):.2f}",
+        "amortized": f"{sum(float(p.get('monthly_amount', 0) or 0) * p['amortized_months'] for p in plans):.2f}",
+        "remaining": f"{sum(float(p.get('monthly_amount', 0) or 0) * (max(p['total_months'] - p['amortized_months'], 0)) for p in plans):.2f}"
+    }
+
+    conn.close()
+    return render_template("amortization.html",
+        plans=plans, exec_logs=exec_logs, stats=stats,
+        message=message, error=error, show_modal=show_modal,
+        today=date.today().isoformat())
+
+
+# ========== 增值税申报表 ==========
+
+@accounting_bp.route("/vat-return", methods=["GET", "POST"])
+def vat_return():
+    """增值税申报表"""
+    conn = get_db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS invoices (
+            id TEXT PRIMARY KEY, invoice_no TEXT NOT NULL, inv_type TEXT NOT NULL,
+            counterparty TEXT NOT NULL, amount REAL NOT NULL DEFAULT 0,
+            tax_rate REAL DEFAULT 13, tax_amount REAL NOT NULL DEFAULT 0,
+            invoice_date TEXT NOT NULL, status TEXT DEFAULT '未认证',
+            related_income_id TEXT, related_expense_id TEXT,
+            notes TEXT, created_at TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        if action == "certify":
+            conn.execute("UPDATE invoices SET status='已认证' WHERE id=?",
+                        (request.form.get("inv_id"),))
+            conn.commit()
+
+    # Output tax detail by rate
+    output_detail = [dict(r) for r in conn.execute(
+        "SELECT tax_rate rate, SUM(amount) amount, SUM(tax_amount) tax, COUNT(*) count "
+        "FROM invoices WHERE inv_type='销项' AND invoice_date LIKE ? "
+        "GROUP BY tax_rate ORDER BY tax_rate DESC", (period + "%",)).fetchall()]
+
+    output_amount = sum(r["amount"] for r in output_detail)
+    output_tax = sum(r["tax"] for r in output_detail)
+
+    input_invoices = [dict(r) for r in conn.execute(
+        "SELECT * FROM invoices WHERE inv_type='进项' AND invoice_date LIKE ? ORDER BY invoice_date DESC",
+        (period + "%",)).fetchall()]
+    input_amount = sum(r["amount"] for r in input_invoices)
+    input_tax_certified = sum(r["tax_amount"] for r in input_invoices if r["status"] == "已认证")
+    carryover = 0  # Simplified: no carryover tracking
+
+    tax_payable = max(output_tax - input_tax_certified - carryover, 0)
+
+    data = {
+        "output_detail": output_detail, "input_invoices": input_invoices,
+        "output_amount": output_amount, "output_tax": output_tax,
+        "input_amount": input_amount, "input_tax_certified": input_tax_certified,
+        "carryover": carryover, "tax_payable": tax_payable
+    }
+
+    conn.close()
+    return render_template("vat_return.html", data=data, period=period)

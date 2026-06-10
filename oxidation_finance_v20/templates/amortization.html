@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>摊销与预提 - 氧化加工厂财务系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
+        .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+        .header { background: #1890ff; color: white; padding: 16px 20px; margin-bottom: 20px; }
+        .header h1 { font-size: 22px; display: flex; align-items: center; justify-content: space-between; }
+        .header a { color: white; font-size: 14px; text-decoration: none; opacity: 0.85; }
+        .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .card h2 { font-size: 18px; margin-bottom: 15px; color: #333; }
+        .summary-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; }
+        .summary-card { background: #f8f9fa; padding: 16px; border-radius: 6px; text-align: center; border-left: 4px solid #1890ff; }
+        .summary-card .val { font-size: 22px; font-weight: bold; color: #333; }
+        .summary-card .lbl { font-size: 13px; color: #999; margin-top: 4px; }
+        .btn { display: inline-block; padding: 9px 18px; background: #1890ff; color: white; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; font-size: 14px; }
+        .btn-success { background: #52c41a; }
+        .btn-warning { background: #faad14; }
+        .btn-danger { background: #f5222d; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #fafafa; font-weight: 600; color: #555; }
+        tr:hover { background: #f5f5f5; }
+        .num { text-align: right; }
+        .progress-bar { display: inline-block; height: 18px; border-radius: 3px; background: #1890ff; vertical-align: middle; }
+        .progress-bg { display: inline-block; width: 120px; height: 18px; background: #f0f0f0; border-radius: 3px; vertical-align: middle; }
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+        .tag-running { background: #e6f7ff; color: #1890ff; }
+        .tag-done { background: #f6ffed; color: #52c41a; }
+        .modal-bg { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 999; justify-content: center; align-items: center; }
+        .modal-bg.show { display: flex; }
+        .modal { background: white; padding: 24px; border-radius: 8px; width: 460px; max-width: 95%; }
+        .modal h3 { margin-bottom: 16px; }
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; margin-bottom: 4px; font-size: 13px; color: #666; }
+        .form-group input, .form-group select { width: 100%; padding: 8px 10px; border: 1px solid #d9d9d9; border-radius: 4px; }
+        .form-row { display: flex; gap: 10px; }
+        .form-row .form-group { flex: 1; }
+        @media (max-width: 768px) {
+            .summary-row { grid-template-columns: repeat(2, 1fr); }
+            .form-row { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <h1>摊销与预提 <a href="/">← 返回首页</a></h1>
+        </div>
+    </div>
+    <div class="container">
+        {% if message %}<div class="card" style="background:#f6ffed;border:1px solid #b7eb8f;color:#52c41a;">{{ message }}</div>{% endif %}
+        {% if error %}<div class="card" style="background:#fff2f0;border:1px solid #ffccc7;color:#f5222d;">{{ error }}</div>{% endif %}
+
+        <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h2>摊销/预提计划</h2>
+                <div>
+                    <button class="btn" onclick="openModal()">+ 新建计划</button>
+                    <form method="POST" style="display:inline; margin-left:10px;">
+                        <input type="hidden" name="action" value="exec_all">
+                        <button class="btn btn-warning" onclick="return confirm('确认执行当月所有摊销？将自动生成凭证。')">一键执行当月摊销</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="summary-row">
+            <div class="summary-card">
+                <div class="val">{{ stats.total_amount }}</div>
+                <div class="lbl">总摊销金额</div>
+            </div>
+            <div class="summary-card" style="border-left-color:#52c41a;">
+                <div class="val">{{ stats.amortized }}</div>
+                <div class="lbl">已摊销金额</div>
+            </div>
+            <div class="summary-card" style="border-left-color:#faad14;">
+                <div class="val">{{ stats.remaining }}</div>
+                <div class="lbl">剩余摊销</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <table>
+                <thead>
+                    <tr>
+                        <th>名称</th>
+                        <th>类型</th>
+                        <th>科目</th>
+                        <th class="num">总金额</th>
+                        <th class="num">月摊销额</th>
+                        <th>进度</th>
+                        <th>下次摊销</th>
+                        <th>状态</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for plan in plans %}
+                    <tr>
+                        <td><strong>{{ plan.name }}</strong></td>
+                        <td>{{ plan.plan_type }}</td>
+                        <td>{{ plan.account_code }}</td>
+                        <td class="num">{{ "%.2f"|format(plan.total_amount) }}</td>
+                        <td class="num">{{ "%.2f"|format(plan.monthly_amount) }}</td>
+                        <td>
+                            <div class="progress-bg">
+                                <div class="progress-bar" style="width:{{ plan.progress }}%; background:{% if plan.progress >= 100 %}#52c41a{% elif plan.progress >= 80 %}#faad14{% else %}#1890ff{% endif %};"></div>
+                            </div>
+                            {{ plan.amortized_months }}/{{ plan.total_months }}月
+                        </td>
+                        <td>{{ plan.next_date }}</td>
+                        <td><span class="tag {{ 'tag-done' if plan.status == '已完成' else 'tag-running' }}">{{ plan.status }}</span></td>
+                        <td>
+                            <form method="POST" style="display:inline;" onsubmit="return confirm('确定删除？');">
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="plan_id" value="{{ plan.id }}">
+                                <button class="btn btn-danger" style="padding:4px 10px; font-size:12px;">删除</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not plans %}
+                    <tr><td colspan="9" style="text-align:center;color:#999;padding:30px;">暂无摊销计划，请新建</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 最近执行记录 -->
+        {% if exec_logs %}
+        <div class="card">
+            <h2>最近执行记录</h2>
+            <table>
+                <thead><tr><th>日期</th><th>计划</th><th>金额</th><th>凭证号</th><th>备注</th></tr></thead>
+                <tbody>
+                    {% for log in exec_logs %}
+                    <tr>
+                        <td>{{ log.exec_date }}</td>
+                        <td>{{ log.plan_name }}</td>
+                        <td class="num">{{ "%.2f"|format(log.amount) }}</td>
+                        <td>{{ log.voucher_no }}</td>
+                        <td>{{ log.notes }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        <!-- 新建计划弹窗 -->
+        <div class="modal-bg" id="planModal">
+            <div class="modal">
+                <h3>新建摊销/预提计划</h3>
+                <form method="POST">
+                    <input type="hidden" name="action" value="create">
+                    <div class="form-group"><label>计划名称 *</label><input type="text" name="name" placeholder="如：厂房租金摊销" required></div>
+                    <div class="form-group">
+                        <label>类型</label>
+                        <select name="plan_type">
+                            <option value="固定资产折旧">固定资产折旧</option>
+                            <option value="长期待摊">长期待摊</option>
+                            <option value="预付租金">预付租金</option>
+                            <option value="预提费用">预提费用</option>
+                        </select>
+                    </div>
+                    <div class="form-group"><label>科目代码 *</label><input type="text" name="account_code" placeholder="如：5602（管理费用）" required></div>
+                    <div class="form-row">
+                        <div class="form-group"><label>总金额 *</label><input type="number" name="total_amount" step="0.01" required></div>
+                        <div class="form-group"><label>摊销月数 *</label><input type="number" name="total_months" value="12" required></div>
+                    </div>
+                    <div class="form-group"><label>开始日期</label><input type="month" name="start_date" value="{{ today[:7] }}"></div>
+                    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:16px;">
+                        <button type="button" class="btn" style="background:#999;" onclick="closeModal()">取消</button>
+                        <button type="submit" class="btn">保存</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <script>
+            function openModal() { document.getElementById('planModal').classList.add('show'); }
+            function closeModal() { document.getElementById('planModal').classList.remove('show'); }
+            {% if show_modal %}setTimeout(openModal, 100);{% endif %}
+        </script>
+    </div>
+</body>
+</html>

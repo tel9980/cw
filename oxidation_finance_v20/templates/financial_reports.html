@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>财务报表 - 氧化加工厂财务系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: "SimSun", "宋体", serif; background: #f5f5f5; }
+        .no-print { background: #1890ff; color: white; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; }
+        .no-print h1 { font-size: 20px; }
+        .no-print a, .no-print button { color: white; text-decoration: none; padding: 8px 16px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.5); cursor: pointer; font-size: 14px; background: transparent; }
+        .no-print button:hover, .no-print a:hover { background: rgba(255,255,255,0.15); }
+        .container { max-width: 900px; margin: 20px auto; padding: 0 10px; }
+        .page { background: white; padding: 40px 30px; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .report-title { text-align: center; font-size: 20px; font-weight: bold; margin-bottom: 6px; }
+        .report-sub { text-align: center; font-size: 14px; color: #555; margin-bottom: 6px; }
+        .report-meta { text-align: center; font-size: 13px; color: #888; margin-bottom: 20px; }
+        .report-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .report-table th, .report-table td { border: 1px solid #333; padding: 6px 8px; }
+        .report-table th { background: #f0f0f0; text-align: center; font-weight: bold; }
+        .report-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+        .report-table .bold { font-weight: bold; }
+        .report-table .section { background: #e8e8e8; font-weight: bold; }
+        .report-table .total-line { border-top: 2px solid #333; }
+        .indent { padding-left: 24px !important; }
+        .footer { text-align: center; font-size: 12px; color: #888; margin-top: 20px; }
+        .stamp-area { display: flex; justify-content: space-around; margin-top: 30px; font-size: 14px; }
+        .stamp-area div { text-align: center; }
+        .period-nav { text-align: center; margin-bottom: 15px; }
+        .period-nav input { padding: 6px 10px; border: 1px solid #d9d9d9; border-radius: 4px; }
+        .period-nav button { padding: 6px 14px; background: #1890ff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        @media print {
+            body { background: white; }
+            .no-print { display: none !important; }
+            .page { box-shadow: none; margin: 0; padding: 20px 15px; page-break-after: always; }
+            .page:last-child { page-break-after: auto; }
+            .container { max-width: 100%; padding: 0; margin: 0; }
+        }
+    </style>
+</head>
+<body>
+    <div class="no-print">
+        <div>
+            <h1>标准财务报表</h1>
+        </div>
+        <div style="display:flex; gap:10px;">
+            <a href="/">← 返回首页</a>
+            <button onclick="window.print()">打印全部报表</button>
+        </div>
+    </div>
+    <div class="container">
+        <div class="no-print period-nav">
+            <form method="GET" style="display:inline;">
+                <input type="month" name="period" value="{{ period }}">
+                <button type="submit">切换期间</button>
+            </form>
+        </div>
+
+        <!-- ===== 资产负债表 ===== -->
+        <div class="page" id="bs">
+            <div class="report-title">资 产 负 债 表</div>
+            <div class="report-sub">氧化加工厂</div>
+            <div class="report-meta">{{ period }} | 单位：元</div>
+            <table class="report-table">
+                <thead>
+                    <tr><th>资产</th><th class="num" width="80">期末余额</th><th class="num" width="80">年初余额</th><th width="20"></th><th>负债及所有者权益</th><th class="num" width="80">期末余额</th></tr>
+                </thead>
+                <tbody>
+                    {% set bs = balance_sheet %}
+                    <tr><td class="section" colspan="3">流动资产</td><td></td><td class="section" colspan="2">流动负债</td></tr>
+                    <tr><td class="indent">货币资金</td><td class="num">{{ "%.2f"|format(bs.cash) }}</td><td class="num">{{ "%.2f"|format(bs.cash_begin) }}</td><td></td><td class="indent">应付账款</td><td class="num">{{ "%.2f"|format(bs.ap) }}</td></tr>
+                    <tr><td class="indent">应收账款</td><td class="num">{{ "%.2f"|format(bs.ar) }}</td><td class="num">{{ "%.2f"|format(bs.ar_begin) }}</td><td></td><td class="indent">应付职工薪酬</td><td class="num">{{ "%.2f"|format(bs.salary_payable) }}</td></tr>
+                    <tr><td class="indent">其他应收款</td><td class="num">{{ "%.2f"|format(bs.other_ar) }}</td><td class="num">0.00</td><td></td><td class="indent">应交税费</td><td class="num">{{ "%.2f"|format(bs.tax_payable) }}</td></tr>
+                    <tr class="bold"><td>流动资产合计</td><td class="num">{{ "%.2f"|format(bs.ca_total) }}</td><td class="num">{{ "%.2f"|format(bs.ca_begin) }}</td><td></td><td class="bold">流动负债合计</td><td class="num">{{ "%.2f"|format(bs.cl_total) }}</td></tr>
+                    <tr><td class="section" colspan="3">非流动资产</td><td></td><td class="bold">负债合计</td><td class="num bold">{{ "%.2f"|format(bs.cl_total) }}</td></tr>
+                    <tr><td class="indent">固定资产</td><td class="num">{{ "%.2f"|format(bs.fa) }}</td><td class="num">{{ "%.2f"|format(bs.fa_begin) }}</td><td></td><td class="section" colspan="2">所有者权益</td></tr>
+                    <tr class="bold"><td>非流动资产合计</td><td class="num">{{ "%.2f"|format(bs.fa) }}</td><td class="num">{{ "%.2f"|format(bs.fa_begin) }}</td><td></td><td class="indent">实收资本</td><td class="num">{{ "%.2f"|format(bs.capital) }}</td></tr>
+                    <tr class="total-line bold"><td>资产总计</td><td class="num">{{ "%.2f"|format(bs.total_assets) }}</td><td class="num">{{ "%.2f"|format(bs.total_assets_begin) }}</td><td></td><td class="indent">未分配利润</td><td class="num">{{ "%.2f"|format(bs.retained) }}</td></tr>
+                    <tr><td></td><td></td><td></td><td></td><td class="bold">所有者权益合计</td><td class="num bold">{{ "%.2f"|format(bs.equity) }}</td></tr>
+                    <tr><td></td><td></td><td></td><td></td><td class="total-line bold">负债及权益总计</td><td class="num bold">{{ "%.2f"|format(bs.total_assets) }}</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- ===== 利润表 ===== -->
+        <div class="page" id="pl">
+            <div class="report-title">利 润 表</div>
+            <div class="report-sub">氧化加工厂</div>
+            <div class="report-meta">{{ period }} | 单位：元</div>
+            <table class="report-table">
+                <thead><tr><th>项目</th><th class="num" width="80">本月数</th><th class="num" width="80">本年累计</th></tr></thead>
+                <tbody>
+                    {% set pl = profit_loss %}
+                    <tr><td class="section">一、营业收入</td><td class="num">{{ "%.2f"|format(pl.revenue) }}</td><td class="num">{{ "%.2f"|format(pl.revenue_ytd) }}</td></tr>
+                    <tr><td>减：营业成本</td><td class="num">{{ "%.2f"|format(pl.cost) }}</td><td class="num">{{ "%.2f"|format(pl.cost_ytd) }}</td></tr>
+                    <tr><td class="section">二、营业毛利</td><td class="num bold">{{ "%.2f"|format(pl.gross) }}</td><td class="num bold">{{ "%.2f"|format(pl.gross_ytd) }}</td></tr>
+                    <tr><td>减：管理费用</td><td class="num">{{ "%.2f"|format(pl.admin_expense) }}</td><td class="num">{{ "%.2f"|format(pl.admin_expense_ytd) }}</td></tr>
+                    <tr><td>减：销售费用</td><td class="num">{{ "%.2f"|format(pl.sell_expense) }}</td><td class="num">{{ "%.2f"|format(0.00) }}</td></tr>
+                    <tr><td>减：财务费用</td><td class="num">{{ "%.2f"|format(pl.finance_expense) }}</td><td class="num">{{ "%.2f"|format(0.00) }}</td></tr>
+                    <tr class="bold total-line"><td>三、营业利润</td><td class="num">{{ "%.2f"|format(pl.o_profit) }}</td><td class="num">{{ "%.2f"|format(pl.o_profit_ytd) }}</td></tr>
+                    <tr class="bold total-line"><td>四、利润总额</td><td class="num">{{ "%.2f"|format(pl.o_profit) }}</td><td class="num">{{ "%.2f"|format(pl.o_profit_ytd) }}</td></tr>
+                    <tr><td>减：所得税费用</td><td class="num">{{ "%.2f"|format(pl.income_tax) }}</td><td class="num">{{ "%.2f"|format(0.00) }}</td></tr>
+                    <tr class="bold total-line"><td>五、净利润</td><td class="num">{{ "%.2f"|format(pl.net) }}</td><td class="num">{{ "%.2f"|format(pl.net_ytd) }}</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- ===== 现金流量表 ===== -->
+        <div class="page" id="cf">
+            <div class="report-title">现 金 流 量 表</div>
+            <div class="report-sub">氧化加工厂</div>
+            <div class="report-meta">{{ period }} | 单位：元</div>
+            <table class="report-table">
+                <thead><tr><th>项目</th><th class="num" width="80">本期金额</th></tr></thead>
+                <tbody>
+                    {% set cf = cash_flow %}
+                    <tr><td class="section" colspan="2">一、经营活动产生的现金流量</td></tr>
+                    <tr><td class="indent">销售商品、提供劳务收到的现金</td><td class="num">{{ "%.2f"|format(cf.op_inflow) }}</td></tr>
+                    <tr><td class="indent">经营活动现金流入小计</td><td class="num bold">{{ "%.2f"|format(cf.op_inflow) }}</td></tr>
+                    <tr><td class="indent">购买商品、接受劳务支付的现金</td><td class="num">{{ "%.2f"|format(cf.op_outflow) }}</td></tr>
+                    <tr><td class="indent">支付给职工的现金</td><td class="num">{{ "%.2f"|format(cf.salary_out) }}</td></tr>
+                    <tr><td class="indent">支付的各项税费</td><td class="num">{{ "%.2f"|format(cf.tax_out) }}</td></tr>
+                    <tr><td class="indent">经营活动现金流出小计</td><td class="num bold">{{ "%.2f"|format(cf.op_outflow + cf.salary_out + cf.tax_out) }}</td></tr>
+                    <tr class="bold total-line"><td>经营活动产生的现金流量净额</td><td class="num">{{ "%.2f"|format(cf.op_net) }}</td></tr>
+                    <tr><td class="section" colspan="2">二、投资活动产生的现金流量</td></tr>
+                    <tr><td class="indent">购建固定资产支付的现金</td><td class="num">{{ "%.2f"|format(cf.inv_out) }}</td></tr>
+                    <tr class="bold total-line"><td>投资活动产生的现金流量净额</td><td class="num">{{ "%.2f"|format(-cf.inv_out) }}</td></tr>
+                    <tr class="bold total-line"><td>三、现金及现金等价物净增加额</td><td class="num">{{ "%.2f"|format(cf.net) }}</td></tr>
+                    <tr><td class="indent">期初现金余额</td><td class="num">{{ "%.2f"|format(cf.begin) }}</td></tr>
+                    <tr class="bold"><td>期末现金余额</td><td class="num">{{ "%.2f"|format(cf.end) }}</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>
