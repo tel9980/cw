@@ -1,9 +1,6 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>会计科目管理 - 氧化加工厂财务系统</title>
+{% extends "base.html" %}
+{% block title %}会计科目管理 - 氧化加工厂财务系统{% endblock %}
+{% block head_extra %}
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
@@ -88,26 +85,16 @@
         .tab-content { padding: 20px 0; }
         .search-box { flex: 1; max-width: 300px; }
     </style>
-</head>
-<body>
-    <div class="header">
-        <div class="container">
-            <h1>会计科目管理</h1>
-        </div>
-    </div>
-    <div class="nav">
-        <div class="container">
-            <a href="/">首页</a>
-            <a href="/orders">订单</a>
-            <a href="/customers">客户</a>
-            <a href="/reports">报表</a>
-            <a href="/chart-of-accounts" class="active">会计科目</a>
-            <a href="/vouchers">会计凭证</a>
-            <a href="/accounting-books">会计账簿</a>
-            <a href="/fixed-assets">固定资产</a>
-            <a href="/system-settings">系统设置</a>
-    </div>
-    <div class="container">
+{% endblock %}
+{% block breadcrumb %}
+<div class="breadcrumb">
+    <a href="/">首页</a>
+    <span class="sep">›</span>
+    <span>会计科目</span>
+</div>
+{% endblock %}
+{% block content %}
+<div class="container">
 
         {% if message %}
         <div class="flash flash-success">{{ message }}</div>
@@ -158,6 +145,11 @@
             <!-- 会计科目 -->
             <div class="tab-content" id="tab-accounts">
                 <div class="filter-bar">
+                    <select id="periodFilter" onchange="changePeriod()">
+                        {% for p in periods %}
+                        <option value="{{ p.period_name }}" {% if p.period_name == selected_period %}selected{% endif %}>{{ p.period_name }}</option>
+                        {% endfor %}
+                    </select>
                     <select id="typeFilter" onchange="filterTable()">
                         <option value="">全部类型</option>
                         <option value="资产类">资产类</option>
@@ -175,15 +167,20 @@
                     <thead>
                         <tr>
                             <th style="width: 180px;">科目编码 / 名称</th>
-                            <th style="width: 100px;">科目类型</th>
-                            <th style="width: 80px;">级别</th>
-                            <th style="width: 80px;">余额方向</th>
+                            <th style="width: 80px;">科目类型</th>
+                            <th style="width: 60px;">级别</th>
+                            <th style="width: 70px;">方向</th>
+                            <th class="num">期初余额</th>
+                            <th class="num">本期借方</th>
+                            <th class="num">本期贷方</th>
+                            <th class="num">期末余额</th>
                             <th>辅助核算</th>
                             <th style="width: 120px;">操作</th>
                         </tr>
                     </thead>
                     <tbody id="accountTableBody">
                         {% for acc in accounts %}
+                        {% set bal = balances.get(acc.code, {}) %}
                         <tr class="level-{{ acc.level }} type-{{ acc.account_type }} {% if not acc.is_active %}inactive{% endif %}"
                             data-type="{{ acc.account_type }}"
                             data-search="{{ acc.code }} {{ acc.name }}">
@@ -195,6 +192,10 @@
                             <td>{{ acc.account_type }}</td>
                             <td>{% if acc.level == 1 %}一级{% elif acc.level == 2 %}二级{% elif acc.level == 3 %}三级{% else %}四级{% endif %}</td>
                             <td><span class="tag tag-dir-{{ acc.balance_direction }}">{{ acc.balance_direction }}</span></td>
+                            <td class="num">{{ '%.2f'|format(bal.opening) if bal.opening else '' }}</td>
+                            <td class="num">{{ '%.2f'|format(bal.debit) if bal.debit else '' }}</td>
+                            <td class="num">{{ '%.2f'|format(bal.credit) if bal.credit else '' }}</td>
+                            <td class="num">{{ '%.2f'|format(bal.closing) if bal.closing else '' }}</td>
                             <td>
                                 {% if acc.aux_customer %}<span class="tag tag-aux">客户</span>{% endif %}
                                 {% if acc.aux_supplier %}<span class="tag tag-aux">供应商</span>{% endif %}
@@ -408,7 +409,8 @@
         </div>
 
     </div>
-
+{% endblock %}
+{% block scripts %}
     <script>
         // 标签切换
         function switchTab(tabName) {
@@ -416,6 +418,12 @@
             document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
             event.target.classList.add('active');
             document.getElementById('tab-' + tabName).style.display = 'block';
+        }
+
+        // 切换会计期间
+        function changePeriod() {
+            const period = document.getElementById('periodFilter').value;
+            window.location.href = '/chart-of-accounts?period=' + period;
         }
 
         // 表格过滤
@@ -478,5 +486,4 @@
             });
         });
     </script>
-</body>
-</html>
+{% endblock %}

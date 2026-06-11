@@ -8,7 +8,7 @@ import io
 import os
 import uuid
 from datetime import date, datetime, timedelta
-from flask import Blueprint, Response, render_template, request, redirect, send_file
+from flask import Blueprint, Response, render_template, request, redirect, send_file, session
 
 from routes.helpers import get_db, to_float
 
@@ -23,6 +23,7 @@ def chart_of_accounts():
     conn = get_db()
     message = None
     error = None
+    selected_period = request.args.get("period", date.today().strftime("%Y-%m"))
 
     if request.method == "POST":
         code = request.form.get("code", "").strip()
@@ -60,6 +61,24 @@ def chart_of_accounts():
         "SELECT * FROM chart_of_accounts ORDER BY code"
     ).fetchall()]
 
+    # 获取可用期间列表
+    periods = [dict(p) for p in conn.execute(
+        "SELECT period_name FROM accounting_periods ORDER BY period_name DESC"
+    ).fetchall()]
+
+    # 查询选中期间的科目余额
+    balances = {}
+    for b in conn.execute(
+        "SELECT account_code, opening_balance, debit_amount, credit_amount, closing_balance FROM account_balances WHERE period_id=?",
+        (selected_period,)
+    ).fetchall():
+        balances[b["account_code"]] = {
+            "opening": float(b["opening_balance"] or 0),
+            "debit": float(b["debit_amount"] or 0),
+            "credit": float(b["credit_amount"] or 0),
+            "closing": float(b["closing_balance"] or 0),
+        }
+
     stats = {"total_accounts": len(accounts), "by_type": {}, "controlled_accounts": 0}
     for acc in accounts:
         t = acc["account_type"]
@@ -76,7 +95,8 @@ def chart_of_accounts():
 
     return render_template(
         "chart_of_accounts.html",
-        accounts=accounts, stats=stats,
+        accounts=accounts, stats=stats, balances=balances,
+        periods=periods, selected_period=selected_period,
         departments=departments, projects=projects,
         department_count=len(departments), project_count=len(projects),
         message=message, error=error, search_term=request.args.get("search", ""),
@@ -233,7 +253,7 @@ def opening_balances():
 def vouchers_page():
     """会计凭证管理页面"""
     conn = get_db()
-    message = None
+    message = request.args.get("message") or None
     error = None
 
     if request.method == "POST":
@@ -1839,15 +1859,82 @@ def batch_vouchers():
     voucher_ids = request.form.getlist("voucher_ids[]")
     conn = get_db()
     now = datetime.now().isoformat()
+    operator = session.get("username", "管理员")
+    success_count = 0
+    skip_count = 0
+
+    if not voucher_ids:
+        conn.close()
+        return redirect("/vouchers")
 
     if action == "batch_review":
-        conn.execute("UPDATE accounting_vouchers SET status='已审核',updated_at=? WHERE id IN ({}) AND status='草稿'".format(
-            ",".join("?" for _ in voucher_ids)), [now] + voucher_ids)
-    elif action == "batch_post":
-        conn.execute("UPDATE accounting_vouchers SET status='已记账',updated_at=? WHERE id IN ({}) AND status='已审核'".format(
-            ",".join("?" for _ in voucher_ids)), [now] + voucher_ids)
+        # 批量审核：草稿 → 已审核
+        placeholders = ",".join("?" for _ in voucher_ids)
+        result = conn.execute(
+            f"SELECT id, voucher_no, accounting_period FROM accounting_vouchers WHERE id IN ({placeholders}) AND status='草稿'",
+            voucher_ids
+        ).fetchall()
+        valid_ids = [r["id"] for r in result]
+        skip_count = len(voucher_ids) - len(valid_ids)
+        if valid_ids:
+            placeholders2 = ",".join("?" for _ in valid_ids)
+            conn.execute(
+                f"UPDATE accounting_vouchers SET status='已审核', reviewer=?, reviewed_at=?, updated_at=? WHERE id IN ({placeholders2})",
+                [operator, now, now] + valid_ids
+            )
+            for r in result:
+                conn.execute(
+                    "INSERT INTO audit_logs (id, operation_type, entity_type, entity_id, operation_description, operator, operation_time) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (str(uuid.uuid4()), "批量审核", "voucher", r["id"], f"批量审核: {r['voucher_no']}", operator, now))
+            success_count = len(valid_ids)
+        conn.commit()
+        conn.close()
+        return redirect(f"/vouchers?message=批量审核完成: 成功{success_count}条, 跳过{skip_count}条")
 
-    conn.commit()
+    elif action == "batch_post":
+        # 批量记账：已审核 → 已记账，需检查期间锁定
+        placeholders = ",".join("?" for _ in voucher_ids)
+        result = conn.execute(
+            f"SELECT id, voucher_no, accounting_period FROM accounting_vouchers WHERE id IN ({placeholders}) AND status='已审核'",
+            voucher_ids
+        ).fetchall()
+        skip_count = len(voucher_ids) - len(result)
+
+        # 检查期间锁定
+        conn.execute("CREATE TABLE IF NOT EXISTS period_locks (id TEXT PRIMARY KEY, period TEXT NOT NULL UNIQUE, locked_by TEXT, locked_at TEXT, is_locked INTEGER DEFAULT 1)")
+        locked_periods = set()
+        locked_rows = conn.execute("SELECT period FROM period_locks WHERE is_locked=1").fetchall()
+        for lr in locked_rows:
+            locked_periods.add(lr["period"])
+
+        valid_ids = []
+        locked_count = 0
+        for r in result:
+            if r["accounting_period"] in locked_periods:
+                locked_count += 1
+            else:
+                valid_ids.append(r["id"])
+
+        if valid_ids:
+            placeholders2 = ",".join("?" for _ in valid_ids)
+            conn.execute(
+                f"UPDATE accounting_vouchers SET status='已记账', posted_by=?, posted_at=?, updated_at=? WHERE id IN ({placeholders2})",
+                [operator, now, now] + valid_ids
+            )
+            for r in result:
+                if r["id"] in valid_ids:
+                    conn.execute(
+                        "INSERT INTO audit_logs (id, operation_type, entity_type, entity_id, operation_description, operator, operation_time) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (str(uuid.uuid4()), "批量记账", "voucher", r["id"], f"批量记账: {r['voucher_no']}", operator, now))
+            success_count = len(valid_ids)
+        total_skip = skip_count + locked_count
+        conn.commit()
+        conn.close()
+        msg_parts = [f"成功{success_count}条"]
+        if skip_count: msg_parts.append(f"非已审核状态跳过{skip_count}条")
+        if locked_count: msg_parts.append(f"期间锁定跳过{locked_count}条")
+        return redirect(f"/vouchers?message=批量记账完成: {'; '.join(msg_parts)}")
+
     conn.close()
     return redirect("/vouchers")
 

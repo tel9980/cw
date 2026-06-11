@@ -104,12 +104,13 @@
             .stats-grid { grid-template-columns: 1fr 1fr; gap: 6px; }
         }
     </style>
+    {% block head_extra %}{% endblock %}
 </head>
 <body>
     <div class="header">
         <div class="container">
             <div style="display:flex; align-items:center; gap:16px;">
-                <h1>氧化加工厂财务系统 V3.8</h1>
+                <h1>氧化加工厂财务系统 V4.0</h1>
                 {% if current_period %}
                 <span class="period-tag">{{ current_period }}</span>
                 {% endif %}
@@ -181,5 +182,6 @@
             {% block content %}{% endblock %}
         </div>
     </div>
+    {% block scripts %}{% endblock %}
 </body>
 </html>
