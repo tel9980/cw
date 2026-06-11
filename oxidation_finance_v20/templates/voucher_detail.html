@@ -210,6 +210,9 @@
             <form method="POST" action="/voucher/unpost/{{ voucher.id }}" style="display:inline;margin-left:10px;" onsubmit="return confirm('确定要反记账吗？\n\n凭证将回退到"已审核"状态。')">
                 <button type="submit" class="btn" style="background:#faad14;color:#fff;">↩ 反记账</button>
             </form>
+            <form method="POST" action="/voucher/reverse/{{ voucher.id }}" style="display:inline;margin-left:10px;" onsubmit="return confirm('确定要红字冲销此凭证吗？\n\n将生成一张借贷相反的冲销凭证，原凭证标记为已冲销。');">
+                <button type="submit" class="btn btn-danger">⊘ 冲销</button>
+            </form>
             {% endif %}
         </div>
     </div>

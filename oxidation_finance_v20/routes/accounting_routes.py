@@ -1884,6 +1884,81 @@ def unpost_voucher(voucher_id):
     return redirect(f"/vouchers/{voucher_id}")
 
 
+# ========== 冲销凭证（红字冲销） ==========
+
+@accounting_bp.route("/voucher/reverse/<voucher_id>", methods=["POST"])
+def reverse_voucher(voucher_id):
+    """红字冲销：生成冲销凭证，原凭证标记为已冲销"""
+    conn = get_db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS period_locks (
+            id TEXT PRIMARY KEY, period TEXT NOT NULL UNIQUE,
+            locked_by TEXT, locked_at TEXT, is_locked INTEGER DEFAULT 1
+        )
+    """)
+    voucher = conn.execute("SELECT * FROM accounting_vouchers WHERE id=?", (voucher_id,)).fetchone()
+    if not voucher or voucher["status"] not in ("已记账", "已冲销"):
+        conn.close()
+        return redirect(f"/vouchers/{voucher_id}")
+    
+    if dict(voucher).get("status") == "已冲销":
+        conn.close()
+        return render_template("error.html", error="该凭证已被冲销，不可重复冲销")
+    
+    period = dict(voucher)["accounting_period"]
+    lock = conn.execute("SELECT * FROM period_locks WHERE period=? AND is_locked=1", (period,)).fetchone()
+    if lock:
+        conn.close()
+        return render_template("error.html", error=f"会计期间 {period} 已锁定，无法冲销凭证")
+    
+    # 获取原凭证分录
+    lines = [dict(l) for l in conn.execute(
+        "SELECT * FROM voucher_lines WHERE voucher_id=? ORDER BY line_no", (voucher_id,)
+    ).fetchall()]
+    
+    if not lines:
+        conn.close()
+        return render_template("error.html", error="凭证无分录，无法冲销")
+    
+    now = datetime.now().isoformat()
+    operator = request.form.get("operator", "管理员")
+    
+    # 生成冲销凭证（红字：借贷金额互换）
+    rev_id = str(uuid.uuid4())
+    rev_no = f"冲销-{voucher['voucher_no']}"
+    rev_summary = f"冲销 [{voucher['voucher_no']}] {voucher['summary']}"
+    
+    total_debit = sum(float(l["debit"] or 0) for l in lines)
+    total_credit = sum(float(l["credit"] or 0) for l in lines)
+    
+    conn.execute(
+        "INSERT INTO accounting_vouchers (id, voucher_no, voucher_date, accounting_period, summary, total_debit, total_credit, created_by, status, created_at, updated_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (rev_id, rev_no, voucher["voucher_date"], voucher["accounting_period"],
+         rev_summary, total_credit, total_debit, operator, "草稿", now, now))
+    
+    # 冲销分录：原借方变贷方，原贷方变借方
+    for i, l in enumerate(lines):
+        dr = float(l["credit"] or 0)
+        cr = float(l["debit"] or 0)
+        conn.execute(
+            "INSERT INTO voucher_lines (id, voucher_id, line_no, account_code, account_name, debit, credit, summary) VALUES (?,?,?,?,?,?,?,?)",
+            (str(uuid.uuid4()), rev_id, i + 1, l["account_code"], l["account_name"],
+             str(dr), str(cr), rev_summary))
+    
+    # 标记原凭证为已冲销
+    conn.execute("UPDATE accounting_vouchers SET status='已冲销', updated_at=? WHERE id=?", (now, voucher_id))
+    
+    # 审计日志
+    conn.execute(
+        "INSERT INTO audit_logs (id, operation_type, entity_type, entity_id, operation_description, operator, operation_time) VALUES (?, '冲销凭证', 'voucher', ?, ?, ?, ?)",
+        (str(uuid.uuid4()), voucher_id, f"冲销凭证: {voucher['voucher_no']} → {rev_no}", operator, now))
+    
+    conn.commit()
+    conn.close()
+    return redirect(f"/vouchers/{rev_id}")
+
+
 @accounting_bp.route("/period/unclose/<period_name>", methods=["POST"])
 def unclose_period(period_name):
     """反结账：将已结转/已结账期间回退到打开状态"""
