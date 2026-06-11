@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}年结 - 氧化加工厂财务系统{% endblock %}
+
+{% block breadcrumb %}
+<div class="breadcrumb"><a href="/">首页</a><span class="sep">/</span><span>年结</span></div>
+{% endblock %}
+
+{% block content %}
+<style>
+    .step-bar { display: flex; margin-bottom: 24px; }
+    .step { flex: 1; text-align: center; padding: 12px; background: #f5f5f5; font-size: 13px; color: #999; position: relative; }
+    .step.active { background: #1890ff; color: white; font-weight: 600; }
+    .step.done { background: #52c41a; color: white; }
+    .preview-table td.num { text-align: right; font-family: monospace; }
+    .summary-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 16px 0; }
+    .summary-item { padding: 12px; background: #f8f9fa; border-radius: 6px; text-align: center; }
+    .summary-item .val { font-size: 20px; font-weight: 700; }
+    .summary-item .lbl { font-size: 12px; color: #888; }
+    .warning-box { background: #fff7e6; border: 1px solid #ffd591; padding: 12px 16px; border-radius: 4px; margin-bottom: 16px; font-size: 13px; color: #d46b08; }
+    .info-box { background: #e6f7ff; border: 1px solid #91d5ff; padding: 12px 16px; border-radius: 4px; margin-bottom: 16px; font-size: 13px; color: #1890ff; }
+</style>
+
+<div class="card">
+    <h2>年结（结转下年）</h2>
+
+    <div class="step-bar">
+        <div class="step {% if not selected_year %}active{% elif not preview %}done{% else %}done{% endif %}">1. 选择年度</div>
+        <div class="step {% if selected_year and not preview %}active{% elif preview %}done{% endif %}">2. 预览结转</div>
+        <div class="step {% if result %}active{% endif %}">3. 执行年结</div>
+    </div>
+
+    {% if message %}
+    <div class="message message-success">{{ message }}</div>
+    {% endif %}
+    {% if error %}
+    <div class="message message-error">{{ error }}</div>
+    {% endif %}
+
+    {% if result %}
+    <!-- 年结完成 -->
+    <div class="summary-row">
+        <div class="summary-item"><div class="val" style="color:#1890ff;">{{ result.year }}</div><div class="lbl">结转年度</div></div>
+        <div class="summary-item"><div class="val" style="color:#52c41a;">{{ result.next_year }}</div><div class="lbl">下一年度</div></div>
+        <div class="summary-item"><div class="val" style="color:#722ed1;">{{ result.periods_count }}</div><div class="lbl">已锁定期间数</div></div>
+    </div>
+    <div class="info-box">
+        年结已完成。{{ result.year }} 年度所有期间已锁定，{{ result.next_year }} 年度 12 个会计期间已自动创建。
+    </div>
+    <a href="/" class="btn">&larr; 返回首页</a>
+
+    {% elif preview %}
+    <!-- 预览结转数据 -->
+    <div class="warning-box">
+        请确认以下结转数据无误。所有损益类科目余额将结转至下年，资产/负债/权益类科目余额作为下年期初余额。
+    </div>
+    <div class="summary-row">
+        <div class="summary-item"><div class="val" style="color:#52c41a;">{{ '%.2f'|format(preview.total_income) }}</div><div class="lbl">年度收入合计</div></div>
+        <div class="summary-item"><div class="val" style="color:#f5222d;">{{ '%.2f'|format(preview.total_expense) }}</div><div class="lbl">年度费用合计</div></div>
+        <div class="summary-item"><div class="val" style="color:{% if preview.net_profit>=0 %}#52c41a{% else %}#f5222d{% endif %};">{{ '%.2f'|format(preview.net_profit) }}</div><div class="lbl">年度净利润</div></div>
+    </div>
+
+    {% if preview.income %}
+    <h3 style="margin:16px 0 8px; color:#52c41a;">收入类科目</h3>
+    <table class="preview-table">
+        <thead><tr><th>科目编码</th><th>科目名称</th><th class="num">年度余额</th></tr></thead>
+        <tbody>
+            {% for a in preview.income %}
+            <tr><td>{{ a.code }}</td><td>{{ a.name }}</td><td class="num" style="color:#52c41a;">{{ '%.2f'|format(a.balance) }}</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    {% if preview.expense %}
+    <h3 style="margin:16px 0 8px; color:#f5222d;">费用/成本类科目</h3>
+    <table class="preview-table">
+        <thead><tr><th>科目编码</th><th>科目名称</th><th class="num">年度余额</th></tr></thead>
+        <tbody>
+            {% for a in preview.expense %}
+            <tr><td>{{ a.code }}</td><td>{{ a.name }}</td><td class="num" style="color:#f5222d;">{{ '%.2f'|format(a.balance) }}</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    <form method="POST" style="margin-top:20px;" onsubmit="return confirm('确定要执行年结吗？执行后将锁定 {{ selected_year }} 年度所有期间，并自动创建下一年度期间。此操作不可撤销！');">
+        <input type="hidden" name="year" value="{{ selected_year }}">
+        <input type="hidden" name="action" value="execute">
+        <button type="submit" class="btn btn-warning">确认执行年结</button>
+        <a href="/year-end-close" class="btn btn-outline" style="margin-left:8px;">取消</a>
+    </form>
+
+    {% else %}
+    <!-- 选择年度 -->
+    <form method="POST">
+        <input type="hidden" name="action" value="preview">
+        <div class="form-group">
+            <label>选择结转年度</label>
+            <select name="year" style="width:200px;">
+                <option value="">-- 请选择 --</option>
+                {% for y in year_list %}
+                <option value="{{ y }}" {% if y == selected_year %}selected{% endif %}>{{ y }} 年</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button type="submit" class="btn">预览结转数据</button>
+    </form>
+
+    {% if not year_list %}
+    <p style="color:#999; margin-top:16px;">暂无可用会计期间数据，请先完成会计初始化。</p>
+    {% endif %}
+    {% endif %}
+</div>
+{% endblock %}

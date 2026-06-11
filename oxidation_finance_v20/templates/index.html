@@ -1,247 +1,224 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>氧化加工厂财务系统 V2.0</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f0f2f5; }
-        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
-        .header { background: linear-gradient(135deg, #1890ff, #096dd9); color: white; padding: 20px; }
-        .header h1 { font-size: 22px; }
-        .header .sub { font-size: 12px; opacity: 0.8; margin-top: 2px; }
-        .nav { background: white; padding: 0 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.06); position: sticky; top: 0; z-index: 100; }
-        .nav .container { display: flex; gap: 0; padding: 0; }
-        .nav a { color: #555; text-decoration: none; padding: 14px 18px; font-size: 14px; border-bottom: 2px solid transparent; transition: all 0.2s; }
-        .nav a:hover, .nav a.active { color: #1890ff; border-bottom-color: #1890ff; font-weight: 600; }
-        .panel { background: white; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-bottom: 20px; overflow: hidden; }
-        .panel-hd { padding: 16px 20px; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
-        .panel-hd h2 { font-size: 16px; color: #333; }
-        .panel-bd { padding: 20px; }
-        .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
-        .kpi { background: white; padding: 18px; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
-        .kpi .lbl { font-size: 12px; color: #888; margin-bottom: 6px; }
-        .kpi .val { font-size: 24px; font-weight: 700; }
-        .kpi .sub { font-size: 11px; color: #999; margin-top: 4px; }
-        .kpi-list { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-        .kpi-sm { background: #f8f9fa; border-radius: 8px; padding: 12px 14px; text-align: center; }
-        .kpi-sm .v { font-size: 18px; font-weight: 700; }
-        .kpi-sm .t { font-size: 11px; color: #888; }
-        .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
-        table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid #f0f0f0; }
-        th { background: #fafafa; font-weight: 600; color: #555; font-size: 12px; }
-        td.num, th.num { text-align: right; font-family: monospace; }
-        tr:hover { background: #fafafa; }
-        .btn { display: inline-block; padding: 8px 16px; background: #1890ff; color: white; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; font-size: 13px; }
-        .btn:hover { background: #40a9ff; }
-        .btn-sm { padding: 5px 10px; font-size: 12px; }
-        .btn-outline { background: white; color: #1890ff; border: 1px solid #1890ff; }
-        .btn-outline:hover { background: #e6f7ff; }
-        .tag { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; }
-        .tag-b { background: #e6f7ff; color: #1890ff; }
-        .tag-g { background: #f6ffed; color: #52c41a; }
-        .tag-o { background: #fff7e6; color: #fa8c16; }
-        .tag-r { background: #fff1f0; color: #f5222d; }
-        .tag-p { background: #f9f0ff; color: #722ed1; }
-        .bar { display: inline-block; height: 8px; border-radius: 4px; margin-right: 6px; vertical-align: middle; }
-        .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
-        .c-blue { color: #1890ff; }
-        .c-red { color: #f5222d; }
-        .c-green { color: #52c41a; }
-        .c-orange { color: #fa8c16; }
-        .quick-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
-        .quick-item { display: block; padding: 12px; background: #f8f9fa; border-radius: 6px; text-align: center; text-decoration: none; color: #333; font-size: 13px; transition: all 0.15s; border: 1px solid transparent; }
-        .quick-item:hover { border-color: #1890ff; color: #1890ff; background: #e6f7ff; }
-        .quick-item .icon { font-size: 18px; display: block; margin-bottom: 2px; }
-        .alert-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px dashed #eee; font-size: 13px; }
-        .alert-row:last-child { border-bottom: none; }
-        canvas { display: block; }
-    </style>
-</head>
-<body>
-<div class="header"><div class="container"><h1>氧化加工厂财务系统</h1><div class="sub">经营仪表盘 | {{ today_income }}</div></div></div>
-<div class="nav"><div class="container">
-    <a href="/" class="active">首页</a>
-    <a href="/orders">订单</a><a href="/customers">客户</a>
-    <a href="/reports">报表</a>
-    <a href="/chart-of-accounts">会计科目</a><a href="/vouchers">会计凭证</a>
-    <a href="/accounting-books">会计账簿</a>
-    <a href="/fixed-assets">固定资产</a>
-    <a href="/system-settings">系统设置</a>
-</div></div>
+{% extends "base.html" %}
+{% block title %}经营仪表盘 - 氧化加工厂财务系统{% endblock %}
 
-<div class="container">
-    <!-- KPI 主指标 -->
-    <div class="kpi-row">
-        <div class="kpi" style="border-left:4px solid #1890ff;">
-            <div class="lbl">今日收入 / 累计</div>
-            <div class="val c-blue">{{ '%.0f'|format(today_income) }}</div>
-            <div class="sub">本月 {{ '%.0f'|format(month_income) }} | 累计 {{ '%.0f'|format(total_income) }}</div>
-        </div>
-        <div class="kpi" style="border-left:4px solid #f5222d;">
-            <div class="lbl">今日支出 / 累计</div>
-            <div class="val c-red">{{ '%.0f'|format(today_expense) }}</div>
-            <div class="sub">本月 {{ '%.0f'|format(month_expense) }} | 累计 {{ '%.0f'|format(total_expense) }}</div>
-        </div>
-        <div class="kpi" style="border-left:4px solid {{ '#52c41a' if month_profit>=0 else '#f5222d' }};">
-            <div class="lbl">本月利润</div>
-            <div class="val {{ 'c-green' if month_profit>=0 else 'c-red' }}">{{ '%.0f'|format(month_profit) }}</div>
-            <div class="sub">累计利润 {{ '%.0f'|format(total_income-total_expense) }}</div>
-        </div>
-        <div class="kpi" style="border-left:4px solid #722ed1;">
-            <div class="lbl">银行余额 / 应收 / 应付</div>
-            <div class="val" style="color:#722ed1;">{{ '%.0f'|format(bank_total) }}</div>
-            <div class="sub">应收 {{ '%.0f'|format(ar_total) }} | 应付 {{ '%.0f'|format(ap_total) }}</div>
-        </div>
+{% block breadcrumb %}
+<div class="breadcrumb"><span>首页</span></div>
+{% endblock %}
+
+{% block content %}
+<style>
+    .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+    .kpi { background: white; padding: 18px; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+    .kpi .lbl { font-size: 12px; color: #888; margin-bottom: 6px; }
+    .kpi .val { font-size: 24px; font-weight: 700; }
+    .kpi .sub { font-size: 11px; color: #999; margin-top: 4px; }
+    .kpi-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .kpi-sm { background: #f8f9fa; border-radius: 8px; padding: 12px 14px; text-align: center; }
+    .kpi-sm .v { font-size: 18px; font-weight: 700; }
+    .kpi-sm .t { font-size: 11px; color: #888; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .panel { background: white; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-bottom: 20px; overflow: hidden; }
+    .panel-hd { padding: 16px 20px; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
+    .panel-hd h2 { font-size: 16px; color: #333; }
+    .panel-bd { padding: 20px; }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; }
+    .tag-b { background: #e6f7ff; color: #1890ff; }
+    .tag-g { background: #f6ffed; color: #52c41a; }
+    .tag-o { background: #fff7e6; color: #fa8c16; }
+    .tag-r { background: #fff1f0; color: #f5222d; }
+    .tag-p { background: #f9f0ff; color: #722ed1; }
+    .bar { display: inline-block; height: 8px; border-radius: 4px; margin-right: 6px; vertical-align: middle; }
+    .c-blue { color: #1890ff; }
+    .c-red { color: #f5222d; }
+    .c-green { color: #52c41a; }
+    .c-orange { color: #fa8c16; }
+    .quick-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+    .quick-item { display: block; padding: 12px; background: #f8f9fa; border-radius: 6px; text-align: center; text-decoration: none; color: #333; font-size: 13px; transition: all 0.15s; border: 1px solid transparent; }
+    .quick-item:hover { border-color: #1890ff; color: #1890ff; background: #e6f7ff; }
+    .quick-item .icon { font-size: 18px; display: block; margin-bottom: 2px; }
+    .alert-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px dashed #eee; font-size: 13px; }
+    .alert-row:last-child { border-bottom: none; }
+    canvas { display: block; }
+    @media (max-width: 768px) {
+        .kpi-row { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+        .grid2 { grid-template-columns: 1fr; gap: 12px; }
+        .kpi-list { grid-template-columns: repeat(2, 1fr); }
+        .kpi .val { font-size: 18px; }
+        .panel-bd { padding: 12px; }
+    }
+    @media (max-width: 480px) {
+        .kpi-row { grid-template-columns: 1fr; }
+        .kpi-list { grid-template-columns: 1fr 1fr; }
+    }
+</style>
+
+<!-- KPI 主指标 -->
+<div class="kpi-row">
+    <div class="kpi" style="border-left:4px solid #1890ff;">
+        <div class="lbl">今日收入 / 累计</div>
+        <div class="val c-blue">{{ '%.0f'|format(today_income) }}</div>
+        <div class="sub">本月 {{ '%.0f'|format(month_income) }} | 累计 {{ '%.0f'|format(total_income) }}</div>
     </div>
-
-    <!-- 二级指标+月度趋势 -->
-    <div class="grid2">
-        <div class="panel">
-            <div class="panel-hd"><h2>业务概览</h2></div>
-            <div class="panel-bd">
-                <div class="kpi-list" style="grid-template-columns: repeat(3, 1fr);">
-                    <div class="kpi-sm"><div class="v c-orange">{{ pending_orders }}</div><div class="t">待加工订单</div></div>
-                    <div class="kpi-sm"><div class="v">{{ unpaid_orders }}</div><div class="t">未收款订单</div></div>
-                    <div class="kpi-sm"><div class="v c-blue">{{ fa_count }}</div><div class="t">使用中固定资产</div></div>
-                    <div class="kpi-sm"><div class="v c-red">{{ draft_count }}</div><div class="t">草稿凭证</div></div>
-                    <div class="kpi-sm"><div class="v c-orange">{{ reviewed_count }}</div><div class="t">待记账凭证</div></div>
-                    <div class="kpi-sm"><div class="v c-green">{{ posted_count }}</div><div class="t">已记账凭证</div></div>
-                </div>
-            </div>
-        </div>
-
-        <div class="panel">
-            <div class="panel-hd"><h2>月度收支趋势</h2><span style="font-size:11px;color:#999;">最近6个月</span></div>
-            <div class="panel-bd" style="padding:10px 20px;">
-                <canvas id="sparkline" style="width:100%;height:160px;"></canvas>
-            </div>
-        </div>
+    <div class="kpi" style="border-left:4px solid #f5222d;">
+        <div class="lbl">今日支出 / 累计</div>
+        <div class="val c-red">{{ '%.0f'|format(today_expense) }}</div>
+        <div class="sub">本月 {{ '%.0f'|format(month_expense) }} | 累计 {{ '%.0f'|format(total_expense) }}</div>
     </div>
-
-    <!-- 待办提醒+快捷操作 -->
-    <div class="grid2">
-        <div class="panel">
-            <div class="panel-hd"><h2>待办提醒</h2></div>
-            <div class="panel-bd">
-                {% if draft_count > 0 %}
-                <div class="alert-row"><span class="tag tag-r">{{ draft_count }}</span>张草稿凭证等待处理 <a href="/vouchers" style="margin-left:auto;font-size:12px;">去处理 &rarr;</a></div>
-                {% endif %}
-                {% if reviewed_count > 0 %}
-                <div class="alert-row"><span class="tag tag-o">{{ reviewed_count }}</span>张已审核凭证等待记账 <a href="/vouchers" style="margin-left:auto;font-size:12px;">去处理 &rarr;</a></div>
-                {% endif %}
-                {% if pending_orders > 0 %}
-                <div class="alert-row"><span class="tag tag-b">{{ pending_orders }}</span>个订单待加工 <a href="/orders" style="margin-left:auto;font-size:12px;">查看 &rarr;</a></div>
-                {% endif %}
-                {% if ar_total > 10000 %}
-                <div class="alert-row"><span class="tag tag-r">!</span>应收账款余额 {{ '%.0f'|format(ar_total) }} 元，请关注回款 <a href="/accounting-books?type=aging" style="margin-left:auto;font-size:12px;">账龄 &rarr;</a></div>
-                {% endif %}
-                {% if draft_count==0 and reviewed_count==0 and pending_orders==0 and ar_total<=10000 %}
-                <div style="color:#999;text-align:center;padding:15px;">暂无待办事项</div>
-                {% endif %}
-            </div>
-        </div>
-
-        <div class="panel">
-            <div class="panel-hd"><h2>快捷操作</h2></div>
-            <div class="panel-bd">
-                <div class="quick-grid">
-                    {% set all_shortcuts = {
-                        'vouchers': {'label': '录入凭证', 'icon': '📝', 'color': '#1890ff'},
-                        'voucher-approval': {'label': '审核凭证', 'icon': '✅', 'color': '#722ed1'},
-                        'quick-income': {'label': '快速收入', 'icon': '💰', 'color': '#52c41a'},
-                        'quick-expense': {'label': '快速支出', 'icon': '💳', 'color': '#f5222d'},
-                        'salary': {'label': '工资表', 'icon': '📊', 'color': '#13c2c2'},
-                        'customer-statement': {'label': '客户对账', 'icon': '📋', 'color': '#fa8c16'},
-                        'alert-center': {'label': '预警中心', 'icon': '🔔', 'color': '#eb2f96'},
-                        'auto-voucher': {'label': '自动凭证', 'icon': '⚙️', 'color': '#2f54eb'},
-                        'financial-ratios': {'label': '财务分析', 'icon': '📈', 'color': '#a0d911'},
-                        'financial-reports': {'label': '打印报表', 'icon': '🖨️', 'color': '#595959'},
-                        'cash-flow-projects': {'label': '现金流量', 'icon': '💵', 'color': '#fa541c'},
-                        'profit-carry-forward': {'label': '损益结转', 'icon': '🔄', 'color': '#eb2f96'},
-                    } %}
-                    {% for route in home_shortcuts %}
-                    {% set sc = all_shortcuts.get(route) %}
-                    {% if sc %}
-                    <a href="/{{ route }}" class="quick-item" style="background:{{ sc.color }}11;border-left:3px solid {{ sc.color }};"><span class="icon">{{ sc.icon }}</span>{{ sc.label }}</a>
-                    {% endif %}
-                    {% endfor %}
-                </div>
-            </div>
-        </div>
+    <div class="kpi" style="border-left:4px solid {{ '#52c41a' if month_profit>=0 else '#f5222d' }};">
+        <div class="lbl">本月利润</div>
+        <div class="val {{ 'c-green' if month_profit>=0 else 'c-red' }}">{{ '%.0f'|format(month_profit) }}</div>
+        <div class="sub">累计利润 {{ '%.0f'|format(total_income-total_expense) }}</div>
     </div>
-
-    <!-- 支出分类 + 最近收支 -->
-    <div class="grid2">
-        <div class="panel">
-            <div class="panel-hd"><h2>支出分类 Top5</h2></div>
-            <div class="panel-bd">
-                {% if expense_cats %}
-                {% set mx = expense_cats[0].total %}
-                <table>
-                    <thead><tr><th>类别</th><th class="num">金额</th><th>占比</th></tr></thead>
-                    <tbody>
-                    {% for c in expense_cats %}
-                    <tr>
-                        <td>{{ c.expense_type }}</td>
-                        <td class="num">{{ '%.0f'|format(c.total) }}</td>
-                        <td>
-                            <span class="bar" style="width:{{ (c.total/mx*100)|int }}px;background:#fa8c16;"></span>
-                            {{ '%.1f'|format(c.total/total_expense*100) if total_expense>0 else 0 }}%
-                        </td>
-                    </tr>
-                    {% endfor %}
-                    </tbody>
-                </table>
-                {% else %}<div style="color:#999;text-align:center;padding:15px;">暂无支出数据</div>{% endif %}
-            </div>
-        </div>
-
-        <div class="panel">
-            <div class="panel-hd"><h2>最近收支</h2></div>
-            <div class="panel-bd">
-                <table>
-                    <thead><tr><th>类型</th><th>对象</th><th class="num">金额</th><th>日期</th></tr></thead>
-                    <tbody>
-                    {% for r in recent_inc[:4] %}
-                    <tr><td><span class="tag tag-g">收入</span></td><td>{{ r.customer_name }}</td>
-                        <td class="num c-green">{{ '%.0f'|format(r.amount) }}</td><td>{{ r.income_date }}</td></tr>
-                    {% endfor %}
-                    {% for r in recent_exp[:4] %}
-                    <tr><td><span class="tag tag-r">支出</span></td><td>{{ r.supplier_name or r.expense_type }}</td>
-                        <td class="num c-red">{{ '%.0f'|format(r.amount) }}</td><td>{{ r.expense_date }}</td></tr>
-                    {% endfor %}
-                    {% if not recent_inc and not recent_exp %}
-                    <tr><td colspan="4" style="text-align:center;color:#999;padding:15px;">暂无收支记录</td></tr>
-                    {% endif %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
+    <div class="kpi" style="border-left:4px solid #722ed1;">
+        <div class="lbl">银行余额 / 应收 / 应付</div>
+        <div class="val" style="color:#722ed1;">{{ '%.0f'|format(bank_total) }}</div>
+        <div class="sub">应收 {{ '%.0f'|format(ar_total) }} | 应付 {{ '%.0f'|format(ap_total) }}</div>
     </div>
+</div>
 
-    <!-- 最近订单 -->
+<!-- 二级指标+月度趋势 -->
+<div class="grid2">
     <div class="panel">
-        <div class="panel-hd"><h2>最近订单</h2><a href="/orders" class="btn btn-sm btn-outline">全部订单</a></div>
+        <div class="panel-hd"><h2>业务概览</h2></div>
         <div class="panel-bd">
+            <div class="kpi-list">
+                <div class="kpi-sm"><div class="v c-orange">{{ pending_orders }}</div><div class="t">待加工订单</div></div>
+                <div class="kpi-sm"><div class="v">{{ unpaid_orders }}</div><div class="t">未收款订单</div></div>
+                <div class="kpi-sm"><div class="v c-blue">{{ fa_count }}</div><div class="t">使用中固定资产</div></div>
+                <div class="kpi-sm"><div class="v c-red">{{ draft_count }}</div><div class="t">草稿凭证</div></div>
+                <div class="kpi-sm"><div class="v c-orange">{{ reviewed_count }}</div><div class="t">待记账凭证</div></div>
+                <div class="kpi-sm"><div class="v c-green">{{ posted_count }}</div><div class="t">已记账凭证</div></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-hd"><h2>月度收支趋势</h2><span style="font-size:11px;color:#999;">最近6个月</span></div>
+        <div class="panel-bd" style="padding:10px 20px;">
+            <canvas id="sparkline" style="width:100%;height:160px;"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- 待办提醒+快捷操作 -->
+<div class="grid2">
+    <div class="panel">
+        <div class="panel-hd"><h2>待办提醒</h2></div>
+        <div class="panel-bd">
+            {% if draft_count > 0 %}
+            <div class="alert-row"><span class="tag tag-r">{{ draft_count }}</span>张草稿凭证等待处理 <a href="/vouchers" style="margin-left:auto;font-size:12px;">去处理 &rarr;</a></div>
+            {% endif %}
+            {% if reviewed_count > 0 %}
+            <div class="alert-row"><span class="tag tag-o">{{ reviewed_count }}</span>张已审核凭证等待记账 <a href="/vouchers" style="margin-left:auto;font-size:12px;">去处理 &rarr;</a></div>
+            {% endif %}
+            {% if pending_orders > 0 %}
+            <div class="alert-row"><span class="tag tag-b">{{ pending_orders }}</span>个订单待加工 <a href="/orders" style="margin-left:auto;font-size:12px;">查看 &rarr;</a></div>
+            {% endif %}
+            {% if ar_total > 10000 %}
+            <div class="alert-row"><span class="tag tag-r">!</span>应收账款余额 {{ '%.0f'|format(ar_total) }} 元，请关注回款 <a href="/accounting-books?type=aging" style="margin-left:auto;font-size:12px;">账龄 &rarr;</a></div>
+            {% endif %}
+            {% if draft_count==0 and reviewed_count==0 and pending_orders==0 and ar_total<=10000 %}
+            <div style="color:#999;text-align:center;padding:15px;">暂无待办事项</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-hd"><h2>快捷操作</h2></div>
+        <div class="panel-bd">
+            <div class="quick-grid">
+                {% set all_shortcuts = {
+                    'vouchers': {'label': '录入凭证', 'icon': '📝', 'color': '#1890ff'},
+                    'voucher-approval': {'label': '审核凭证', 'icon': '✅', 'color': '#722ed1'},
+                    'quick-income': {'label': '快速收入', 'icon': '💰', 'color': '#52c41a'},
+                    'quick-expense': {'label': '快速支出', 'icon': '💳', 'color': '#f5222d'},
+                    'salary': {'label': '工资表', 'icon': '📊', 'color': '#13c2c2'},
+                    'customer-statement': {'label': '客户对账', 'icon': '📋', 'color': '#fa8c16'},
+                    'alert-center': {'label': '预警中心', 'icon': '🔔', 'color': '#eb2f96'},
+                    'auto-voucher': {'label': '自动凭证', 'icon': '⚙️', 'color': '#2f54eb'},
+                    'financial-ratios': {'label': '财务分析', 'icon': '📈', 'color': '#a0d911'},
+                    'financial-reports': {'label': '打印报表', 'icon': '🖨️', 'color': '#595959'},
+                    'cash-flow-projects': {'label': '现金流量', 'icon': '💵', 'color': '#fa541c'},
+                    'profit-carry-forward': {'label': '损益结转', 'icon': '🔄', 'color': '#eb2f96'},
+                } %}
+                {% for route in home_shortcuts %}
+                {% set sc = all_shortcuts.get(route) %}
+                {% if sc %}
+                <a href="/{{ route }}" class="quick-item" style="background:{{ sc.color }}11;border-left:3px solid {{ sc.color }};"><span class="icon">{{ sc.icon }}</span>{{ sc.label }}</a>
+                {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 支出分类 + 最近收支 -->
+<div class="grid2">
+    <div class="panel">
+        <div class="panel-hd"><h2>支出分类 Top5</h2></div>
+        <div class="panel-bd">
+            {% if expense_cats %}
+            {% set mx = expense_cats[0].total %}
             <table>
-                <thead><tr><th>订单号</th><th>客户</th><th class="num">金额</th><th>状态</th><th>日期</th></tr></thead>
+                <thead><tr><th>类别</th><th class="num">金额</th><th>占比</th></tr></thead>
                 <tbody>
-                {% for o in recent_orders %}
+                {% for c in expense_cats %}
                 <tr>
-                    <td>{{ o.order_no }}</td><td>{{ o.customer_name }}</td>
-                    <td class="num">{{ '%.0f'|format(o.total_amount) }}</td>
-                    <td><span class="tag {% if o.status=='待加工' %}tag-o{% elif o.status=='加工中' %}tag-b{% elif o.status=='已完工' %}tag-g{% else %}tag-p{% endif %}">{{ o.status }}</span></td>
-                    <td>{{ o.order_date }}</td>
+                    <td>{{ c.expense_type }}</td>
+                    <td class="num">{{ '%.0f'|format(c.total) }}</td>
+                    <td>
+                        <span class="bar" style="width:{{ (c.total/mx*100)|int }}px;background:#fa8c16;"></span>
+                        {{ '%.1f'|format(c.total/total_expense*100) if total_expense>0 else 0 }}%
+                    </td>
                 </tr>
                 {% endfor %}
-                {% if not recent_orders %}<tr><td colspan="5" style="text-align:center;color:#999;padding:15px;">暂无订单</td></tr>{% endif %}
+                </tbody>
+            </table>
+            {% else %}<div style="color:#999;text-align:center;padding:15px;">暂无支出数据</div>{% endif %}
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-hd"><h2>最近收支</h2></div>
+        <div class="panel-bd">
+            <table>
+                <thead><tr><th>类型</th><th>对象</th><th class="num">金额</th><th>日期</th></tr></thead>
+                <tbody>
+                {% for r in recent_inc[:4] %}
+                <tr><td><span class="tag tag-g">收入</span></td><td>{{ r.customer_name }}</td>
+                    <td class="num c-green">{{ '%.0f'|format(r.amount) }}</td><td>{{ r.income_date }}</td></tr>
+                {% endfor %}
+                {% for r in recent_exp[:4] %}
+                <tr><td><span class="tag tag-r">支出</span></td><td>{{ r.supplier_name or r.expense_type }}</td>
+                    <td class="num c-red">{{ '%.0f'|format(r.amount) }}</td><td>{{ r.expense_date }}</td></tr>
+                {% endfor %}
+                {% if not recent_inc and not recent_exp %}
+                <tr><td colspan="4" style="text-align:center;color:#999;padding:15px;">暂无收支记录</td></tr>
+                {% endif %}
                 </tbody>
             </table>
         </div>
+    </div>
+</div>
+
+<!-- 最近订单 -->
+<div class="panel">
+    <div class="panel-hd"><h2>最近订单</h2><a href="/orders" class="btn btn-outline">全部订单</a></div>
+    <div class="panel-bd">
+        <table>
+            <thead><tr><th>订单号</th><th>客户</th><th class="num">金额</th><th>状态</th><th>日期</th></tr></thead>
+            <tbody>
+            {% for o in recent_orders %}
+            <tr>
+                <td>{{ o.order_no }}</td><td>{{ o.customer_name }}</td>
+                <td class="num">{{ '%.0f'|format(o.total_amount) }}</td>
+                <td><span class="tag {% if o.status=='待加工' %}tag-o{% elif o.status=='加工中' %}tag-b{% elif o.status=='已完工' %}tag-g{% else %}tag-p{% endif %}">{{ o.status }}</span></td>
+                <td>{{ o.order_date }}</td>
+            </tr>
+            {% endfor %}
+            {% if not recent_orders %}<tr><td colspan="5" style="text-align:center;color:#999;padding:15px;">暂无订单</td></tr>{% endif %}
+            </tbody>
+        </table>
     </div>
 </div>
 
@@ -261,7 +238,6 @@ if (canvas && md.length > 0) {
     md.forEach(function(d){ maxVal = Math.max(maxVal, d.inc, d.exp); });
     maxVal = maxVal * 1.2 || 1;
 
-    // Y axis
     ctx.strokeStyle = '#eee'; ctx.fillStyle = '#999'; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
     for (var i=0;i<=4;i++) {
         var y = pad.t + ch*(1-i/4);
@@ -269,39 +245,31 @@ if (canvas && md.length > 0) {
         ctx.fillText((maxVal*i/4).toFixed(0), pad.l-4, y+4);
     }
 
-    // Bars & profit line
     var gap = cw / n, barW = Math.min(30, gap*0.3);
     var px=[], py=[];
     md.forEach(function(d,i){
         var x = pad.l + gap*i + gap/2;
-        // Income bar
         var ih = d.inc/maxVal*ch;
         ctx.fillStyle = '#1890ff'; ctx.fillRect(x-barW*1.2, pad.t+ch-ih, barW, ih);
-        // Expense bar
         var eh = d.exp/maxVal*ch;
         ctx.fillStyle = '#fa8c16'; ctx.fillRect(x+barW*0.2, pad.t+ch-eh, barW, eh);
-        // Profit dot
         var ph = (d.inc-d.exp)/maxVal*ch;
         var py2 = pad.t + ch - ch/2 - ph/2;
         px.push(x); py.push(Math.max(pad.t+5, Math.min(pad.t+ch-5, py2)));
     });
 
-    // Profit line
     if (px.length > 1) {
         ctx.strokeStyle = '#52c41a'; ctx.lineWidth = 2; ctx.beginPath();
         ctx.moveTo(px[0], py[0]);
         for (var i=1;i<px.length;i++) ctx.lineTo(px[i], py[i]);
         ctx.stroke();
-        // Dots
         ctx.fillStyle = '#52c41a';
         px.forEach(function(x,i){ ctx.beginPath(); ctx.arc(x,py[i],3,0,Math.PI*2); ctx.fill(); });
     }
 
-    // X labels
     ctx.fillStyle = '#666'; ctx.textAlign = 'center';
     md.forEach(function(d,i){ ctx.fillText(d.m.substring(5), pad.l+gap*i+gap/2, H-pad.b+15); });
 
-    // Legend
     ctx.fillStyle = '#1890ff'; ctx.fillRect(10,4,10,10);
     ctx.fillStyle = '#333'; ctx.textAlign = 'left'; ctx.fillText('收入',24,13);
     ctx.fillStyle = '#fa8c16'; ctx.fillRect(60,4,10,10);
@@ -310,5 +278,4 @@ if (canvas && md.length > 0) {
     ctx.fillStyle = '#333'; ctx.fillText('利润趋势',124,13);
 }
 </script>
-</body>
-</html>
+{% endblock %}

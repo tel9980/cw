@@ -2598,6 +2598,119 @@ def check_before_close():
                           has_posted=has_posted, is_closed=is_closed)
 
 
+# ========== 年结（结转下年） ==========
+
+@accounting_bp.route("/year-end-close", methods=["GET", "POST"])
+def year_end_close():
+    """年结：结转本年余额至下年"""
+    conn = get_db()
+    message = None
+    error = None
+    preview = None
+    result = None
+    
+    # 获取可用年度
+    years = conn.execute(
+        "SELECT DISTINCT substr(period_name,1,4) as year FROM accounting_periods ORDER BY year"
+    ).fetchall()
+    year_list = [y["year"] for y in years]
+    
+    selected_year = request.args.get("year", request.form.get("year", ""))
+    action = request.form.get("action", "")
+    
+    if action == "preview" and selected_year:
+        # 预览结转数据
+        all_periods = [dict(p) for p in conn.execute(
+            "SELECT * FROM accounting_periods WHERE period_name LIKE ? ORDER BY period_name",
+            (selected_year + "%",)
+        ).fetchall()]
+        
+        unclosed = [p for p in all_periods if p["status"] not in ("已结转", "已结账")]
+        if unclosed:
+            error = f"年度 {selected_year} 还有 {len(unclosed)} 个期间未结账（{', '.join(p['period_name'] for p in unclosed)}），请先完成所有期间结账。"
+        else:
+            # 计算损益类科目余额
+            pl_accounts = conn.execute(
+                "SELECT code, name, balance_direction FROM chart_of_accounts WHERE account_type IN ('损益类','成本类') AND code LIKE '5%' ORDER BY code"
+            ).fetchall()
+            
+            preview = {"income": [], "expense": [], "periods": all_periods}
+            total_income = 0.0
+            total_expense = 0.0
+            
+            for acc in pl_accounts:
+                balances = conn.execute("""
+                    SELECT SUM(opening_balance) as ob, SUM(debit_amount) as da, SUM(credit_amount) as ca
+                    FROM account_balances WHERE account_code=? AND period_id LIKE ?
+                """, (acc["code"], selected_year + "%")).fetchone()
+                
+                ob = float(balances["ob"] or 0)
+                da = float(balances["da"] or 0)
+                ca = float(balances["ca"] or 0)
+                
+                if acc["balance_direction"] == "借":
+                    balance = ob + da - ca
+                else:
+                    balance = ob + ca - da
+                
+                if abs(balance) > 0.01:
+                    if acc["code"].startswith(("5001", "5051")):
+                        preview["income"].append({"code": acc["code"], "name": acc["name"], "balance": balance})
+                        total_income += abs(balance)
+                    else:
+                        preview["expense"].append({"code": acc["code"], "name": acc["name"], "balance": balance})
+                        total_expense += abs(balance)
+            
+            preview["total_income"] = total_income
+            preview["total_expense"] = total_expense
+            preview["net_profit"] = total_income - total_expense
+    
+    elif action == "execute" and selected_year:
+        # 执行年结
+        all_periods = [dict(p) for p in conn.execute(
+            "SELECT * FROM accounting_periods WHERE period_name LIKE ? ORDER BY period_name",
+            (selected_year + "%",)
+        ).fetchall()]
+        
+        operator = request.form.get("operator", "管理员")
+        now = datetime.now().isoformat()
+        next_year = str(int(selected_year) + 1)
+        
+        try:
+            # 1. 锁定该年度所有期间
+            conn.execute("CREATE TABLE IF NOT EXISTS period_locks (id TEXT PRIMARY KEY, period TEXT NOT NULL UNIQUE, locked_by TEXT, locked_at TEXT, is_locked INTEGER DEFAULT 1)")
+            for p in all_periods:
+                conn.execute("INSERT OR REPLACE INTO period_locks (id, period, locked_by, locked_at, is_locked) VALUES (?, ?, ?, ?, 1)",
+                            (str(uuid.uuid4()), p["period_name"], operator, now))
+            
+            # 2. 创建下一年度12个会计期间
+            for m in range(1, 13):
+                pname = f"{next_year}-{m:02d}"
+                exist = conn.execute("SELECT id FROM accounting_periods WHERE period_name=?", (pname,)).fetchone()
+                if not exist:
+                    conn.execute("""
+                        INSERT INTO accounting_periods (id, period_name, start_date, end_date, status, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, '打开', ?, ?)
+                    """, (str(uuid.uuid4()), pname, f"{next_year}-{m:02d}-01", f"{next_year}-{m:02d}-28", now, now))
+            
+            # 3. 记录审计日志
+            conn.execute("""
+                INSERT INTO audit_logs (id, operation_type, entity_type, entity_id, operation_description, operator, operation_time)
+                VALUES (?, '年结', 'period', ?, ?, ?, ?)
+            """, (str(uuid.uuid4()), selected_year, f"年结: 结转 {selected_year} 年度至 {next_year} 年", operator, now))
+            
+            conn.commit()
+            result = {"year": selected_year, "next_year": next_year, "periods_count": len(all_periods)}
+            message = f"年结成功！{selected_year} 年度已结转至 {next_year} 年，已创建 {next_year} 年 12 个会计期间。"
+        except Exception as e:
+            conn.rollback()
+            error = f"年结失败：{str(e)}"
+    
+    conn.close()
+    return render_template("year_end_close.html", year_list=year_list, selected_year=selected_year,
+                          preview=preview, result=result, message=message, error=error)
+
+
 # ========== 数据备份与恢复 ==========
 
 @accounting_bp.route("/data-backup", methods=["GET", "POST"])
@@ -4144,6 +4257,117 @@ def auto_voucher():
     conn.close()
     return render_template("auto_voucher.html", rules=rules,
                           message=message, error=error)
+
+
+# ========== 自动凭证批量执行 ==========
+
+@accounting_bp.route("/auto-voucher/batch-execute", methods=["GET", "POST"])
+def auto_voucher_batch_execute():
+    """批量执行自动凭证规则"""
+    conn = get_db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS auto_voucher_rules (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL, frequency TEXT NOT NULL DEFAULT '每月',
+            debit_account TEXT, credit_account TEXT, amount REAL DEFAULT 0,
+            summary TEXT, next_date TEXT, exec_count INTEGER DEFAULT 0,
+            enabled INTEGER DEFAULT 1, created_at TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    
+    today_str = date.today().isoformat()
+    today_month = today_str[:7]
+    message = None
+    error = None
+    result = None
+    
+    if request.method == "POST":
+        # 执行批量
+        rules = list(conn.execute(
+            "SELECT * FROM auto_voucher_rules WHERE enabled=1 AND next_date<=?",
+            (today_month,)
+        ).fetchall())
+        
+        if not rules:
+            error = "没有可执行的规则（所有规则已执行或未到执行日期）"
+        else:
+            success = 0
+            skip = 0
+            fail = 0
+            details = []
+            
+            for rule in rules:
+                rule = dict(rule)
+                try:
+                    vid = str(uuid.uuid4())
+                    vno = f"AV{rule['id'][:4]}{today_month.replace('-', '')}"
+                    exist = conn.execute(
+                        "SELECT COUNT(*) FROM accounting_vouchers WHERE voucher_no=?",
+                        (vno,)
+                    ).fetchone()[0]
+                    
+                    if exist:
+                        skip += 1
+                        details.append({"name": rule["name"], "status": "跳过", "reason": "凭证编号已存在"})
+                        continue
+                    
+                    amt = float(rule["amount"] or 0)
+                    conn.execute(
+                        "INSERT INTO accounting_vouchers (id, voucher_no, voucher_date, accounting_period, summary, total_debit, total_credit, created_by, status, created_at, updated_at) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                        (vid, vno, today_str, today_month, rule["summary"] or rule["name"],
+                         amt, amt, "自动", "待审核", datetime.now().isoformat(), datetime.now().isoformat()))
+                    conn.execute(
+                        "INSERT INTO voucher_lines (id, voucher_id, account_code, account_name, debit, credit, summary) VALUES (?,?,?,?,?,?,?)",
+                        (str(uuid.uuid4()), vid, rule["debit_account"], rule["debit_account"],
+                         str(amt), "0", rule["summary"] or ""))
+                    conn.execute(
+                        "INSERT INTO voucher_lines (id, voucher_id, account_code, account_name, debit, credit, summary) VALUES (?,?,?,?,?,?,?)",
+                        (str(uuid.uuid4()), vid, rule["credit_account"], rule["credit_account"],
+                         "0", str(amt), rule["summary"] or ""))
+                    
+                    # 更新下次执行日期
+                    y, m = int(today_month[:4]), int(today_month[5:])
+                    freq = rule["frequency"]
+                    if freq == "每月":
+                        m += 1
+                    elif freq == "每季度":
+                        m += 3
+                    else:
+                        y += 1
+                    if m > 12:
+                        y += 1
+                        m -= 12
+                    next_d = f"{y}-{m:02d}"
+                    conn.execute(
+                        "UPDATE auto_voucher_rules SET next_date=?, exec_count=exec_count+1 WHERE id=?",
+                        (next_d, rule["id"]))
+                    
+                    success += 1
+                    details.append({"name": rule["name"], "status": "成功", "reason": f"凭证号 {vno}"})
+                except Exception as e:
+                    fail += 1
+                    details.append({"name": rule["name"], "status": "失败", "reason": str(e)})
+            
+            conn.commit()
+            result = {"success": success, "skip": skip, "fail": fail, "details": details}
+            message = f"批量执行完成：成功 {success} 条，跳过 {skip} 条，失败 {fail} 条"
+    
+    # 获取规则列表
+    due_rules = list(conn.execute(
+        "SELECT * FROM auto_voucher_rules WHERE enabled=1 AND next_date<=?",
+        (today_month,)
+    ).fetchall())
+    
+    all_rules = [dict(r) for r in conn.execute(
+        "SELECT * FROM auto_voucher_rules ORDER BY enabled DESC, next_date"
+    ).fetchall()]
+    for r in all_rules:
+        r["is_due"] = r["enabled"] and (r["next_date"] or "") <= today_month
+    
+    conn.close()
+    return render_template("auto_voucher_batch.html", rules=all_rules, due_rules=due_rules,
+                          result=result, message=message, error=error, today_month=today_month)
 
 
 # ========== 客户/供应商全景视图 ==========

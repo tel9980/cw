@@ -8,63 +8,102 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+            background: linear-gradient(135deg, #e6f0fa 0%, #f0f5ff 50%, #e6f7ff 100%);
             min-height: 100vh; display: flex; align-items: center; justify-content: center;
         }
-        .login-card {
-            background: white; border-radius: 12px; box-shadow: 0 8px 40px rgba(0,0,0,0.2);
-            padding: 40px; width: 400px; max-width: 90%;
+        .login-wrapper {
+            display: flex; background: white; border-radius: 16px;
+            box-shadow: 0 12px 60px rgba(24,144,255,0.15);
+            width: 800px; max-width: 95%; overflow: hidden;
         }
-        .login-card h1 { font-size: 22px; color: #333; margin-bottom: 8px; text-align: center; }
-        .login-card .subtitle { font-size: 14px; color: #999; margin-bottom: 30px; text-align: center; }
+        .login-brand {
+            flex: 1; background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+            padding: 48px 40px; color: white; display: flex; flex-direction: column; justify-content: center;
+        }
+        .login-brand .logo-icon { font-size: 48px; margin-bottom: 16px; }
+        .login-brand h1 { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
+        .login-brand .version { font-size: 12px; opacity: 0.8; background: rgba(255,255,255,0.15); padding: 3px 10px; border-radius: 10px; display: inline-block; margin-bottom: 24px; }
+        .login-brand .features { list-style: none; font-size: 13px; opacity: 0.9; line-height: 2.2; }
+        .login-brand .features li::before { content: "✓ "; font-weight: 700; }
+        .login-form-area { flex: 1; padding: 48px 40px; display: flex; flex-direction: column; justify-content: center; }
+        .login-form-area h2 { font-size: 22px; color: #333; margin-bottom: 4px; }
+        .login-form-area .subtitle { font-size: 13px; color: #999; margin-bottom: 28px; }
         .form-group { margin-bottom: 20px; }
-        .form-group label { display: block; margin-bottom: 6px; font-weight: 500; color: #555; font-size: 14px; }
+        .form-group label { display: block; margin-bottom: 6px; font-weight: 500; color: #555; font-size: 13px; }
         .form-group input {
-            width: 100%; padding: 12px 14px; border: 1px solid #d9d9d9;
-            border-radius: 6px; font-size: 15px; transition: border-color 0.2s;
+            width: 100%; padding: 12px 14px; border: 1px solid #e8e8e8;
+            border-radius: 8px; font-size: 15px; transition: all 0.2s; background: #fafafa;
         }
-        .form-group input:focus { outline: none; border-color: #1890ff; box-shadow: 0 0 0 3px rgba(24,144,255,0.15); }
+        .form-group input:focus { outline: none; border-color: #1890ff; background: white; box-shadow: 0 0 0 3px rgba(24,144,255,0.1); }
         .btn-login {
-            width: 100%; padding: 12px; background: #1890ff; color: white; border: none;
-            border-radius: 6px; font-size: 16px; cursor: pointer; transition: background 0.2s;
+            width: 100%; padding: 12px; background: linear-gradient(135deg, #1890ff, #096dd9); color: white; border: none;
+            border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; transition: all 0.2s; margin-top: 4px;
         }
-        .btn-login:hover { background: #40a9ff; }
+        .btn-login:hover { background: linear-gradient(135deg, #40a9ff, #1890ff); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(24,144,255,0.3); }
         .error-msg {
             background: #fff2f0; border: 1px solid #ffccc7; color: #f5222d;
-            padding: 10px 14px; border-radius: 6px; margin-bottom: 20px; font-size: 14px;
+            padding: 10px 14px; border-radius: 8px; margin-bottom: 20px; font-size: 13px;
+            animation: shake 0.4s ease;
         }
-        .info-box {
-            background: #f6ffed; border: 1px solid #b7eb8f; padding: 14px;
-            border-radius: 6px; margin-top: 24px; font-size: 13px; color: #555; line-height: 1.8;
+        @keyframes shake {
+            0%,100% { transform: translateX(0); }
+            25% { transform: translateX(-6px); }
+            50% { transform: translateX(6px); }
+            75% { transform: translateX(-4px); }
         }
-        .info-box strong { color: #333; }
+        .demo-info {
+            background: #f6ffed; border: 1px solid #b7eb8f; padding: 12px 14px;
+            border-radius: 8px; margin-top: 20px; font-size: 12px; color: #555; line-height: 1.8;
+        }
+        .demo-info strong { color: #333; }
+        @media (max-width: 640px) {
+            .login-wrapper { flex-direction: column; width: 95%; }
+            .login-brand { padding: 32px 24px; text-align: center; }
+            .login-brand .features { display: none; }
+            .login-brand h1 { font-size: 20px; }
+            .login-form-area { padding: 32px 24px; }
+        }
     </style>
 </head>
 <body>
-    <div class="login-card">
-        <h1>氧化加工厂财务系统</h1>
-        <p class="subtitle">V3.0 · 企业级财务管理系统</p>
+    <div class="login-wrapper">
+        <div class="login-brand">
+            <div class="logo-icon">🏭</div>
+            <h1>氧化加工厂财务系统</h1>
+            <span class="version">V3.9</span>
+            <ul class="features">
+                <li>完整会计循环管理</li>
+                <li>多级凭证审批流程</li>
+                <li>智能预警与报表分析</li>
+                <li>固定资产与自动折旧</li>
+                <li>银行对账与应收应付</li>
+                <li>工资管理与税务申报</li>
+                <li>数据备份与安全审计</li>
+            </ul>
+        </div>
+        <div class="login-form-area">
+            <h2>系统登录</h2>
+            <p class="subtitle">请输入账号密码登录系统</p>
 
-        {% if error %}
-        <div class="error-msg">{{ error }}</div>
-        {% endif %}
+            {% if error %}
+            <div class="error-msg">{{ error }}</div>
+            {% endif %}
 
-        <form method="POST">
-            <div class="form-group">
-                <label>用户名</label>
-                <input type="text" name="username" placeholder="请输入用户名" required autofocus>
+            <form method="POST">
+                <div class="form-group">
+                    <label>用户名</label>
+                    <input type="text" name="username" placeholder="请输入用户名" required autofocus>
+                </div>
+                <div class="form-group">
+                    <label>密码</label>
+                    <input type="password" name="password" placeholder="请输入密码" required>
+                </div>
+                <button type="submit" class="btn-login">登 录</button>
+            </form>
+
+            <div class="demo-info">
+                <strong>演示账号：</strong>admin / admin123
             </div>
-            <div class="form-group">
-                <label>密码</label>
-                <input type="password" name="password" placeholder="请输入密码" required>
-            </div>
-            <button type="submit" class="btn-login">登 录</button>
-        </form>
-
-        <div class="info-box">
-            <strong>默认管理员账号：</strong><br>
-            用户名：admin<br>
-            密码：admin123
         </div>
     </div>
 </body>

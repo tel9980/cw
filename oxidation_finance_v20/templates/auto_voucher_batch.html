@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}自动凭证批量执行 - 氧化加工厂财务系统{% endblock %}
+
+{% block breadcrumb %}
+<div class="breadcrumb"><a href="/">首页</a><span class="sep">/</span><a href="/auto-voucher">自动凭证</a><span class="sep">/</span><span>批量执行</span></div>
+{% endblock %}
+
+{% block content %}
+<style>
+    .summary-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 16px 0; }
+    .summary-item { padding: 16px; border-radius: 8px; text-align: center; }
+    .summary-item .val { font-size: 28px; font-weight: 700; }
+    .summary-item .lbl { font-size: 13px; color: #888; margin-top: 4px; }
+    .summary-item.success { background: #f6ffed; border: 1px solid #b7eb8f; }
+    .summary-item.success .val { color: #52c41a; }
+    .summary-item.skip { background: #fff7e6; border: 1px solid #ffd591; }
+    .summary-item.skip .val { color: #fa8c16; }
+    .summary-item.fail { background: #fff1f0; border: 1px solid #ffa39e; }
+    .summary-item.fail .val { color: #f5222d; }
+    .detail-status { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 12px; font-weight: 600; }
+    .detail-status.success { background: #f6ffed; color: #52c41a; }
+    .detail-status.skip { background: #fff7e6; color: #fa8c16; }
+    .detail-status.fail { background: #fff1f0; color: #f5222d; }
+</style>
+
+<div class="card">
+    <div class="flex-row">
+        <h2>自动凭证批量执行</h2>
+        <a href="/auto-voucher" class="btn btn-outline">&larr; 返回规则管理</a>
+    </div>
+
+    {% if message %}
+    <div class="message message-success">{{ message }}</div>
+    {% endif %}
+    {% if error %}
+    <div class="message message-error">{{ error }}</div>
+    {% endif %}
+
+    <!-- 可执行规则概览 -->
+    <div class="card" style="background: #f8f9fa; box-shadow: none;">
+        <h2 style="margin-bottom:8px;">当前期间：{{ today_month }}</h2>
+        <p style="font-size:13px;color:#666;">可执行规则 {{ due_rules|length }} 条（总计 {{ rules|length }} 条规则）</p>
+
+        {% if due_rules %}
+        <table style="margin-top:12px;">
+            <thead><tr><th>规则名称</th><th>借方科目</th><th>贷方科目</th><th class="num">金额</th><th>频率</th><th>下次执行</th></tr></thead>
+            <tbody>
+                {% for r in due_rules %}
+                <tr>
+                    <td><strong>{{ r.name }}</strong></td>
+                    <td>{{ r.debit_account }}</td>
+                    <td>{{ r.credit_account }}</td>
+                    <td class="num">{{ '%.2f'|format(r.amount or 0) }}</td>
+                    <td>{{ r.frequency }}</td>
+                    <td>{{ r.next_date }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <form method="POST" onsubmit="return confirm('确定要批量执行全部 {{ due_rules|length }} 条规则吗？每条规则将生成一张凭证。');">
+            <button type="submit" class="btn btn-warning" style="margin-top:16px;">一键执行全部（{{ due_rules|length }} 条）</button>
+        </form>
+        {% else %}
+        <p style="color:#999; padding:16px; text-align:center;">当前没有待执行的规则，所有启用的规则已执行或未到执行日期。</p>
+        {% endif %}
+    </div>
+
+    <!-- 执行结果 -->
+    {% if result %}
+    <div class="card" style="background: #f8f9fa; box-shadow: none;">
+        <h2 style="margin-bottom:12px;">执行结果</h2>
+        <div class="summary-row">
+            <div class="summary-item success">
+                <div class="val">{{ result.success }}</div>
+                <div class="lbl">成功生成凭证</div>
+            </div>
+            <div class="summary-item skip">
+                <div class="val">{{ result.skip }}</div>
+                <div class="lbl">跳过（已存在）</div>
+            </div>
+            <div class="summary-item fail">
+                <div class="val">{{ result.fail }}</div>
+                <div class="lbl">执行失败</div>
+            </div>
+        </div>
+
+        <table>
+            <thead><tr><th>规则名称</th><th>状态</th><th>备注</th></tr></thead>
+            <tbody>
+                {% for d in result.details %}
+                <tr>
+                    <td>{{ d.name }}</td>
+                    <td><span class="detail-status {{ d.status }}">{{ d.status }}</span></td>
+                    <td style="font-size:12px;color:#999;">{{ d.reason }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
