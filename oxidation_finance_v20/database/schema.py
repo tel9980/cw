@@ -535,6 +535,19 @@ def create_tables(conn: sqlite3.Connection):
         "CREATE INDEX IF NOT EXISTS idx_budget_target ON budgets(target_type, target_id)"
     )
 
+    # 方案B: 存货分类表
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS inventory_categories (
+            id TEXT PRIMARY KEY,
+            code TEXT UNIQUE NOT NULL,
+            name TEXT NOT NULL,
+            parent_id TEXT,
+            sort_order INTEGER DEFAULT 0,
+            notes TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+
     conn.commit()
 
 
@@ -561,6 +574,7 @@ def drop_tables(conn: sqlite3.Connection):
         "projects",
         "reconciliation",
         "budgets",
+        "inventory_categories",
     }
 
     tables = [
@@ -570,6 +584,7 @@ def drop_tables(conn: sqlite3.Connection):
         "projects",
         "reconciliation",
         "budgets",
+        "inventory_categories",
         "voucher_lines",
         "accounting_vouchers",
         "accounting_periods",

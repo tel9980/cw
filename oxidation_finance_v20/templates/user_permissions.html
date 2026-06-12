@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}用户权限管理 - 氧化加工厂财务系统{% endblock %}
+{% block head_extra %}
+<style>
+    .filter-bar { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
+    .filter-bar select, .filter-bar input { padding: 8px 12px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; }
+    .empty-state { text-align: center; padding: 40px; color: #999; }
+    .perm-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; margin-top: 15px; }
+    .perm-category { background: #fafafa; border: 1px solid #e8e8e8; border-radius: 6px; padding: 15px; }
+    .perm-category h4 { font-size: 14px; color: #1890ff; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #e8e8e8; }
+    .perm-category label { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 13px; cursor: pointer; }
+    .perm-category label:hover { color: #1890ff; }
+    .perm-category input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: #1890ff; }
+    .user-info-bar { display: flex; gap: 20px; align-items: center; padding: 12px 15px; background: #f0f5ff; border-radius: 6px; margin-bottom: 15px; }
+    .user-info-bar .info-label { font-size: 13px; color: #666; }
+    .user-info-bar .info-value { font-size: 14px; font-weight: 600; color: #333; }
+    .role-badge { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 12px; background: #e6f7ff; color: #1890ff; }
+</style>
+{% endblock %}
+{% block breadcrumb %}
+<div class="breadcrumb">
+    <a href="/">首页</a>
+    <span class="sep">›</span>
+    <span>用户权限管理</span>
+</div>
+{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>用户权限管理</h2>
+
+    {% if error %}
+    <div class="message message-error">{{ error }}</div>
+    {% endif %}
+    {% if message %}
+    <div class="message message-success">{{ message }}</div>
+    {% endif %}
+
+    <form method="GET" style="margin-bottom:15px;">
+        <div class="filter-bar">
+            <label>选择用户：</label>
+            <select name="user_id" onchange="this.form.submit()">
+                <option value="">-- 请选择用户 --</option>
+                {% for u in users %}
+                <option value="{{ u.id }}" {% if selected_user and selected_user.id == u.id %}selected{% endif %}>
+                    {{ u.username }}{% if u.is_active %}{% else %} (已停用){% endif %}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+    </form>
+
+    {% if selected_user %}
+    <div class="user-info-bar">
+        <div>
+            <span class="info-label">用户：</span>
+            <span class="info-value">{{ selected_user.username }}</span>
+        </div>
+        <div>
+            <span class="info-label">角色：</span>
+            <span class="role-badge">{{ selected_user.role }}</span>
+        </div>
+        <div>
+            <span class="info-label">状态：</span>
+            <span class="info-value">{% if selected_user.is_active %}正常{% else %}已停用{% endif %}</span>
+        </div>
+    </div>
+
+    <form method="POST">
+        <input type="hidden" name="user_id" value="{{ selected_user.id }}">
+        {% set categories = {} %}
+        {% for perm in all_permissions %}
+            {% set cat = perm.category or '其他' %}
+            {% if cat not in categories %}
+                {% set _ = categories.update({cat: []}) %}
+            {% endif %}
+            {% set _ = categories[cat].append(perm) %}
+        {% endfor %}
+        <div class="perm-grid">
+        {% for cat_name, perms in categories.items() %}
+            <div class="perm-category">
+                <h4>{{ cat_name }}</h4>
+                {% for perm in perms %}
+                <label>
+                    <input type="checkbox" name="permissions" value="{{ perm.key }}" {% if perm.key in user_permissions %}checked{% endif %}>
+                    {{ perm.name }}
+                </label>
+                {% endfor %}
+            </div>
+        {% endfor %}
+        </div>
+        <div style="margin-top:20px;">
+            <button type="submit" class="btn">保存权限</button>
+        </div>
+    </form>
+    {% else %}
+    <div class="empty-state">请从上方下拉框中选择一个用户</div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}存货明细账 - 氧化加工厂财务系统{% endblock %}
+{% block head_extra %}
+<style>
+    .filter-bar { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
+    .filter-bar select, .filter-bar input { padding: 8px 12px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; }
+    .empty-state { text-align: center; padding: 40px; color: #999; }
+    .num { text-align: right; font-family: "SF Mono", Monaco, monospace; }
+    .totals-row td { font-weight: bold; background: #fafafa; border-top: 2px solid #333; }
+    .info-header { font-size: 15px; color: #666; margin: 15px 0; }
+    .info-header strong { color: #333; }
+    .search-hint { padding: 8px 12px; background: #fafafa; border-radius: 4px; margin-bottom: 15px; }
+</style>
+{% endblock %}
+{% block breadcrumb %}
+<div class="breadcrumb">
+    <a href="/">首页</a>
+    <span class="sep">›</span>
+    <span>存货明细账</span>
+</div>
+{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>存货明细账</h2>
+    <div class="filter-bar">
+        <form method="GET" style="display:contents;">
+            <label>会计期间：</label>
+            <select name="period" onchange="this.form.submit()">
+                {% for p in periods %}
+                <option value="{{ p }}" {% if period == p %}selected{% endif %}>{{ p }}</option>
+                {% endfor %}
+            </select>
+            <label>存货编码/名称：</label>
+            <input type="text" name="account_code" placeholder="搜索存货..." value="{{ account_code or '' }}" style="width:200px;">
+            <button type="submit" class="btn btn-sm">查询</button>
+        </form>
+    </div>
+
+    {% if message %}
+    <div class="message message-info">{{ message }}</div>
+    {% endif %}
+
+    {% if account_code and account_name %}
+    <div class="info-header">
+        存货：<strong>{{ account_code }} - {{ account_name }}</strong>
+        &nbsp;|&nbsp; 期间：<strong>{{ period }}</strong>
+    </div>
+    {% endif %}
+
+    {% if ledger_data %}
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>日期</th>
+                    <th>凭证号</th>
+                    <th>摘要</th>
+                    <th class="num">收入数量</th>
+                    <th class="num">收入单价</th>
+                    <th class="num">收入金额</th>
+                    <th class="num">发出数量</th>
+                    <th class="num">发出单价</th>
+                    <th class="num">发出金额</th>
+                    <th class="num">结存数量</th>
+                    <th class="num">结存金额</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% set ns = namespace(
+                    bal_qty=0, bal_amt=0,
+                    total_in_qty=0, total_in_amt=0,
+                    total_out_qty=0, total_out_amt=0
+                ) %}
+                {% for entry in ledger_data %}
+                {% set qty = entry.quantity|float if entry.quantity else 0 %}
+                {% set price = entry.unit_price|float if entry.unit_price else 0 %}
+                {% set debit = entry.debit|float if entry.debit else 0 %}
+                {% set credit = entry.credit|float if entry.credit else 0 %}
+                {% if debit > 0 %}
+                    {% set in_qty = qty %}
+                    {% set in_price = price %}
+                    {% set in_amt = debit %}
+                    {% set out_qty = 0 %}
+                    {% set out_price = 0 %}
+                    {% set out_amt = 0 %}
+                    {% set ns.total_in_qty = ns.total_in_qty + in_qty %}
+                    {% set ns.total_in_amt = ns.total_in_amt + in_amt %}
+                {% else %}
+                    {% set in_qty = 0 %}
+                    {% set in_price = 0 %}
+                    {% set in_amt = 0 %}
+                    {% set out_qty = qty %}
+                    {% set out_price = price %}
+                    {% set out_amt = credit %}
+                    {% set ns.total_out_qty = ns.total_out_qty + out_qty %}
+                    {% set ns.total_out_amt = ns.total_out_amt + out_amt %}
+                {% endif %}
+                {% set ns.bal_qty = ns.bal_qty + in_qty - out_qty %}
+                {% set ns.bal_amt = ns.bal_amt + in_amt - out_amt %}
+                <tr>
+                    <td>{{ entry.voucher_date }}</td>
+                    <td>{{ entry.voucher_no }}</td>
+                    <td>{{ entry.summary or '-' }}</td>
+                    <td class="num">{% if in_qty %}{{ '%.4f'|format(in_qty) }}{% endif %}</td>
+                    <td class="num">{% if in_price %}{{ '%.4f'|format(in_price) }}{% endif %}</td>
+                    <td class="num">{% if in_amt %}{{ '%.2f'|format(in_amt) }}{% endif %}</td>
+                    <td class="num">{% if out_qty %}{{ '%.4f'|format(out_qty) }}{% endif %}</td>
+                    <td class="num">{% if out_price %}{{ '%.4f'|format(out_price) }}{% endif %}</td>
+                    <td class="num">{% if out_amt %}{{ '%.2f'|format(out_amt) }}{% endif %}</td>
+                    <td class="num" style="font-weight:600;">{{ '%.4f'|format(ns.bal_qty) }}</td>
+                    <td class="num" style="font-weight:600;">{{ '%.2f'|format(ns.bal_amt) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr class="totals-row">
+                    <td colspan="3">本期合计</td>
+                    <td class="num">{{ '%.4f'|format(ns.total_in_qty) }}</td>
+                    <td class="num"></td>
+                    <td class="num">{{ '%.2f'|format(ns.total_in_amt) }}</td>
+                    <td class="num">{{ '%.4f'|format(ns.total_out_qty) }}</td>
+                    <td class="num"></td>
+                    <td class="num">{{ '%.2f'|format(ns.total_out_amt) }}</td>
+                    <td class="num">{{ '%.4f'|format(ns.bal_qty) }}</td>
+                    <td class="num">{{ '%.2f'|format(ns.bal_amt) }}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+    {% elif account_code %}
+    <div class="empty-state">该存货暂无凭证记录</div>
+    {% else %}
+    <div class="empty-state">请选择存货进行查询</div>
+    {% endif %}
+</div>
+{% endblock %}

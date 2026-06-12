@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}存货分类 - 氧化加工厂财务系统{% endblock %}
+
+{% block breadcrumb %}
+<div class="breadcrumb"><a href="/">首页</a><span class="sep">›</span><span>存货分类</span></div>
+{% endblock %}
+
+{% block content %}
+{% if message %}
+<div class="message message-success">{{ message }}</div>
+{% endif %}
+{% if error %}
+<div class="message message-error">{{ error }}</div>
+{% endif %}
+
+<div class="card">
+    <h2>新增存货分类</h2>
+    <form method="POST" style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
+        <input type="hidden" name="action" value="create">
+        <div class="form-group" style="margin-bottom: 0; min-width: 150px;">
+            <label>分类编码</label>
+            <input type="text" name="code" placeholder="如：01" required style="width: 150px;">
+        </div>
+        <div class="form-group" style="margin-bottom: 0; min-width: 200px;">
+            <label>分类名称</label>
+            <input type="text" name="name" placeholder="如：原材料" required style="width: 200px;">
+        </div>
+        <div class="form-group" style="margin-bottom: 0; min-width: 200px;">
+            <label>上级分类</label>
+            <select name="parent_id" style="width: 200px;">
+                <option value="">无（顶级分类）</option>
+                {% for c in categories %}
+                <option value="{{ c.id }}">{{ c.code }} - {{ c.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button type="submit" class="btn btn-success" style="height: 38px;">新增</button>
+    </form>
+</div>
+
+<div class="card">
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>分类编码</th>
+                    <th>分类名称</th>
+                    <th>上级分类</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in categories %}
+                <tr>
+                    <td>{{ c.code }}</td>
+                    <td>{{ c.name }}</td>
+                    <td>
+                        {% set parent = categories | selectattr('id', 'equalto', c.parent_id) | first %}
+                        {{ parent.name if parent else '-' }}
+                    </td>
+                    <td>
+                        <a href="/inventory-categories/edit/{{ c.id }}" class="btn btn-sm btn-outline">编辑</a>
+                        <form method="POST" style="display:inline;" onsubmit="return confirm('确认删除该分类？');">
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="id" value="{{ c.id }}">
+                            <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+                {% if not categories %}
+                <tr><td colspan="4" style="text-align:center;color:#999;padding:30px;">暂无存货分类，请添加</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}存货收发存汇总表 - 氧化加工厂财务系统{% endblock %}
+{% block head_extra %}
+<style>
+    .filter-bar { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
+    .filter-bar select, .filter-bar input { padding: 8px 12px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; }
+    .empty-state { text-align: center; padding: 40px; color: #999; }
+    .num { text-align: right; font-family: "SF Mono", Monaco, monospace; }
+    .totals-row td { font-weight: bold; background: #fafafa; border-top: 2px solid #333; }
+    .info-header { font-size: 15px; color: #666; margin-bottom: 15px; }
+    .info-header strong { color: #333; }
+</style>
+{% endblock %}
+{% block breadcrumb %}
+<div class="breadcrumb">
+    <a href="/">首页</a>
+    <span class="sep">›</span>
+    <span>存货收发存汇总表</span>
+</div>
+{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>存货收发存汇总表</h2>
+    <div class="filter-bar">
+        <form method="GET" style="display:contents;">
+            <label>会计期间：</label>
+            <select name="period">
+                {% for p in periods %}
+                <option value="{{ p }}" {% if period == p %}selected{% endif %}>{{ p }}</option>
+                {% endfor %}
+            </select>
+            <label>存货类别：</label>
+            <select name="category_id">
+                <option value="">全部类别</option>
+                {% for cat in categories %}
+                <option value="{{ cat.id }}" {% if category_id|string == cat.id|string %}selected{% endif %}>{{ cat.name }}</option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="btn btn-sm">查询</button>
+        </form>
+    </div>
+
+    {% if message %}
+    <div class="message message-info">{{ message }}</div>
+    {% endif %}
+
+    {% if period %}
+    <div class="info-header">
+        期间：<strong>{{ period }}</strong>
+        {% if category_id %}&nbsp;|&nbsp; 类别：<strong>{{ category_id }}</strong>{% endif %}
+    </div>
+    {% endif %}
+
+    {% if summary_data %}
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>存货编码</th>
+                    <th>存货名称</th>
+                    <th>计量单位</th>
+                    <th class="num">期初数量</th>
+                    <th class="num">期初金额</th>
+                    <th class="num">本期收入数量</th>
+                    <th class="num">本期收入金额</th>
+                    <th class="num">本期发出数量</th>
+                    <th class="num">本期发出金额</th>
+                    <th class="num">期末数量</th>
+                    <th class="num">期末金额</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% set ns = namespace(op_qty=0, op_amt=0, in_qty=0, in_amt=0, out_qty=0, out_amt=0, cl_qty=0, cl_amt=0) %}
+                {% for row in summary_data %}
+                {% set opening_qty = row.opening_qty|float if row.opening_qty else 0 %}
+                {% set opening_amount = row.opening_amount|float if row.opening_amount else 0 %}
+                {% set in_qty_v = row.in_qty|float if row.in_qty else 0 %}
+                {% set in_amount_v = row.in_amount|float if row.in_amount else 0 %}
+                {% set out_qty_v = row.out_qty|float if row.out_qty else 0 %}
+                {% set out_amount_v = row.out_amount|float if row.out_amount else 0 %}
+                {% set closing_qty = row.closing_qty|float if row.closing_qty else 0 %}
+                {% set closing_amount = row.closing_amount|float if row.closing_amount else 0 %}
+                {% set ns.op_qty = ns.op_qty + opening_qty %}
+                {% set ns.op_amt = ns.op_amt + opening_amount %}
+                {% set ns.in_qty = ns.in_qty + in_qty_v %}
+                {% set ns.in_amt = ns.in_amt + in_amount_v %}
+                {% set ns.out_qty = ns.out_qty + out_qty_v %}
+                {% set ns.out_amt = ns.out_amt + out_amount_v %}
+                {% set ns.cl_qty = ns.cl_qty + closing_qty %}
+                {% set ns.cl_amt = ns.cl_amt + closing_amount %}
+                <tr>
+                    <td>{{ row.account_code }}</td>
+                    <td>{{ row.account_name }}</td>
+                    <td>{{ row.unit or '-' }}</td>
+                    <td class="num">{{ '%.4f'|format(opening_qty) }}</td>
+                    <td class="num">{{ '%.2f'|format(opening_amount) }}</td>
+                    <td class="num">{{ '%.4f'|format(in_qty_v) }}</td>
+                    <td class="num">{{ '%.2f'|format(in_amount_v) }}</td>
+                    <td class="num">{{ '%.4f'|format(out_qty_v) }}</td>
+                    <td class="num">{{ '%.2f'|format(out_amount_v) }}</td>
+                    <td class="num">{{ '%.4f'|format(closing_qty) }}</td>
+                    <td class="num">{{ '%.2f'|format(closing_amount) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr class="totals-row">
+                    <td colspan="3">合计</td>
+                    <td class="num">{{ '%.4f'|format(ns.op_qty) }}</td>
+                    <td class="num">{{ '%.2f'|format(ns.op_amt) }}</td>
+                    <td class="num">{{ '%.4f'|format(ns.in_qty) }}</td>
+                    <td class="num">{{ '%.2f'|format(ns.in_amt) }}</td>
+                    <td class="num">{{ '%.4f'|format(ns.out_qty) }}</td>
+                    <td class="num">{{ '%.2f'|format(ns.out_amt) }}</td>
+                    <td class="num">{{ '%.4f'|format(ns.cl_qty) }}</td>
+                    <td class="num">{{ '%.2f'|format(ns.cl_amt) }}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">暂无数据，请选择查询条件</div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}凭证连续打印 - 氧化加工厂财务系统{% endblock %}
+{% block head_extra %}
+<style>
+    .filter-bar { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
+    .filter-bar select, .filter-bar input { padding: 8px 12px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; }
+    .empty-state { text-align: center; padding: 40px; color: #999; }
+    .num { text-align: right; font-family: "SF Mono", Monaco, monospace; }
+    .info-card { background: #f0f5ff; padding: 15px; border-radius: 6px; margin-bottom: 20px; display: flex; gap: 30px; flex-wrap: wrap; align-items: center; }
+    .info-card .info-item { font-size: 14px; color: #333; }
+    .info-card .info-item strong { color: #1890ff; font-size: 18px; }
+    .no-print { }
+    .voucher-card { background: white; border: 1px solid #e8e8e8; border-radius: 6px; padding: 20px; margin-bottom: 20px; }
+    .voucher-card:last-child { margin-bottom: 0; }
+    .voucher-header { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid #e8e8e8; }
+    .voucher-header .vh-item { font-size: 14px; }
+    .voucher-header .vh-item strong { color: #333; }
+    .voucher-header .vh-no { font-size: 16px; font-weight: bold; color: #1890ff; }
+    .page-total-line { background: #fafafa; font-weight: bold; font-size: 13px; padding: 8px 12px; margin: 12px 0; border-radius: 4px; display: flex; justify-content: space-between; }
+    @media print {
+        .header { display: none !important; }
+        .nav { display: none !important; }
+        .breadcrumb { display: none !important; }
+        .no-print { display: none !important; }
+        body { background: white; font-size: 12px; }
+        .container { max-width: 100%; padding: 0; margin: 0; }
+        .content-wrapper { padding: 0; }
+        .card { box-shadow: none; border: none; padding: 0; margin-bottom: 0; }
+        .voucher-card { box-shadow: none; border: 1px solid #ccc; page-break-after: always; margin-bottom: 0; padding: 10px 15px; }
+        .voucher-card:last-child { page-break-after: auto; }
+        table { font-size: 11px; }
+        th, td { padding: 4px 6px; }
+    }
+</style>
+{% endblock %}
+{% block breadcrumb %}
+<div class="breadcrumb">
+    <a href="/">首页</a>
+    <span class="sep">›</span>
+    <span>凭证连续打印</span>
+</div>
+{% endblock %}
+{% block content %}
+<div class="card no-print">
+    <h2>凭证连续打印</h2>
+    <div class="filter-bar">
+        <form method="GET" style="display:contents;">
+            <label>会计期间：</label>
+            <select name="period">
+                {% for p in periods %}
+                <option value="{{ p }}" {% if period == p %}selected{% endif %}>{{ p }}</option>
+                {% endfor %}
+            </select>
+            <label>起始凭证号：</label>
+            <input type="text" name="start_no" value="{{ start_no or '' }}" style="width:120px;" placeholder="如: 001">
+            <label>截止凭证号：</label>
+            <input type="text" name="end_no" value="{{ end_no or '' }}" style="width:120px;" placeholder="如: 010">
+            <button type="submit" class="btn btn-sm">查询并打印</button>
+        </form>
+    </div>
+
+    {% if message %}
+    <div class="message message-info">{{ message }}</div>
+    {% endif %}
+
+    {% if vouchers %}
+    <div class="info-card">
+        <div class="info-item">期间：<strong>{{ period }}</strong></div>
+        <div class="info-item">凭证范围：<strong>{{ start_no }} - {{ end_no }}</strong></div>
+        <div class="info-item">总张数：<strong>{{ vouchers|length }}</strong></div>
+    </div>
+    <button onclick="window.print()" class="btn btn-success">打 印</button>
+    {% endif %}
+</div>
+
+{% if vouchers %}
+<div>
+    {% set ns = namespace(page_voucher_count=0, page_debit=0, page_credit=0) %}
+    {% set page_size = 4 %}
+    {% for voucher in vouchers %}
+        {% set ns.page_voucher_count = ns.page_voucher_count + 1 %}
+        {% set v_debit = namespace(total=0) %}
+        {% set v_credit = namespace(total=0) %}
+        {% for line in lines_map.get(voucher.id, []) %}
+            {% set v_debit.total = v_debit.total + (line.debit_amount|float if line.debit_amount else 0) %}
+            {% set v_credit.total = v_credit.total + (line.credit_amount|float if line.credit_amount else 0) %}
+        {% endfor %}
+        {% set ns.page_debit = ns.page_debit + v_debit.total %}
+        {% set ns.page_credit = ns.page_credit + v_credit.total %}
+
+        <div class="voucher-card">
+            <div class="voucher-header">
+                <span class="vh-no">凭证号：{{ voucher.voucher_no }}</span>
+                <span class="vh-item">日期：<strong>{{ voucher.voucher_date }}</strong></span>
+                <span class="vh-item">摘要：<strong>{{ voucher.description or '-' }}</strong></span>
+                <span class="vh-item">借方合计：<strong>{{ '%.2f'|format(v_debit.total) }}</strong></span>
+                <span class="vh-item">贷方合计：<strong>{{ '%.2f'|format(v_credit.total) }}</strong></span>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>科目编码</th>
+                        <th>科目名称</th>
+                        <th>摘要</th>
+                        <th class="num">借方金额</th>
+                        <th class="num">贷方金额</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for line in lines_map.get(voucher.id, []) %}
+                    <tr>
+                        <td>{{ line.account_code }}</td>
+                        <td>{{ line.account_name }}</td>
+                        <td>{{ line.summary or '-' }}</td>
+                        <td class="num">{% if line.debit_amount and line.debit_amount|float > 0 %}{{ '%.2f'|format(line.debit_amount|float) }}{% endif %}</td>
+                        <td class="num">{% if line.credit_amount and line.credit_amount|float > 0 %}{{ '%.2f'|format(line.credit_amount|float) }}{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            {% if ns.page_voucher_count >= page_size and not loop.last %}
+            <div class="page-total-line">
+                <span>过次页</span>
+                <span>借方累计：{{ '%.2f'|format(ns.page_debit) }} &nbsp;&nbsp; 贷方累计：{{ '%.2f'|format(ns.page_credit) }}</span>
+            </div>
+            {% endif %}
+        </div>
+
+        {% if loop.nextitem and (ns.page_voucher_count >= page_size or (page_totals and page_totals|length > 0)) %}
+            {% set found = namespace(done=false) %}
+            {% for pt in page_totals %}
+                {% if pt.page_num == (ns.page_voucher_count // page_size) and not found.done %}
+                {% endif %}
+            {% endfor %}
+            {% if ns.page_voucher_count >= page_size %}
+            <div class="voucher-card" style="opacity:0.7;">
+                <div class="page-total-line" style="margin:0;">
+                    <span>承前页</span>
+                    <span>借方累计：{{ '%.2f'|format(ns.page_debit) }} &nbsp;&nbsp; 贷方累计：{{ '%.2f'|format(ns.page_credit) }}</span>
+                </div>
+            </div>
+            {% set ns.page_debit = 0 %}
+            {% set ns.page_credit = 0 %}
+            {% set ns.page_voucher_count = 0 %}
+            {% endif %}
+        {% endif %}
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

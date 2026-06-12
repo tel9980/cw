@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}科目汇总表 - 氧化加工厂财务系统{% endblock %}
+
+{% block breadcrumb %}
+<div class="breadcrumb"><a href="/">首页</a><span class="sep">›</span><span>科目汇总表</span></div>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="flex-row" style="margin-bottom: 15px;">
+        <form method="GET" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <select name="period" style="padding: 6px 10px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px;">
+                {% for p in periods %}
+                <option value="{{ p }}" {% if p == period %}selected{% endif %}>{{ p }}</option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="btn">查询</button>
+        </form>
+    </div>
+</div>
+
+{% for type_name in ['资产类', '负债类', '权益类', '成本类', '损益类'] %}
+    {% set group = summary_data | selectattr('account_type', 'equalto', type_name) | list %}
+    {% if group %}
+    <div class="card">
+        <h2 style="font-size: 16px; color: #333; margin-bottom: 12px; padding-left: 12px; border-left: 3px solid #1890ff;">{{ type_name }}</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>科目编码</th>
+                        <th>科目名称</th>
+                        <th class="num">期初余额</th>
+                        <th class="num">本期借方</th>
+                        <th class="num">本期贷方</th>
+                        <th class="num">期末余额</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% set ns = namespace(sub_dr=0, sub_cr=0, sub_open=0, sub_close=0) %}
+                    {% for row in group %}
+                    <tr>
+                        <td>{{ row.account_code }}</td>
+                        <td>{{ row.account_name }}</td>
+                        <td class="num">{{ "%.2f"|format(row.opening_balance) }}</td>
+                        <td class="num">{{ "%.2f"|format(row.period_debit) }}</td>
+                        <td class="num">{{ "%.2f"|format(row.period_credit) }}</td>
+                        <td class="num">{{ "%.2f"|format(row.closing_balance) }}</td>
+                    </tr>
+                    {% set ns.sub_dr = ns.sub_dr + row.period_debit %}
+                    {% set ns.sub_cr = ns.sub_cr + row.period_credit %}
+                    {% set ns.sub_open = ns.sub_open + row.opening_balance %}
+                    {% set ns.sub_close = ns.sub_close + row.closing_balance %}
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr style="font-weight: bold; background: #f0f5ff;">
+                        <td colspan="2">{{ type_name }}小计</td>
+                        <td class="num">{{ "%.2f"|format(ns.sub_open) }}</td>
+                        <td class="num">{{ "%.2f"|format(ns.sub_dr) }}</td>
+                        <td class="num">{{ "%.2f"|format(ns.sub_cr) }}</td>
+                        <td class="num">{{ "%.2f"|format(ns.sub_close) }}</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+{% endfor %}
+
+{% if totals and summary_data %}
+<div class="card">
+    <div class="table-wrap">
+        <table>
+            <tfoot>
+                <tr style="font-weight: bold; background: #e6f7ff; font-size: 15px;">
+                    <td colspan="2">总计</td>
+                    <td class="num">{{ "%.2f"|format(totals.opening_balance) }}</td>
+                    <td class="num">{{ "%.2f"|format(totals.period_debit) }}</td>
+                    <td class="num">{{ "%.2f"|format(totals.period_credit) }}</td>
+                    <td class="num">{{ "%.2f"|format(totals.closing_balance) }}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% if not summary_data %}
+<div class="card">
+    <p style="text-align:center;color:#999;padding:30px;">暂无数据</p>
+</div>
+{% endif %}
+{% endblock %}

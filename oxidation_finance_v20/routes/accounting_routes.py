@@ -5,6 +5,7 @@
 import csv
 import hashlib
 import io
+import json
 import os
 import time
 import uuid
@@ -5924,3 +5925,719 @@ def budget_comparison():
     return render_template("budget_comparison.html",
         period=period, target_type=target_type,
         comparison=comparison, periods_list=periods_list)
+
+
+# ========== 方案C: 凭证连续打印 ==========
+
+@accounting_bp.route("/vouchers/batch-print")
+def vouchers_batch_print():
+    """凭证批量连续打印"""
+    conn = get_db()
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+    start_no = request.args.get("start_no", "").strip()
+    end_no = request.args.get("end_no", "").strip()
+
+    query = "SELECT * FROM accounting_vouchers WHERE status='已记账' AND accounting_period=? "
+    params = [period]
+
+    if start_no:
+        query += " AND CAST(voucher_no AS INTEGER) >= ? "
+        params.append(int(start_no))
+    if end_no:
+        query += " AND CAST(voucher_no AS INTEGER) <= ? "
+        params.append(int(end_no))
+
+    query += " ORDER BY voucher_no"
+    vouchers = [dict(v) for v in conn.execute(query, params).fetchall()]
+
+    lines_map = {}
+    for v in vouchers:
+        vid = v["id"]
+        lines = [dict(l) for l in conn.execute(
+            "SELECT * FROM voucher_lines WHERE voucher_id=? ORDER BY id", (vid,)).fetchall()]
+        lines_map[vid] = lines
+
+    # Calculate per-page totals (承前页/过次页), 5 vouchers per page
+    page_size = 5
+    page_totals = []
+    cumulative_debit = 0.0
+    cumulative_credit = 0.0
+
+    for i in range(0, len(vouchers), page_size):
+        page_vouchers = vouchers[i:i + page_size]
+        page_debit = 0.0
+        page_credit = 0.0
+        for v in page_vouchers:
+            page_debit += float(v.get("total_debit", 0) or 0)
+            page_credit += float(v.get("total_credit", 0) or 0)
+        cumulative_debit += page_debit
+        cumulative_credit += page_credit
+        page_totals.append({
+            "page_no": i // page_size + 1,
+            "brought_forward_debit": round(cumulative_debit - page_debit, 2),
+            "brought_forward_credit": round(cumulative_credit - page_credit, 2),
+            "page_debit": round(page_debit, 2),
+            "page_credit": round(page_credit, 2),
+            "carried_forward_debit": round(cumulative_debit, 2),
+            "carried_forward_credit": round(cumulative_credit, 2),
+            "voucher_range": (i, min(i + page_size, len(vouchers))),
+        })
+
+    periods = [dict(p) for p in conn.execute(
+        "SELECT DISTINCT accounting_period FROM accounting_vouchers ORDER BY accounting_period DESC"
+    ).fetchall()]
+
+    conn.close()
+    return render_template("batch_print.html",
+        vouchers=vouchers, lines_map=lines_map,
+        page_totals=page_totals, period=period,
+        start_no=start_no, end_no=end_no,
+        periods=periods, total_count=len(vouchers))
+
+
+# ========== 方案D: 操作员权限细化 + 跨期间查询 ==========
+
+AVAILABLE_PERMISSIONS = [
+    "order_view", "order_create", "order_edit", "order_delete",
+    "income_view", "income_create", "income_edit", "income_delete",
+    "expense_view", "expense_create", "expense_edit", "expense_delete",
+    "customer_view", "customer_create", "customer_edit", "customer_delete",
+    "report_view", "report_export",
+    "system_config", "user_manage", "log_view",
+]
+
+
+@accounting_bp.route("/user-permissions", methods=["GET", "POST"])
+def user_permissions():
+    """用户权限管理"""
+    conn = get_db()
+    message = None
+    error = None
+
+    if request.method == "POST":
+        user_id = request.form.get("user_id", "").strip()
+        perm_json = request.form.get("permissions", "{}")
+        try:
+            permissions = json.loads(perm_json) if isinstance(perm_json, str) else {}
+            now = datetime.now().isoformat()
+            key = f"perm_{user_id}"
+            conn.execute(
+                "INSERT INTO system_settings (key, value, description, updated_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=?, updated_at=?",
+                (key, json.dumps(permissions, ensure_ascii=False), f"用户 {user_id} 权限", now, json.dumps(permissions, ensure_ascii=False), now))
+            conn.commit()
+            message = "权限保存成功"
+        except Exception as e:
+            error = f"保存失败: {e}"
+
+    # List all users
+    users_list = [dict(u) for u in conn.execute(
+        "SELECT id, username, role, is_active FROM users ORDER BY role"
+    ).fetchall()]
+
+    # Read permissions from system_settings
+    user_perms = {}
+    for u in users_list:
+        uid = u["id"]
+        row = conn.execute(
+            "SELECT value FROM system_settings WHERE key=?", (f"perm_{uid}",)
+        ).fetchone()
+        if row:
+            try:
+                user_perms[uid] = json.loads(row["value"])
+            except (json.JSONDecodeError, TypeError):
+                user_perms[uid] = {}
+        else:
+            user_perms[uid] = {}
+
+    conn.close()
+    return render_template("user_permissions.html",
+        users=users_list, user_perms=user_perms,
+        available_permissions=AVAILABLE_PERMISSIONS,
+        message=message, error=error)
+
+
+@accounting_bp.route("/accounting-books-cross")
+def accounting_books_cross():
+    """跨期间账簿查询"""
+    conn = get_db()
+    start_period = request.args.get("start_period", date.today().strftime("%Y-01"))
+    end_period = request.args.get("end_period", date.today().strftime("%Y-%m"))
+    account_code = request.args.get("account_code", "").strip()
+    book_type = request.args.get("book_type", "detail")
+
+    # Query vouchers across periods
+    query = """
+        SELECT v.* FROM accounting_vouchers v
+        WHERE v.accounting_period >= ? AND v.accounting_period <= ?
+    """
+    params = [start_period, end_period]
+
+    if account_code:
+        query += " AND v.id IN (SELECT voucher_id FROM voucher_lines WHERE account_code=?)"
+        params.append(account_code)
+
+    query += " ORDER BY v.accounting_period, v.voucher_date, v.voucher_no"
+    vouchers = [dict(v) for v in conn.execute(query, params).fetchall()]
+
+    # Get lines for vouchers
+    lines_map = {}
+    for v in vouchers:
+        vid = v["id"]
+        if account_code:
+            lines = [dict(l) for l in conn.execute(
+                "SELECT * FROM voucher_lines WHERE voucher_id=? AND account_code=? ORDER BY id",
+                (vid, account_code)).fetchall()]
+        else:
+            lines = [dict(l) for l in conn.execute(
+                "SELECT * FROM voucher_lines WHERE voucher_id=? ORDER BY id", (vid,)).fetchall()]
+        lines_map[vid] = lines
+
+    # Calculate period subtotals
+    period_subtotals = {}
+    for v in vouchers:
+        p = v["accounting_period"]
+        if p not in period_subtotals:
+            period_subtotals[p] = {"debit": 0.0, "credit": 0.0, "count": 0}
+        period_subtotals[p]["count"] += 1
+        for line in lines_map.get(v["id"], []):
+            if not account_code or line.get("account_code") == account_code:
+                period_subtotals[p]["debit"] += float(line.get("debit", 0) or 0)
+                period_subtotals[p]["credit"] += float(line.get("credit", 0) or 0)
+
+    # Round subtotals
+    for p in period_subtotals:
+        period_subtotals[p]["debit"] = round(period_subtotals[p]["debit"], 2)
+        period_subtotals[p]["credit"] = round(period_subtotals[p]["credit"], 2)
+
+    # Available periods for dropdown
+    all_periods = [dict(p) for p in conn.execute(
+        "SELECT DISTINCT accounting_period FROM accounting_vouchers ORDER BY accounting_period DESC"
+    ).fetchall()]
+
+    accounts_list = [dict(a) for a in conn.execute(
+        "SELECT code, name, account_type FROM chart_of_accounts WHERE is_active=1 ORDER BY code"
+    ).fetchall()]
+
+    conn.close()
+    return render_template("cross_period_books.html",
+        vouchers=vouchers, lines_map=lines_map,
+        period_subtotals=period_subtotals,
+        start_period=start_period, end_period=end_period,
+        account_code=account_code, book_type=book_type,
+        all_periods=all_periods, accounts_list=accounts_list,
+        total_count=len(vouchers))
+
+
+# ========== 方案A: 凭证汇总表 + 科目汇总表 ==========
+
+@accounting_bp.route("/voucher-summary")
+def voucher_summary():
+    """凭证汇总表：按科目汇总已记账凭证的借方/贷方"""
+    conn = get_db()
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+    account_type = request.args.get("account_type", "").strip()
+
+    # Build account filter
+    acct_filter = ""
+    acct_params = []
+    if account_type:
+        acct_filter = " AND a.account_type = ?"
+        acct_params.append(account_type)
+
+    # Query: group voucher_lines by account_code for posted vouchers in period
+    rows = conn.execute(f"""
+        SELECT a.code, a.name, a.account_type, a.balance_direction,
+            COALESCE(SUM(CAST(l.debit AS REAL)), 0) as total_debit,
+            COALESCE(SUM(CAST(l.credit AS REAL)), 0) as total_credit,
+            COUNT(DISTINCT v.id) as voucher_count
+        FROM chart_of_accounts a
+        JOIN voucher_lines l ON l.account_code = a.code
+        JOIN accounting_vouchers v ON v.id = l.voucher_id
+        WHERE v.status = '已记账' AND v.accounting_period = ?{acct_filter}
+        GROUP BY a.code, a.name
+        ORDER BY a.code
+    """, [period] + acct_params).fetchall()
+
+    summary_data = [dict(r) for r in rows]
+
+    # Calculate totals
+    total_debit = sum(d["total_debit"] for d in summary_data)
+    total_credit = sum(d["total_credit"] for d in summary_data)
+    voucher_count = len(set(d["voucher_count"] for d in summary_data))
+    unique_vouchers = conn.execute(
+        "SELECT COUNT(*) as cnt FROM accounting_vouchers WHERE status='已记账' AND accounting_period=?",
+        (period,)).fetchone()["cnt"]
+
+    # Get account type list for filter
+    account_types = [dict(t) for t in conn.execute(
+        "SELECT DISTINCT account_type FROM chart_of_accounts WHERE is_active=1 ORDER BY account_type"
+    ).fetchall()]
+
+    # Available periods for dropdown
+    periods = [dict(p) for p in conn.execute(
+        "SELECT DISTINCT accounting_period FROM accounting_vouchers ORDER BY accounting_period DESC"
+    ).fetchall()]
+
+    conn.close()
+    return render_template("voucher_summary.html",
+        period=period, account_type=account_type,
+        summary_data=summary_data, total_debit=round(total_debit, 2),
+        total_credit=round(total_credit, 2),
+        voucher_count=unique_vouchers,
+        account_types=account_types, periods=periods)
+
+
+@accounting_bp.route("/account-summary")
+def account_summary():
+    """科目汇总表（T型账户式）：期初余额+本期借方+本期贷方+期末余额"""
+    conn = get_db()
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+
+    # Get opening/closing balances from account_balances
+    balances = {}
+    for b in conn.execute(
+        "SELECT account_code, opening_balance, debit_amount, credit_amount, closing_balance "
+        "FROM account_balances WHERE period_id=?",
+        (period,)
+    ).fetchall():
+        balances[b["account_code"]] = dict(b)
+
+    # Get posted voucher line totals for the period
+    period_totals = {}
+    for row in conn.execute("""
+        SELECT l.account_code, 
+            COALESCE(SUM(CAST(l.debit AS REAL)), 0) as period_debit,
+            COALESCE(SUM(CAST(l.credit AS REAL)), 0) as period_credit
+        FROM voucher_lines l
+        JOIN accounting_vouchers v ON v.id = l.voucher_id
+        WHERE v.status = '已记账' AND v.accounting_period = ?
+        GROUP BY l.account_code
+    """, (period,)).fetchall():
+        period_totals[row["account_code"]] = dict(row)
+
+    # Get all active accounts
+    accounts = [dict(a) for a in conn.execute(
+        "SELECT code, name, account_type, balance_direction FROM chart_of_accounts "
+        "WHERE is_active=1 ORDER BY account_type, code"
+    ).fetchall()]
+
+    # Build grouped data
+    account_type_order = ["资产类", "负债类", "权益类", "成本类", "损益类"]
+    groups = {}
+    for at in account_type_order:
+        groups[at] = []
+
+    for a in accounts:
+        at = a["account_type"]
+        if at not in groups:
+            groups[at] = []
+
+        code = a["code"]
+        bal = balances.get(code, {})
+        pt = period_totals.get(code, {})
+
+        opening = bal.get("opening_balance", 0) or 0
+        closing = bal.get("closing_balance", 0) or 0
+        p_debit = pt.get("period_debit", 0) or 0
+        p_credit = pt.get("period_credit", 0) or 0
+
+        groups[at].append({
+            "code": code,
+            "name": a["name"],
+            "account_type": at,
+            "balance_direction": a["balance_direction"],
+            "opening_balance": opening,
+            "period_debit": p_debit,
+            "period_credit": p_credit,
+            "closing_balance": closing,
+        })
+
+    # Calculate group subtotals
+    group_totals = {}
+    for at, items in groups.items():
+        if items:
+            group_totals[at] = {
+                "opening_debit": round(sum(i["opening_balance"] for i in items if i["balance_direction"] == "借"), 2),
+                "opening_credit": round(sum(i["opening_balance"] for i in items if i["balance_direction"] == "贷"), 2),
+                "period_debit": round(sum(i["period_debit"] for i in items), 2),
+                "period_credit": round(sum(i["period_credit"] for i in items), 2),
+                "closing_debit": round(sum(i["closing_balance"] for i in items if i["balance_direction"] == "借"), 2),
+                "closing_credit": round(sum(i["closing_balance"] for i in items if i["balance_direction"] == "贷"), 2),
+            }
+
+    # Available periods
+    periods = [dict(p) for p in conn.execute(
+        "SELECT DISTINCT accounting_period FROM accounting_vouchers ORDER BY accounting_period DESC"
+    ).fetchall()]
+
+    conn.close()
+    return render_template("account_summary.html",
+        period=period, groups=groups, group_totals=group_totals,
+        account_type_order=account_type_order, periods=periods)
+
+
+@accounting_bp.route("/export/voucher-summary")
+def export_voucher_summary():
+    """导出凭证汇总表 Excel"""
+    conn = get_db()
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+    account_type = request.args.get("account_type", "").strip()
+
+    acct_filter = ""
+    acct_params = []
+    if account_type:
+        acct_filter = " AND a.account_type = ?"
+        acct_params.append(account_type)
+
+    rows = conn.execute(f"""
+        SELECT a.code, a.name, a.account_type, a.balance_direction,
+            COALESCE(SUM(CAST(l.debit AS REAL)), 0) as total_debit,
+            COALESCE(SUM(CAST(l.credit AS REAL)), 0) as total_credit,
+            COUNT(DISTINCT v.id) as voucher_count
+        FROM chart_of_accounts a
+        JOIN voucher_lines l ON l.account_code = a.code
+        JOIN accounting_vouchers v ON v.id = l.voucher_id
+        WHERE v.status = '已记账' AND v.accounting_period = ?{acct_filter}
+        GROUP BY a.code, a.name
+        ORDER BY a.code
+    """, [period] + acct_params).fetchall()
+
+    summary_data = [dict(r) for r in rows]
+    total_debit = sum(d["total_debit"] for d in summary_data)
+    total_credit = sum(d["total_credit"] for d in summary_data)
+    unique_vouchers = conn.execute(
+        "SELECT COUNT(*) as cnt FROM accounting_vouchers WHERE status='已记账' AND accounting_period=?",
+        (period,)).fetchone()["cnt"]
+    conn.close()
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "凭证汇总表"
+    hf, tf, mf, hfill, hfw, border = _excel_style()
+
+    ws.merge_cells('A1:F1')
+    ws['A1'] = f"凭证汇总表 - {period}"
+    ws['A1'].font = tf
+    ws['A1'].alignment = Alignment(horizontal='center')
+
+    row = 3
+    headers = ["科目编码", "科目名称", "科目类别", "借方金额", "贷方金额", "凭证张数"]
+    for col, val in enumerate(headers, 1):
+        cell = ws.cell(row=row, column=col, value=val)
+        cell.font = hfw; cell.fill = hfill; cell.border = border
+        cell.alignment = Alignment(horizontal='center')
+
+    row = 4
+    for d in summary_data:
+        ws.cell(row=row, column=1, value=d["code"]).border = border
+        ws.cell(row=row, column=2, value=d["name"]).border = border
+        ws.cell(row=row, column=3, value=d["account_type"]).border = border
+        c4 = ws.cell(row=row, column=4, value=d["total_debit"])
+        c4.number_format = mf; c4.border = border
+        c5 = ws.cell(row=row, column=5, value=d["total_credit"])
+        c5.number_format = mf; c5.border = border
+        ws.cell(row=row, column=6, value=d["voucher_count"]).border = border
+        row += 1
+
+    # Totals row
+    ws.cell(row=row, column=1, value="合计").border = border
+    ws.cell(row=row, column=1).font = hf
+    ws.cell(row=row, column=2).border = border
+    ws.cell(row=row, column=3).border = border
+    c4 = ws.cell(row=row, column=4, value=round(total_debit, 2))
+    c4.number_format = mf; c4.border = border; c4.font = hf
+    c5 = ws.cell(row=row, column=5, value=round(total_credit, 2))
+    c5.number_format = mf; c5.border = border; c5.font = hf
+    ws.cell(row=row, column=6, value=unique_vouchers).border = border
+    ws.cell(row=row, column=6).font = hf
+
+    ws.column_dimensions['A'].width = 16
+    ws.column_dimensions['B'].width = 28
+    ws.column_dimensions['C'].width = 14
+    ws.column_dimensions['D'].width = 18
+    ws.column_dimensions['E'].width = 18
+    ws.column_dimensions['F'].width = 12
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return send_file(output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    as_attachment=True, download_name=f"凭证汇总表_{period}.xlsx")
+
+
+# ========== 方案B: 存货核算模块 ==========
+
+@accounting_bp.route("/inventory-categories", methods=["GET", "POST"])
+def inventory_categories():
+    """存货分类管理"""
+    conn = get_db()
+    message = None
+    error = None
+
+    if request.method == "POST":
+        code = request.form.get("code", "").strip()
+        name = request.form.get("name", "").strip()
+        parent_id = request.form.get("parent_id", "").strip() or None
+        notes = request.form.get("notes", "").strip() or None
+        now = datetime.now().isoformat()
+        cat_id = str(uuid.uuid4())
+
+        if not code or not name:
+            error = "分类编码和名称不能为空"
+        else:
+            try:
+                conn.execute(
+                    "INSERT INTO inventory_categories (id, code, name, parent_id, sort_order, notes, created_at) "
+                    "VALUES (?, ?, ?, ?, 0, ?, ?)",
+                    (cat_id, code, name, parent_id, notes, now))
+                conn.commit()
+                message = f"分类 {name} 创建成功"
+            except Exception as e:
+                error = f"创建失败: {e}"
+
+    categories = [dict(c) for c in conn.execute(
+        "SELECT * FROM inventory_categories ORDER BY sort_order, code"
+    ).fetchall()]
+
+    conn.close()
+    return render_template("inventory_categories.html",
+        categories=categories, message=message, error=error)
+
+
+@accounting_bp.route("/inventory-summary")
+def inventory_summary():
+    """存货收发存汇总表"""
+    conn = get_db()
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+    category_id = request.args.get("category_id", "").strip()
+
+    # Get all quantity-enabled accounts
+    q_accounts = [dict(a) for a in conn.execute(
+        "SELECT code, name, account_type, balance_direction, COALESCE(is_quantity_account,0) as is_quantity_account "
+        "FROM chart_of_accounts WHERE is_active=1 AND is_quantity_account=1 ORDER BY code"
+    ).fetchall()]
+
+    # Get previous period (for opening quantities/amounts)
+    prev_period = None
+    parts = period.split("-")
+    if len(parts) == 2:
+        y, m = int(parts[0]), int(parts[1])
+        if m == 1:
+            prev_period = f"{y-1}-12"
+        else:
+            prev_period = f"{y}-{m-1:02d}"
+
+    # Get opening balances from previous period's closing
+    opening_map = {}
+    if prev_period:
+        for b in conn.execute(
+            "SELECT account_code, closing_balance FROM account_balances WHERE period_id=?",
+            (prev_period,)
+        ).fetchall():
+            opening_map[b["account_code"]] = b["closing_balance"] or 0
+
+    # Get period debit/credit totals with quantities
+    period_data = {}
+    for row in conn.execute("""
+        SELECT l.account_code,
+            COALESCE(SUM(CAST(l.debit AS REAL)), 0) as debit_amount,
+            COALESCE(SUM(CAST(l.credit AS REAL)), 0) as credit_amount,
+            COALESCE(SUM(CASE WHEN l.debit > 0 THEN COALESCE(l.quantity, 0) ELSE 0 END), 0) as debit_qty,
+            COALESCE(SUM(CASE WHEN l.credit > 0 THEN COALESCE(l.quantity, 0) ELSE 0 END), 0) as credit_qty
+        FROM voucher_lines l
+        JOIN accounting_vouchers v ON v.id = l.voucher_id
+        WHERE v.status = '已记账' AND v.accounting_period = ?
+        GROUP BY l.account_code
+    """, (period,)).fetchall():
+        period_data[row["account_code"]] = dict(row)
+
+    # Build summary
+    summary = []
+    for acc in q_accounts:
+        code = acc["code"]
+        pd = period_data.get(code, {})
+        opening_amount = opening_map.get(code, 0)
+
+        debit_amount = pd.get("debit_amount", 0) or 0
+        credit_amount = pd.get("credit_amount", 0) or 0
+        debit_qty = pd.get("debit_qty", 0) or 0
+        credit_qty = pd.get("credit_qty", 0) or 0
+
+        # Estimate opening quantity from opening amount and average unit price
+        opening_qty = 0.0
+        if prev_period:
+            prev_qty_row = conn.execute("""
+                SELECT COALESCE(SUM(CASE WHEN l.debit > 0 THEN COALESCE(l.quantity, 0) 
+                    ELSE -COALESCE(l.quantity, 0) END), 0) as cum_qty
+                FROM voucher_lines l
+                JOIN accounting_vouchers v ON v.id = l.voucher_id
+                WHERE v.status = '已记账' AND v.accounting_period <= ?
+                  AND l.account_code = ?
+            """, (prev_period, code)).fetchone()
+            opening_qty = prev_qty_row["cum_qty"] if prev_qty_row else 0
+
+        in_qty = debit_qty
+        in_amount = debit_amount
+        out_qty = credit_qty
+        out_amount = credit_amount
+        closing_qty = (opening_qty or 0) + in_qty - out_qty
+        closing_amount = opening_amount + in_amount - out_amount
+
+        summary.append({
+            "code": code,
+            "name": acc["name"],
+            "account_type": acc["account_type"],
+            "balance_direction": acc["balance_direction"],
+            "opening_qty": round(opening_qty or 0, 4),
+            "opening_amount": round(opening_amount, 2),
+            "in_qty": round(in_qty, 4),
+            "in_amount": round(in_amount, 2),
+            "out_qty": round(out_qty, 4),
+            "out_amount": round(out_amount, 2),
+            "closing_qty": round(closing_qty, 4),
+            "closing_amount": round(closing_amount, 2),
+        })
+
+    # Get categories for filter
+    categories = [dict(c) for c in conn.execute(
+        "SELECT * FROM inventory_categories ORDER BY sort_order, code"
+    ).fetchall()]
+
+    # Available periods
+    periods = [dict(p) for p in conn.execute(
+        "SELECT DISTINCT accounting_period FROM accounting_vouchers ORDER BY accounting_period DESC"
+    ).fetchall()]
+
+    conn.close()
+    return render_template("inventory_summary.html",
+        period=period, category_id=category_id,
+        summary=summary, categories=categories, periods=periods)
+
+
+@accounting_bp.route("/inventory-ledger")
+def inventory_ledger():
+    """存货明细账"""
+    conn = get_db()
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+    account_code = request.args.get("account_code", "").strip()
+
+    # Get quantity-enabled accounts for dropdown
+    accounts_list = [dict(a) for a in conn.execute(
+        "SELECT code, name, account_type, balance_direction, COALESCE(is_quantity_account,0) as is_quantity_account "
+        "FROM chart_of_accounts WHERE is_active=1 AND is_quantity_account=1 ORDER BY code"
+    ).fetchall()]
+
+    # Available periods
+    periods = [dict(p) for p in conn.execute(
+        "SELECT DISTINCT accounting_period FROM accounting_vouchers ORDER BY accounting_period DESC"
+    ).fetchall()]
+
+    if not period and periods:
+        period = periods[0]["accounting_period"]
+
+    acc_info = None
+    ledger_data = []
+
+    if period and account_code:
+        # Get account info
+        acc_info_row = conn.execute(
+            "SELECT code, name, account_type, balance_direction, COALESCE(is_quantity_account,0) as is_quantity_account "
+            "FROM chart_of_accounts WHERE code=?",
+            (account_code,)).fetchone()
+        acc_info = dict(acc_info_row) if acc_info_row else None
+
+        # Get all voucher lines for this account in this period
+        items = conn.execute("""
+            SELECT v.voucher_no, v.voucher_date, v.summary as voucher_summary,
+                   l.debit, l.credit, l.summary as line_summary,
+                   COALESCE(l.quantity, 0) as quantity,
+                   COALESCE(l.unit, '') as unit,
+                   COALESCE(l.unit_price, 0) as unit_price,
+                   v.status
+            FROM voucher_lines l
+            JOIN accounting_vouchers v ON v.id = l.voucher_id
+            WHERE l.account_code = ? AND v.accounting_period = ? AND v.status = '已记账'
+            ORDER BY v.voucher_date, v.voucher_no
+        """, (account_code, period)).fetchall()
+
+        # Calculate running balances
+        running_qty = 0.0
+        running_amount = 0.0
+
+        # Get opening balance and quantity from previous periods
+        if acc_info and acc_info["balance_direction"] == "借":
+            # For debit-nature accounts, opening balance is cumulative
+            opening_bal_row = conn.execute(
+                "SELECT closing_balance FROM account_balances WHERE account_code=? AND period_id<? ORDER BY period_id DESC LIMIT 1",
+                (account_code, period)).fetchone()
+            opening_amount = float(opening_bal_row["closing_balance"] or 0) if opening_bal_row else 0
+        else:
+            opening_bal_row = conn.execute(
+                "SELECT closing_balance FROM account_balances WHERE account_code=? AND period_id<? ORDER BY period_id DESC LIMIT 1",
+                (account_code, period)).fetchone()
+            opening_amount = float(opening_bal_row["closing_balance"] or 0) if opening_bal_row else 0
+
+        # Get opening quantity from all previous periods
+        opening_qty = 0.0
+        prev_qty_row = conn.execute("""
+            SELECT COALESCE(SUM(CASE WHEN CAST(l.debit AS REAL) > 0 THEN COALESCE(l.quantity, 0) 
+                ELSE -COALESCE(l.quantity, 0) END), 0) as cum_qty
+            FROM voucher_lines l
+            JOIN accounting_vouchers v ON v.id = l.voucher_id
+            WHERE v.status = '已记账' AND v.accounting_period < ?
+              AND l.account_code = ?
+        """, (period, account_code)).fetchone()
+        opening_qty = float(prev_qty_row["cum_qty"] or 0) if prev_qty_row else 0
+
+        running_qty = opening_qty
+        running_amount = opening_amount
+
+        for item in items:
+            d = dict(item)
+            debit_amt = float(d.get("debit", 0) or 0)
+            credit_amt = float(d.get("credit", 0) or 0)
+            qty = float(d.get("quantity", 0) or 0)
+            unit_price = float(d.get("unit_price", 0) or 0)
+            direction = acc_info["balance_direction"] if acc_info else "借"
+
+            if debit_amt > 0:
+                in_qty = qty
+                in_price = unit_price
+                in_amount = debit_amt
+                out_qty = 0
+                out_price = 0
+                out_amount = 0
+                running_qty += in_qty
+                running_amount += debit_amt
+            else:
+                in_qty = 0
+                in_price = 0
+                in_amount = 0
+                out_qty = qty
+                out_price = unit_price
+                out_amount = credit_amt
+                running_qty -= out_qty
+                running_amount -= credit_amt
+
+            ledger_data.append({
+                "voucher_date": d["voucher_date"],
+                "voucher_no": d["voucher_no"],
+                "summary": d.get("line_summary", "") or d.get("voucher_summary", ""),
+                "in_qty": round(in_qty, 4),
+                "in_price": round(in_price, 4),
+                "in_amount": round(in_amount, 2),
+                "out_qty": round(out_qty, 4),
+                "out_price": round(out_price, 4),
+                "out_amount": round(out_amount, 2),
+                "balance_qty": round(running_qty, 4),
+                "balance_amount": round(running_amount, 2),
+            })
+
+    conn.close()
+    return render_template("inventory_ledger.html",
+        period=period, account_code=account_code,
+        accounts_list=accounts_list, periods=periods,
+        acc_info=acc_info, ledger_data=ledger_data,
+        opening_qty=round(opening_qty, 4) if 'opening_qty' in dir() else 0,
+        opening_amount=round(opening_amount, 2) if 'opening_amount' in dir() else 0)

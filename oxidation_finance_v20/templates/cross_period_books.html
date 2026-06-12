@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}跨期间账簿查询 - 氧化加工厂财务系统{% endblock %}
+{% block head_extra %}
+<style>
+    .filter-bar { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
+    .filter-bar select, .filter-bar input { padding: 8px 12px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; }
+    .empty-state { text-align: center; padding: 40px; color: #999; }
+    .num { text-align: right; font-family: "SF Mono", Monaco, monospace; }
+    .summary-card { background: #f0f5ff; padding: 15px; border-radius: 6px; margin-bottom: 20px; display: flex; gap: 30px; flex-wrap: wrap; }
+    .summary-card .sum-item { font-size: 14px; }
+    .summary-card .sum-item strong { color: #1890ff; }
+    .period-section { margin-bottom: 25px; border: 1px solid #e8e8e8; border-radius: 6px; overflow: hidden; }
+    .period-header { background: #fafafa; padding: 12px 15px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e8e8e8; }
+    .period-header h3 { font-size: 15px; color: #333; margin: 0; }
+    .period-header .ph-stats { display: flex; gap: 20px; font-size: 13px; color: #666; }
+    .period-header .ph-stats span strong { color: #333; }
+    .period-body { padding: 0; }
+    .period-body table { margin: 0; }
+    .period-body th { background: #f5f5f5; }
+</style>
+{% endblock %}
+{% block breadcrumb %}
+<div class="breadcrumb">
+    <a href="/">首页</a>
+    <span class="sep">›</span>
+    <span>跨期间账簿</span>
+</div>
+{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>跨期间账簿查询</h2>
+    <div class="filter-bar">
+        <form method="GET" style="display:contents;">
+            <label>起始期间：</label>
+            <select name="start_period">
+                {% for p in periods %}
+                <option value="{{ p }}" {% if start_period == p %}selected{% endif %}>{{ p }}</option>
+                {% endfor %}
+            </select>
+            <label>截止期间：</label>
+            <select name="end_period">
+                {% for p in periods %}
+                <option value="{{ p }}" {% if end_period == p %}selected{% endif %}>{{ p }}</option>
+                {% endfor %}
+            </select>
+            <label>科目编码：</label>
+            <input type="text" name="account_code" placeholder="可选" value="{{ account_code or '' }}" style="width:150px;">
+            <label>账簿类型：</label>
+            <select name="book_type">
+                <option value="detail" {% if book_type == 'detail' %}selected{% endif %}>明细账</option>
+                <option value="ledger" {% if book_type == 'ledger' %}selected{% endif %}>总账</option>
+                <option value="balance" {% if book_type == 'balance' %}selected{% endif %}>余额表</option>
+            </select>
+            <button type="submit" class="btn btn-sm">查询</button>
+        </form>
+    </div>
+
+    {% if message %}
+    <div class="message message-info">{{ message }}</div>
+    {% endif %}
+
+    {% if vouchers %}
+    {% set total_voucher_count = namespace(val=0) %}
+    {% set cross_period_count = 0 %}
+    {% for period_key, subtotal in period_subtotals.items() %}
+        {% set total_voucher_count.val = total_voucher_count.val + subtotal.count %}
+        {% set cross_period_count = cross_period_count + 1 %}
+    {% endfor %}
+
+    <div class="summary-card">
+        <div class="sum-item">起始期间：<strong>{{ start_period }}</strong></div>
+        <div class="sum-item">截止期间：<strong>{{ end_period }}</strong></div>
+        <div class="sum-item">总凭证数：<strong>{{ total_voucher_count.val }}</strong></div>
+        <div class="sum-item">跨期数：<strong>{{ cross_period_count }}</strong></div>
+    </div>
+
+    {% for period_key, subtotal in period_subtotals.items() %}
+        {% if subtotal.vouchers %}
+        <div class="period-section">
+            <div class="period-header">
+                <h3>{{ period_key }}</h3>
+                <div class="ph-stats">
+                    <span>凭证数：<strong>{{ subtotal.count }}</strong></span>
+                    <span>借方合计：<strong>{{ '%.2f'|format(subtotal.debit_total) }}</strong></span>
+                    <span>贷方合计：<strong>{{ '%.2f'|format(subtotal.credit_total) }}</strong></span>
+                </div>
+            </div>
+            <div class="period-body">
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>日期</th>
+                                <th>凭证号</th>
+                                <th>摘要</th>
+                                <th>科目编码</th>
+                                <th>科目名称</th>
+                                <th class="num">借方金额</th>
+                                <th class="num">贷方金额</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% set p_debit = namespace(val=0) %}
+                            {% set p_credit = namespace(val=0) %}
+                            {% for v in subtotal.vouchers %}
+                                {% for line in lines_map.get(v.id, []) %}
+                                <tr>
+                                    <td>{{ v.voucher_date }}</td>
+                                    <td>{{ v.voucher_no }}</td>
+                                    <td>{{ v.description or '-' }}</td>
+                                    <td>{{ line.account_code }}</td>
+                                    <td>{{ line.account_name }}</td>
+                                    <td class="num">{% if line.debit_amount and line.debit_amount|float > 0 %}{{ '%.2f'|format(line.debit_amount|float) }}{% endif %}</td>
+                                    <td class="num">{% if line.credit_amount and line.credit_amount|float > 0 %}{{ '%.2f'|format(line.credit_amount|float) }}{% endif %}</td>
+                                </tr>
+                                {% endfor %}
+                            {% endfor %}
+                        </tbody>
+                        <tfoot>
+                            <tr style="font-weight:bold;background:#fafafa;border-top:2px solid #333;">
+                                <td colspan="5">本期小计</td>
+                                <td class="num">{{ '%.2f'|format(subtotal.debit_total) }}</td>
+                                <td class="num">{{ '%.2f'|format(subtotal.credit_total) }}</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    {% endfor %}
+
+    {% else %}
+    <div class="empty-state">请选择查询条件后点击查询</div>
+    {% endif %}
+</div>
+{% endblock %}
