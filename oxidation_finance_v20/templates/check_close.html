@@ -1,79 +1,123 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>月末结账检查 - 氧化加工厂财务系统</title>
+{% extends "base.html" %}
+{% block title %}月末结账检查 - 氧化加工厂财务系统{% endblock %}
+{% block head_extra %}
 <style>
-* { margin:0; padding:0; box-sizing:border-box; }
-body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#f5f5f5; }
-.container { max-width:800px; margin:0 auto; padding:20px; }
-.header { background:#1890ff; color:white; padding:18px 20px; margin-bottom:20px; }
-.header h1 { font-size:20px; }
-.nav { background:white; padding:10px 20px; margin-bottom:20px; box-shadow:0 2px 4px rgba(0,0,0,0.1); }
-.nav a { color:#333; text-decoration:none; margin-right:20px; font-size:14px; }
-.nav a:hover, .nav a.active { color:#1890ff; font-weight:600; }
-.card { background:white; padding:20px; margin-bottom:20px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.1); }
-.card h2 { font-size:18px; margin-bottom:15px; }
-.check-list { }
-.check-row { display:flex; align-items:center; padding:12px 15px; margin-bottom:8px; border-radius:6px; }
-.check-pass { background:#f6ffed; }
-.check-fail { background:#fff1f0; }
-.check-icon { font-size:20px; margin-right:12px; }
-.check-info { flex:1; }
-.check-title { font-size:14px; font-weight:600; }
-.check-detail { font-size:12px; color:#888; margin-top:2px; }
-.btn { display:inline-block; padding:10px 24px; background:#1890ff; color:white; border-radius:4px; border:none; cursor:pointer; font-size:14px; text-decoration:none; }
-.btn:hover { background:#40a9ff; }
-.btn-success { background:#52c41a; }
-.btn-success:hover { background:#73d13d; }
-.btn-warning { background:#fa8c16; }
-.btn-danger { background:#f5222d; }
-.btn-group { display:flex; gap:10px; margin-top:15px; }
-.banner { padding:15px; border-radius:6px; margin-bottom:15px; text-align:center; font-size:15px; font-weight:600; }
-.banner-ok { background:#f6ffed; color:#52c41a; border:1px solid #b7eb8f; }
-.banner-err { background:#fff1f0; color:#f5222d; border:1px solid #ffa39e; }
+    .check-list { }
+    .check-row { display:flex; align-items:center; padding:14px 16px; margin-bottom:8px; border-radius:8px; gap:12px; }
+    .check-pass { background:#f6ffed; border-left:4px solid #52c41a; }
+    .check-warn { background:#fffbe6; border-left:4px solid #faad14; }
+    .check-fail { background:#fff1f0; border-left:4px solid #f5222d; }
+    .check-icon { font-size:22px; flex-shrink:0; width:28px; text-align:center; }
+    .check-info { flex:1; min-width:0; }
+    .check-title { font-size:15px; font-weight:600; }
+    .check-detail { font-size:13px; color:#666; margin-top:3px; }
+    .check-items { margin-top:6px; padding-left:8px; }
+    .check-item { font-size:12px; color:#999; padding:2px 0; }
+    .check-actions { flex-shrink:0; }
+    .btn { display:inline-block; padding:10px 24px; background:#1890ff; color:white; border-radius:4px; border:none; cursor:pointer; font-size:14px; text-decoration:none; }
+    .btn:hover { background:#40a9ff; }
+    .btn-sm { padding:6px 14px; font-size:12px; }
+    .btn-success { background:#52c41a; }
+    .btn-success:hover { background:#73d13d; }
+    .btn-warning { background:#fa8c16; color:#fff; }
+    .btn-warning:hover { background:#ffa940; }
+    .btn-danger { background:#f5222d; color:#fff; }
+    .btn-danger:hover { background:#ff4d4f; }
+    .btn-outline { background:#fff; color:#1890ff; border:1px solid #1890ff; }
+    .btn-outline:hover { background:#e6f7ff; }
+    .btn-group { display:flex; gap:10px; margin-top:20px; flex-wrap:wrap; }
+    .banner { padding:16px; border-radius:8px; margin-bottom:16px; text-align:center; font-size:15px; font-weight:600; }
+    .banner-ok { background:#f6ffed; color:#52c41a; border:1px solid #b7eb8f; }
+    .banner-warn { background:#fffbe6; color:#d48806; border:1px solid #ffe58f; }
+    .banner-err { background:#fff1f0; color:#f5222d; border:1px solid #ffa39e; }
+    .summary-bar { display:flex; gap:16px; margin-bottom:15px; font-size:13px; }
+    .summary-item { display:flex; align-items:center; gap:6px; }
+    .summary-dot { width:10px; height:10px; border-radius:50%; }
+    .dot-pass { background:#52c41a; }
+    .dot-warn { background:#faad14; }
+    .dot-fail { background:#f5222d; }
+    .message { padding:10px 16px; border-radius:4px; margin-bottom:16px; font-size:14px; }
+    .message-success { background:#f6ffed; border:1px solid #b7eb8f; color:#52c41a; }
+    .message-error { background:#fff1f0; border:1px solid #ffa39e; color:#f5222d; }
 </style>
-</head>
-<body>
-<div class="header"><div class="container"><h1>月末结账检查</h1></div></div>
-<div class="nav"><div class="container">
-<a href="/">首页</a><a href="/accounting-books">账簿</a><a href="/check-before-close" class="active">结账检查</a>
-<a href="/fixed-assets">固定资产</a><a href="/system-settings">设置</a>
-</div></div>
-<div class="container">
+{% endblock %}
+{% block breadcrumb %}
+<div class="breadcrumb"><a href="/">首页</a><span class="sep">›</span><a href="/accounting-books">会计账簿</a><span class="sep">›</span><span>结账检查</span></div>
+{% endblock %}
+{% block content %}
+{% if message %}
+<div class="message message-success">{{ message }}</div>
+{% endif %}
+{% if error %}
+<div class="message message-error">{{ error }}</div>
+{% endif %}
+
 <div class="card">
-<h2>检查项目 - {{ period }}</h2>
-{% if all_ok %}
-<div class="banner banner-ok">全部检查通过，可以执行月末结账</div>
-{% else %}
-<div class="banner banner-err">存在未通过的检查项，请处理后再结账</div>
-{% endif %}
-<div class="check-list">
-{% for key, c in checks.items() %}
-<div class="check-row {{ 'check-pass' if c.pass else 'check-fail' }}">
-<div class="check-icon">{{ '✅' if c.pass else '❌' }}</div>
-<div class="check-info">
-<div class="check-title">{{ {'all_posted':'凭证是否全部记账','balanced':'试算是否平衡','profit_closed':'损益是否已结转','depreciated':'折旧是否已计提','not_closed':'期间是否可关闭'}.get(key, key) }}</div>
-<div class="check-detail">{{ c.detail }}</div>
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <h2>检查项目 - {{ period }}</h2>
+        <div class="summary-bar">
+            <div class="summary-item"><span class="summary-dot dot-pass"></span> 通过: {{ checks.values()|selectattr('level','equalto','pass')|list|length }}</div>
+            <div class="summary-item"><span class="summary-dot dot-warn"></span> 警告: {{ warn_count }}</div>
+            <div class="summary-item"><span class="summary-dot dot-fail"></span> 未通过: {{ fail_count }}</div>
+        </div>
+    </div>
+
+    {% if all_ok %}
+    <div class="banner banner-ok">全部检查通过，可以执行月末结账</div>
+    {% elif fail_count > 0 %}
+    <div class="banner banner-err">存在 {{ fail_count }} 项未通过，请处理后再结账</div>
+    {% else %}
+    <div class="banner banner-warn">存在 {{ warn_count }} 项警告，建议处理后结账</div>
+    {% endif %}
+
+    <div class="check-list">
+        {% for key, c in checks.items() %}
+        {% set icon = '&#9989;' if c.level == 'pass' else ('&#9888;' if c.level == 'warn' else '&#10060;') %}
+        {% set row_class = 'check-pass' if c.level == 'pass' else ('check-warn' if c.level == 'warn' else 'check-fail') %}
+        <div class="check-row {{ row_class }}">
+            <div class="check-icon">{{ icon|safe }}</div>
+            <div class="check-info">
+                <div class="check-title">{{ c.title }}</div>
+                <div class="check-detail">{{ c.detail }}</div>
+                {% if c.get('items') %}
+                <div class="check-items">
+                    {% for item in c.get('items', [])[:5] %}
+                    <div class="check-item">{{ item.no }}{% if item.status %} ({{ item.status }}){% endif %}{% if item.summary %} - {{ item.summary }}{% endif %}</div>
+                    {% endfor %}
+                    {% if c.get('items', [])|length > 5 %}
+                    <div class="check-item">... 共 {{ c.get('items', [])|length }} 条</div>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+            <div class="check-actions">
+                {% if c.can_fix %}
+                <form method="POST" style="display:inline;" onsubmit="return confirm('确定执行 {{ c.fix_label }}？')">
+                    <input type="hidden" name="action" value="auto_fix">
+                    <input type="hidden" name="fix_type" value="{{ c.fix_type }}">
+                    <button type="submit" class="btn btn-sm btn-outline">{{ c.fix_label }}</button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="btn-group">
+        {% if all_ok %}
+        <a href="/accounting-books?type=periods" class="btn btn-success">执行月末结账</a>
+        {% else %}
+        <a href="/vouchers" class="btn">去处理凭证</a>
+        <a href="/fixed-assets" class="btn btn-warning">计提折旧</a>
+        <a href="/profit-carry-forward" class="btn">结转损益</a>
+        {% endif %}
+        {% if has_posted and is_closed %}
+        <form method="POST" style="display:inline;">
+            <input type="hidden" name="action" value="rollback">
+            <button type="submit" class="btn btn-danger" onclick="return confirm('确定取消结账？这将删除结转凭证并重新打开期间。')">取消结账（回滚）</button>
+        </form>
+        {% endif %}
+    </div>
 </div>
-</div>
-{% endfor %}
-</div>
-<div class="btn-group">
-{% if all_ok %}
-<a href="/accounting-books?type=periods" class="btn btn-success">执行月末结账</a>
-{% else %}
-<a href="/vouchers" class="btn">去处理凭证</a>
-<a href="/fixed-assets" class="btn btn-warning">计提折旧</a>
-{% endif %}
-{% if has_posted and is_closed %}
-<form method="POST" style="display:inline;">
-<input type="hidden" name="action" value="rollback">
-<button type="submit" class="btn btn-danger" onclick="return confirm('确定取消结账？这将删除结转凭证并重新打开期间。')">取消结账（回滚）</button>
-</form>
-{% endif %}
-</div>
-</div>
-</div>
-</body>
-</html>
+{% endblock %}
+{% block scripts %}{% endblock %}

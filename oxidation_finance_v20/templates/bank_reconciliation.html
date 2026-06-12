@@ -1,8 +1,6 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>银行对账 - 氧化加工厂财务系统</title>
+{% extends "base.html" %}
+{% block title %}银行对账 - 氧化加工厂财务系统{% endblock %}
+{% block head_extra %}
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f0f2f5; }
@@ -49,123 +47,118 @@
         .text-green { color: #52c41a; }
         .text-red { color: #f5222d; }
     </style>
-</head>
-<body>
-<div class="header"><div class="container"><h1>银行对账</h1></div></div>
-<div class="nav"><div class="container">
-    <a href="/">首页</a><a href="/orders">订单</a><a href="/customers">客户</a>
-    <a href="/reports">报表</a><a href="/chart-of-accounts">会计科目</a>
-    <a href="/vouchers">会计凭证</a><a href="/accounting-books">会计账簿</a>
-    <a href="/fixed-assets">固定资产</a><a href="/bank-reconciliation" class="active">银行对账</a>
-    <a href="/system-settings">系统设置</a>
-</div></div>
-
-<div class="container">
-    {% if message %}<div class="flash flash-s">{{ message }}</div>{% endif %}
-    {% if error %}<div class="flash flash-e">{{ error }}</div>{% endif %}
-
-    <div class="panel">
-        <div class="panel-hd">
-            <h2>对账面板</h2>
-            <div style="display:flex;gap:8px;">
-                <form method="POST" style="display:contents;">
-                    <input type="hidden" name="action" value="import_bank_stmt">
-                    <input type="hidden" name="operator" value="管理员">
-                    <button class="btn btn-sm btn-outline" onclick="return confirm('导入该银行该期间所有收支为银行对账单项目？')">导入银行流水</button>
-                </form>
-                <form method="POST" style="display:contents;">
-                    <input type="hidden" name="action" value="auto_match">
-                    <input type="hidden" name="operator" value="管理员">
-                    <button class="btn btn-sm btn-success" onclick="return confirm('自动按金额+日期匹配勾稽？')">自动匹配</button>
-                </form>
-            </div>
-        </div>
-        <div class="panel-bd">
-            <div class="filter-bar">
-                <form method="GET" style="display:flex;gap:12px;align-items:center;">
-                    <label>银行账户：</label>
-                    <select name="bank_type" onchange="this.form.submit()">
-                        {% for b in bank_types %}<option value="{{ b.bank_type }}" {% if bank_type==b.bank_type %}selected{% endif %}>{{ b.bank_type }}</option>{% endfor %}
-                        {% if not bank_types %}<option>对公账户</option>{% endif %}
-                    </select>
-                    <label>期间：</label>
-                    <input type="text" name="period" value="{{ period }}" placeholder="YYYY-MM" style="width:100px;" onchange="this.form.submit()">
-                </form>
-            </div>
-
-            <!-- Summary -->
-            <div class="summary-cards">
-                <div class="sc"><div class="l">对账单未勾稽</div><div class="v text-red">{{ '%.0f'|format(bank_stmt_total) }}</div><div class="s">{{ bank_stmt|selectattr('matched','equalto',0)|list|length }} 笔</div></div>
-                <div class="sc"><div class="l">企业未勾稽收入</div><div class="v text-green">{{ '%.0f'|format(book_income_total) }}</div><div class="s">{{ book_income|length }} 笔</div></div>
-                <div class="sc"><div class="l">企业未勾稽支出</div><div class="v text-red">{{ '%.0f'|format(book_expense_total) }}</div><div class="s">{{ book_expense|length }} 笔</div></div>
-                <div class="sc"><div class="l">已勾稽</div><div class="v" style="color:#1890ff;">{{ '%.0f'|format(recon_total) }}</div><div class="s">{{ recon_items|length }} 笔</div></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Unmatched items for manual reconciliation -->
-    <div class="grid2">
-        <!-- Bank Statement -->
-        <div class="panel">
-            <div class="panel-hd"><h2>银行对账单 (未勾稽)</h2></div>
-            <div class="panel-bd">
-                {% set unmatched = bank_stmt|selectattr('matched','equalto',0)|list %}
-                {% if unmatched %}
-                <table>
-                    <thead><tr><th>日期</th><th>对方</th><th class="num">金额</th><th>描述</th></tr></thead>
-                    <tbody>
-                    {% for b in unmatched %}
-                    <tr><td>{{ b.transaction_date }}</td><td>{{ b.counterparty or '-' }}</td>
-                        <td class="num">{{ '%.2f'|format(b.amount|float) }}</td>
-                        <td>{{ b.description or '-' }}</td></tr>
-                    {% endfor %}
-                    </tbody>
-                </table>
-                {% else %}<div style="color:#999;text-align:center;padding:20px;">无未勾稽银行项目</div>{% endif %}
-            </div>
-        </div>
-
-        <!-- Book Items -->
-        <div class="panel">
-            <div class="panel-hd"><h2>企业账面 (未勾稽)</h2></div>
-            <div class="panel-bd">
-                {% if book_income or book_expense %}
-                <table>
-                    <thead><tr><th>类型</th><th>日期</th><th>对象</th><th class="num">金额</th></tr></thead>
-                    <tbody>
-                    {% for inc in book_income[:10] %}
-                    <tr><td><span class="tag tag-g">收入</span></td><td>{{ inc.date }}</td><td>{{ inc.name }}</td>
-                        <td class="num text-green">{{ '%.2f'|format(inc.amount) }}</td></tr>
-                    {% endfor %}
-                    {% for exp in book_expense[:10] %}
-                    <tr><td><span class="tag tag-r">支出</span></td><td>{{ exp.date }}</td><td>{{ exp.name or exp.expense_type }}</td>
-                        <td class="num text-red">{{ '%.2f'|format(exp.amount) }}</td></tr>
-                    {% endfor %}
-                    </tbody>
-                </table>
-                {% else %}<div style="color:#999;text-align:center;padding:20px;">无未勾稽企业项目</div>{% endif %}
-            </div>
-        </div>
-    </div>
-
-    <!-- Reconciled Items -->
-    <div class="panel">
-        <div class="panel-hd"><h2>已勾稽项 ({{ recon_items|length }} 笔)</h2></div>
-        <div class="panel-bd">
-            {% if recon_items %}
-            <table>
-                <thead><tr><th>类型</th><th class="num">金额</th><th>勾稽时间</th><th>操作人</th></tr></thead>
-                <tbody>
-                {% for r in recon_items %}
-                <tr><td><span class="tag tag-b">{{ {'income':'收入','expense':'支出'}.get(r.book_item_type, r.book_item_type) }}</span></td>
-                    <td class="num">{{ '%.2f'|format(r.amount|float) }}</td>
-                    <td>{{ r.reconciled_at[:16] }}</td><td>{{ r.reconcilied_by }}</td></tr>
-                {% endfor %}
-                </tbody>
-            </table>
-            {% else %}<div style="color:#999;text-align:center;padding:20px;">暂无已勾稽项，使用"导入银行流水"和"自动匹配"开始对账</div>{% endif %}
-        </div>
-    </div>
+{% endblock %}
+{% block breadcrumb %}
+<div class="breadcrumb">
+    <a href="/">首页</a> <span class="sep">›</span> <a href="/vouchers">会计</a> <span class="sep">›</span> 银行对账
 </div>
-</body>
-</html>
+{% endblock %}
+{% block content %}
+    <div class="container">
+        {% if message %}<div class="flash flash-s">{{ message }}</div>{% endif %}
+        {% if error %}<div class="flash flash-e">{{ error }}</div>{% endif %}
+
+        <div class="panel">
+            <div class="panel-hd">
+                <h2>对账面板</h2>
+                <div style="display:flex;gap:8px;">
+                    <form method="POST" style="display:contents;">
+                        <input type="hidden" name="action" value="import_bank_stmt">
+                        <input type="hidden" name="operator" value="管理员">
+                        <button class="btn btn-sm btn-outline" onclick="return confirm('导入该银行该期间所有收支为银行对账单项目？')">导入银行流水</button>
+                    </form>
+                    <form method="POST" style="display:contents;">
+                        <input type="hidden" name="action" value="auto_match">
+                        <input type="hidden" name="operator" value="管理员">
+                        <button class="btn btn-sm btn-success" onclick="return confirm('自动按金额+日期匹配勾稽？')">自动匹配</button>
+                    </form>
+                </div>
+            </div>
+            <div class="panel-bd">
+                <div class="filter-bar">
+                    <form method="GET" style="display:flex;gap:12px;align-items:center;">
+                        <label>银行账户：</label>
+                        <select name="bank_type" onchange="this.form.submit()">
+                            {% for b in bank_types %}<option value="{{ b.bank_type }}" {% if bank_type==b.bank_type %}selected{% endif %}>{{ b.bank_type }}</option>{% endfor %}
+                            {% if not bank_types %}<option>对公账户</option>{% endif %}
+                        </select>
+                        <label>期间：</label>
+                        <input type="text" name="period" value="{{ period }}" placeholder="YYYY-MM" style="width:100px;" onchange="this.form.submit()">
+                    </form>
+                </div>
+
+                <!-- Summary -->
+                <div class="summary-cards">
+                    <div class="sc"><div class="l">对账单未勾稽</div><div class="v text-red">{{ '%.0f'|format(bank_stmt_total) }}</div><div class="s">{{ bank_stmt|selectattr('matched','equalto',0)|list|length }} 笔</div></div>
+                    <div class="sc"><div class="l">企业未勾稽收入</div><div class="v text-green">{{ '%.0f'|format(book_income_total) }}</div><div class="s">{{ book_income|length }} 笔</div></div>
+                    <div class="sc"><div class="l">企业未勾稽支出</div><div class="v text-red">{{ '%.0f'|format(book_expense_total) }}</div><div class="s">{{ book_expense|length }} 笔</div></div>
+                    <div class="sc"><div class="l">已勾稽</div><div class="v" style="color:#1890ff;">{{ '%.0f'|format(recon_total) }}</div><div class="s">{{ recon_items|length }} 笔</div></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Unmatched items for manual reconciliation -->
+        <div class="grid2">
+            <!-- Bank Statement -->
+            <div class="panel">
+                <div class="panel-hd"><h2>银行对账单 (未勾稽)</h2></div>
+                <div class="panel-bd">
+                    {% set unmatched = bank_stmt|selectattr('matched','equalto',0)|list %}
+                    {% if unmatched %}
+                    <table>
+                        <thead><tr><th>日期</th><th>对方</th><th class="num">金额</th><th>描述</th></tr></thead>
+                        <tbody>
+                        {% for b in unmatched %}
+                        <tr><td>{{ b.transaction_date }}</td><td>{{ b.counterparty or '-' }}</td>
+                            <td class="num">{{ '%.2f'|format(b.amount|float) }}</td>
+                            <td>{{ b.description or '-' }}</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}<div style="color:#999;text-align:center;padding:20px;">无未勾稽银行项目</div>{% endif %}
+                </div>
+            </div>
+
+            <!-- Book Items -->
+            <div class="panel">
+                <div class="panel-hd"><h2>企业账面 (未勾稽)</h2></div>
+                <div class="panel-bd">
+                    {% if book_income or book_expense %}
+                    <table>
+                        <thead><tr><th>类型</th><th>日期</th><th>对象</th><th class="num">金额</th></tr></thead>
+                        <tbody>
+                        {% for inc in book_income[:10] %}
+                        <tr><td><span class="tag tag-g">收入</span></td><td>{{ inc.date }}</td><td>{{ inc.name }}</td>
+                            <td class="num text-green">{{ '%.2f'|format(inc.amount) }}</td></tr>
+                        {% endfor %}
+                        {% for exp in book_expense[:10] %}
+                        <tr><td><span class="tag tag-r">支出</span></td><td>{{ exp.date }}</td><td>{{ exp.name or exp.expense_type }}</td>
+                            <td class="num text-red">{{ '%.2f'|format(exp.amount) }}</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}<div style="color:#999;text-align:center;padding:20px;">无未勾稽企业项目</div>{% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Reconciled Items -->
+        <div class="panel">
+            <div class="panel-hd"><h2>已勾稽项 ({{ recon_items|length }} 笔)</h2></div>
+            <div class="panel-bd">
+                {% if recon_items %}
+                <table>
+                    <thead><tr><th>类型</th><th class="num">金额</th><th>勾稽时间</th><th>操作人</th></tr></thead>
+                    <tbody>
+                    {% for r in recon_items %}
+                    <tr><td><span class="tag tag-b">{{ {'income':'收入','expense':'支出'}.get(r.book_item_type, r.book_item_type) }}</span></td>
+                        <td class="num">{{ '%.2f'|format(r.amount|float) }}</td>
+                        <td>{{ r.reconciled_at[:16] }}</td><td>{{ r.reconcilied_by }}</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}<div style="color:#999;text-align:center;padding:20px;">暂无已勾稽项，使用"导入银行流水"和"自动匹配"开始对账</div>{% endif %}
+            </div>
+        </div>
+    </div>
+{% endblock %}

@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}导入科目 - 氧化加工厂财务系统{% endblock %}
+{% block head_extra %}
+<style>
+    .upload-zone { border: 2px dashed #d9d9d9; padding: 30px; text-align: center; border-radius: 8px; margin-bottom: 20px; }
+    .upload-zone:hover { border-color: #1890ff; }
+    .template-link { font-size: 13px; color: #1890ff; text-decoration: none; margin-top: 10px; display: inline-block; }
+    .template-link:hover { text-decoration: underline; }
+    .preview-table { margin-top: 20px; }
+    .preview-table th { font-size: 12px; white-space: nowrap; }
+    .preview-table td { font-size: 13px; }
+    .tag-new { background: #f6ffed; color: #52c41a; padding: 2px 8px; border-radius: 3px; font-size: 11px; }
+    .tag-update { background: #fff7e6; color: #fa8c16; padding: 2px 8px; border-radius: 3px; font-size: 11px; }
+    .summary { margin: 15px 0; font-size: 14px; }
+    .summary span { font-weight: 600; }
+    .btn { display: inline-block; padding: 8px 16px; background: #1890ff; color: white; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; font-size: 14px; }
+    .btn-default { background: #fff; color: #333; border: 1px solid #d9d9d9; }
+    .btn-success { background: #52c41a; }
+    .btn-warning { background: #fa8c16; color: #fff; }
+    .message { padding: 10px 16px; border-radius: 4px; margin-bottom: 16px; font-size: 14px; }
+    .message-success { background: #f6ffed; border: 1px solid #b7eb8f; color: #52c41a; }
+    .message-error { background: #fff1f0; border: 1px solid #ffa39e; color: #f5222d; }
+    .message-info { background: #e6f7ff; border: 1px solid #91d5ff; color: #1890ff; }
+    .btn-group { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+</style>
+{% endblock %}
+{% block breadcrumb %}
+<div class="breadcrumb"><a href="/">首页</a><span class="sep">›</span><a href="/chart-of-accounts">会计科目</a><span class="sep">›</span><span>导入科目</span></div>
+{% endblock %}
+{% block content %}
+{% if message %}
+<div class="message message-success">{{ message }}</div>
+{% endif %}
+{% if error %}
+<div class="message message-error">{{ error }}</div>
+{% endif %}
+
+<div class="card">
+    <h2>导入会计科目</h2>
+
+    {% if not preview %}
+    <div class="message message-info">支持 CSV 格式导入。请先下载模板，按格式填写后上传。</div>
+
+    <div class="upload-zone">
+        <form method="POST" action="/chart-of-accounts/import" enctype="multipart/form-data">
+            <input type="hidden" name="action" value="preview">
+            <div style="font-size:36px; margin-bottom:10px;">&#128193;</div>
+            <div style="font-size:15px; color:#666; margin-bottom:10px;">选择 CSV 文件上传</div>
+            <div style="font-size:12px; color:#999; margin-bottom:15px;">支持 .csv 格式，编码 UTF-8</div>
+            <input type="file" name="file" accept=".csv" style="margin-bottom:12px;" onchange="this.form.submit()">
+            <br>
+            <a href="/chart-of-accounts/export" class="template-link">下载当前科目作为模板</a>
+        </form>
+    </div>
+
+    <div class="card" style="background:#f8f9fa;">
+        <h3>CSV 列说明</h3>
+        <table style="font-size:13px;">
+            <thead>
+                <tr><th>列名</th><th>说明</th><th>示例</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>code</td><td>科目编码（必填）</td><td>1001</td></tr>
+                <tr><td>name</td><td>科目名称（必填）</td><td>库存现金</td></tr>
+                <tr><td>account_type</td><td>科目类型</td><td>资产类/负债类/权益类/成本类/损益类</td></tr>
+                <tr><td>balance_direction</td><td>余额方向</td><td>借/贷</td></tr>
+                <tr><td>is_active</td><td>是否启用</td><td>1=启用, 0=停用</td></tr>
+                <tr><td>aux_customer</td><td>客户核算</td><td>1=启用, 0=不启用</td></tr>
+                <tr><td>aux_supplier</td><td>供应商核算</td><td>1=启用, 0=不启用</td></tr>
+                <tr><td>aux_department</td><td>部门核算</td><td>1=启用, 0=不启用</td></tr>
+                <tr><td>aux_project</td><td>项目核算</td><td>1=启用, 0=不启用</td></tr>
+                <tr><td>aux_employee</td><td>员工核算</td><td>1=启用, 0=不启用</td></tr>
+                <tr><td>notes</td><td>备注</td><td>选填</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    {% else %}
+    <div class="summary">
+        共 <span>{{ preview|length }}</span> 条科目，
+        其中 <span style="color:#52c41a;">{{ preview|selectattr('is_new','equalto',true)|list|length }} 条新增</span>，
+        <span style="color:#fa8c16;">{{ preview|selectattr('is_new','equalto',false)|list|length }} 条更新</span>
+    </div>
+
+    <div class="preview-table">
+        <table>
+            <thead>
+                <tr>
+                    <th>编码</th><th>名称</th><th>类型</th><th>方向</th><th>辅助核算</th><th>状态</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in preview %}
+                <tr>
+                    <td>{{ row.code }}</td>
+                    <td>{{ row.name }}</td>
+                    <td>{{ row.account_type }}</td>
+                    <td>{{ row.balance_direction }}</td>
+                    <td style="font-size:11px;">
+                        {% if row.aux_customer %}客户 {% endif %}
+                        {% if row.aux_supplier %}供应商 {% endif %}
+                        {% if row.aux_department %}部门 {% endif %}
+                        {% if row.aux_project %}项目 {% endif %}
+                        {% if row.aux_employee %}员工 {% endif %}
+                        {% if not row.aux_customer and not row.aux_supplier and not row.aux_department and not row.aux_project and not row.aux_employee %}-{% endif %}
+                    </td>
+                    <td>
+                        {% if row.is_new %}
+                        <span class="tag-new">新增</span>
+                        {% else %}
+                        <span class="tag-update">更新</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="btn-group">
+        <form method="POST" action="/chart-of-accounts/import" onsubmit="return confirm('确定导入 {{ preview|length }} 条科目？')">
+            <input type="hidden" name="action" value="confirm">
+            <input type="hidden" name="import_data" value="{{ preview|tojson|forceescape }}">
+            <button type="submit" class="btn btn-success">确认导入</button>
+        </form>
+        <a href="/chart-of-accounts/import" class="btn btn-default">重新上传</a>
+        <a href="/chart-of-accounts" class="btn btn-default">返回科目列表</a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}{% endblock %}

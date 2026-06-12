@@ -1,8 +1,6 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>审计日志 - 氧化加工厂财务系统</title>
+{% extends "base.html" %}
+{% block title %}审计日志 - 氧化加工厂财务系统{% endblock %}
+{% block head_extra %}
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
@@ -21,38 +19,35 @@
         .pagination a.active { background: #1890ff; color: white; border-color: #1890ff; }
         .empty { text-align: center; color: #999; padding: 40px; }
     </style>
-</head>
-<body>
-<div class="header"><div class="container"><h1>审计日志</h1></div></div>
-<div class="nav"><div class="container">
-    <a href="/">首页</a><a href="/orders">订单</a><a href="/reports">报表</a>
-    <a href="/vouchers">凭证</a><a href="/accounting-books">账簿</a>
-    <a href="/fixed-assets">固定资产</a><a href="/audit-log" class="active">审计日志</a>
-    <a href="/system-settings">系统设置</a>
-</div></div>
-<div class="container">
-    <div class="card">
-        <div style="display:flex;justify-content:space-between;margin-bottom:15px;">
-            <span>共 {{ total }} 条记录</span>
-        </div>
-        {% if logs %}
-        <table>
-            <thead><tr><th>时间</th><th>用户</th><th>操作</th><th>对象类型</th><th>详情</th></tr></thead>
-            <tbody>
-            {% for l in logs %}
-            <tr><td>{{ l.created_at[:19] or '-' }}</td><td>{{ l.user_name or '-' }}</td><td>{{ l.action }}</td>
-                <td>{{ l.entity_type }}</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;">{{ l.details or '-' }}</td></tr>
-            {% endfor %}
-            </tbody>
-        </table>
-        <div class="pagination">
-            {% set total_pages = (total // per_page) + (1 if total % per_page > 0 else 0) %}
-            {% if page > 1 %}<a href="?page={{ page-1 }}">上一页</a>{% endif %}
-            <a class="active">{{ page }}/{{ total_pages or 1 }}</a>
-            {% if page < total_pages %}<a href="?page={{ page+1 }}">下一页</a>{% endif %}
-        </div>
-        {% else %}<div class="empty">暂无审计日志记录</div>{% endif %}
-    </div>
+{% endblock %}
+{% block breadcrumb %}
+<div class="breadcrumb">
+    <a href="/">首页</a> <span class="sep">›</span> <a href="/system-settings">系统</a> <span class="sep">›</span> 审计日志
 </div>
-</body>
-</html>
+{% endblock %}
+{% block content %}
+    <div class="container">
+        <div class="card">
+            <div style="display:flex;justify-content:space-between;margin-bottom:15px;">
+                <span>共 {{ total }} 条记录</span>
+            </div>
+            {% if logs %}
+            <table>
+                <thead><tr><th>时间</th><th>用户</th><th>操作</th><th>对象类型</th><th>详情</th></tr></thead>
+                <tbody>
+                {% for l in logs %}
+                <tr><td>{{ l.operation_time[:19] if l.operation_time else '-' }}</td><td>{{ l.operator or '-' }}</td><td>{{ l.operation_type }}</td>
+                    <td>{{ l.entity_type }}</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;">{{ l.operation_description or '-' }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            <div class="pagination">
+                {% set total_pages = (total // per_page) + (1 if total % per_page > 0 else 0) %}
+                {% if page > 1 %}<a href="?page={{ page-1 }}">上一页</a>{% endif %}
+                <a class="active">{{ page }}/{{ total_pages or 1 }}</a>
+                {% if page < total_pages %}<a href="?page={{ page+1 }}">下一页</a>{% endif %}
+            </div>
+            {% else %}<div class="empty">暂无审计日志记录</div>{% endif %}
+        </div>
+    </div>
+{% endblock %}

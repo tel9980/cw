@@ -163,6 +163,110 @@ def add_project():
     return redirect("/chart-of-accounts")
 
 
+# ========== 科目导入/导出 ==========
+
+@accounting_bp.route("/chart-of-accounts/export")
+def export_accounts():
+    """导出会计科目为CSV"""
+    conn = get_db()
+    accounts = conn.execute("SELECT * FROM chart_of_accounts ORDER BY code").fetchall()
+    conn.close()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["code", "name", "account_type", "balance_direction", "is_active",
+                      "aux_customer", "aux_supplier", "aux_department", "aux_project", "aux_employee", "notes"])
+    for a in accounts:
+        a = dict(a)
+        writer.writerow([
+            a.get("code", ""), a.get("name", ""), a.get("account_type", ""),
+            a.get("balance_direction", "借"), 1 if a.get("is_active") else 0,
+            1 if a.get("aux_customer") else 0, 1 if a.get("aux_supplier") else 0,
+            1 if a.get("aux_department") else 0, 1 if a.get("aux_project") else 0,
+            1 if a.get("aux_employee") else 0, a.get("notes", "")
+        ])
+    output.seek(0)
+    return Response(
+        output.getvalue().encode("utf-8-sig"),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment;filename=chart_of_accounts_{date.today().isoformat()}.csv"}
+    )
+
+
+@accounting_bp.route("/chart-of-accounts/import", methods=["GET", "POST"])
+def import_accounts():
+    """导入会计科目CSV"""
+    conn = get_db()
+    preview = []
+    message = None
+    error = None
+
+    if request.method == "POST":
+        action = request.form.get("action", "preview")
+        if action == "preview" and "file" in request.files:
+            file = request.files["file"]
+            if file.filename:
+                content = file.read().decode("utf-8-sig")
+                reader = csv.DictReader(io.StringIO(content))
+                existing = set(r["code"] for r in conn.execute("SELECT code FROM chart_of_accounts").fetchall())
+                for row in reader:
+                    code = row.get("code", "").strip()
+                    if not code:
+                        continue
+                    is_new = code not in existing
+                    preview.append({
+                        "code": code,
+                        "name": row.get("name", ""),
+                        "account_type": row.get("account_type", "资产类"),
+                        "balance_direction": row.get("balance_direction", "借"),
+                        "is_active": row.get("is_active", "1") == "1",
+                        "aux_customer": row.get("aux_customer", "0") == "1",
+                        "aux_supplier": row.get("aux_supplier", "0") == "1",
+                        "aux_department": row.get("aux_department", "0") == "1",
+                        "aux_project": row.get("aux_project", "0") == "1",
+                        "aux_employee": row.get("aux_employee", "0") == "1",
+                        "notes": row.get("notes", ""),
+                        "is_new": is_new
+                    })
+        elif action == "confirm":
+            import_data = request.form.get("import_data", "[]")
+            import json
+            rows = json.loads(import_data)
+            now = datetime.now().isoformat()
+            insert_count = 0
+            update_count = 0
+            for r in rows:
+                code = r.get("code", "").strip()
+                if not code:
+                    continue
+                exist = conn.execute("SELECT id FROM chart_of_accounts WHERE code=?", (code,)).fetchone()
+                if exist:
+                    conn.execute("""UPDATE chart_of_accounts SET name=?, account_type=?, balance_direction=?,
+                        is_active=?, aux_customer=?, aux_supplier=?, aux_department=?, aux_project=?, aux_employee=?, notes=?
+                        WHERE code=?""",
+                        (r.get("name", ""), r.get("account_type", "资产类"), r.get("balance_direction", "借"),
+                         1 if r.get("is_active") else 0, 1 if r.get("aux_customer") else 0,
+                         1 if r.get("aux_supplier") else 0, 1 if r.get("aux_department") else 0,
+                         1 if r.get("aux_project") else 0, 1 if r.get("aux_employee") else 0,
+                         r.get("notes", ""), code))
+                    update_count += 1
+                else:
+                    conn.execute("""INSERT INTO chart_of_accounts (code, name, account_type, balance_direction, is_active,
+                        aux_customer, aux_supplier, aux_department, aux_project, aux_employee, notes, is_controlled)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
+                        (code, r.get("name", ""), r.get("account_type", "资产类"), r.get("balance_direction", "借"),
+                         1 if r.get("is_active") else 0, 1 if r.get("aux_customer") else 0,
+                         1 if r.get("aux_supplier") else 0, 1 if r.get("aux_department") else 0,
+                         1 if r.get("aux_project") else 0, 1 if r.get("aux_employee") else 0,
+                         r.get("notes", "")))
+                    insert_count += 1
+            conn.commit()
+            conn.close()
+            return redirect(f"/chart-of-accounts?message=导入完成: 新增{insert_count}条, 更新{update_count}条")
+
+    conn.close()
+    return render_template("chart_of_accounts_import.html", preview=preview, message=message, error=error)
+
+
 # ========== 期初余额管理 ==========
 
 @accounting_bp.route("/chart-of-accounts/opening-balances", methods=["GET", "POST"])
@@ -458,7 +562,27 @@ def delete_attachment(attachment_id):
     return redirect("/vouchers")
 
 
-# ========== 会计账簿查询 ==========
+@accounting_bp.route("/voucher/attachment-preview/<attachment_id>")
+def attachment_preview(attachment_id):
+    """预览/下载凭证附件"""
+    conn = get_db()
+    att = conn.execute("SELECT * FROM voucher_attachments WHERE id=?", (attachment_id,)).fetchone()
+    conn.close()
+    if not att:
+        return "附件不存在", 404
+    a = dict(att)
+    upload_dir = os.path.join(os.path.dirname(__file__), "..", "attachments")
+    filepath = os.path.join(upload_dir, a["filename"])
+    if not os.path.exists(filepath):
+        return "文件不存在", 404
+    ext = os.path.splitext(a["original_name"])[1].lower()
+    mime_map = {
+        ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+        ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
+        ".pdf": "application/pdf",
+    }
+    mime = mime_map.get(ext, "application/octet-stream")
+    return send_file(filepath, mimetype=mime, download_name=a["original_name"])
 
 @accounting_bp.route("/accounting-books")
 def accounting_books():
@@ -2307,7 +2431,7 @@ def audit_log():
     offset = (page - 1) * per_page
 
     rows = conn.execute("""
-        SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT ? OFFSET ?
+        SELECT * FROM audit_logs ORDER BY operation_time DESC LIMIT ? OFFSET ?
     """, (per_page, offset)).fetchall()
     total = conn.execute("SELECT COUNT(*) FROM audit_logs").fetchone()[0]
 
@@ -2680,14 +2804,18 @@ def export_statement():
 
 @accounting_bp.route("/check-before-close", methods=["GET", "POST"])
 def check_before_close():
-    """月末结账前检查"""
+    """月末结账前检查（增强版：8项检查+三级结果+明细+一键修复）"""
     conn = get_db()
     period = request.args.get("period", date.today().strftime("%Y-%m"))
+    message = None
+    error = None
 
     if request.method == "POST":
         action = request.form.get("action", "")
+        operator = session.get("username", "管理员")
+        now = datetime.now().isoformat()
+
         if action == "rollback":
-            # 删除该期间的最后一张结转凭证
             last_close = conn.execute(
                 "SELECT id, voucher_no FROM accounting_vouchers "
                 "WHERE summary LIKE '%损益结转%' AND accounting_period=? "
@@ -2702,13 +2830,79 @@ def check_before_close():
             conn.close()
             return redirect(f"/check-before-close?period={period}")
 
+        elif action == "auto_fix":
+            fix_type = request.form.get("fix_type", "")
+            if fix_type == "review_unreviewed":
+                # 批量审核未审核凭证
+                unreviewed = conn.execute(
+                    "SELECT id, voucher_no FROM accounting_vouchers WHERE accounting_period=? AND status='草稿'",
+                    (period,)).fetchall()
+                for v in unreviewed:
+                    conn.execute("UPDATE accounting_vouchers SET status='已审核', reviewer=?, reviewed_at=?, updated_at=? WHERE id=?",
+                               (operator, now, now, v["id"]))
+                    conn.execute("INSERT INTO audit_logs (id, operation_type, entity_type, entity_id, operation_description, operator, operation_time) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                               (str(uuid.uuid4()), "自动审核", "voucher", v["id"], f"一键修复审核: {v['voucher_no']}", operator, now))
+                conn.commit()
+                message = f"已自动审核 {len(unreviewed)} 张凭证"
+            elif fix_type == "post_unposted":
+                # 批量记账已审核凭证
+                conn.execute("CREATE TABLE IF NOT EXISTS period_locks (id TEXT PRIMARY KEY, period TEXT NOT NULL UNIQUE, locked_by TEXT, locked_at TEXT, is_locked INTEGER DEFAULT 1)")
+                lock = conn.execute("SELECT * FROM period_locks WHERE period=? AND is_locked=1", (period,)).fetchone()
+                if lock:
+                    error = "该期间已锁定，无法批量记账"
+                else:
+                    unreviewed = conn.execute(
+                        "SELECT id, voucher_no FROM accounting_vouchers WHERE accounting_period=? AND status='已审核'",
+                        (period,)).fetchall()
+                    for v in unreviewed:
+                        conn.execute("UPDATE accounting_vouchers SET status='已记账', posted_by=?, posted_at=?, updated_at=? WHERE id=?",
+                                   (operator, now, now, v["id"]))
+                        conn.execute("INSERT INTO audit_logs (id, operation_type, entity_type, entity_id, operation_description, operator, operation_time) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                   (str(uuid.uuid4()), "自动记账", "voucher", v["id"], f"一键修复记账: {v['voucher_no']}", operator, now))
+                    conn.commit()
+                    message = f"已自动记账 {len(unreviewed)} 张凭证"
+            elif fix_type == "run_depreciation":
+                # 自动执行折旧
+                fa_list = conn.execute("SELECT * FROM fixed_assets WHERE status='使用中'").fetchall()
+                if fa_list:
+                    from business.account_manager import AccountManager
+                    am = AccountManager(conn=conn)
+                    # Generate depreciation voucher
+                    total_dep = 0
+                    for fa in fa_list:
+                        fa = dict(fa)
+                        monthly = (fa.get("original_value", 0) or 0) * (fa.get("depreciation_rate", 0) or 0) / 100 / 12
+                        total_dep += monthly
+                    if total_dep > 0:
+                        voucher_no = generate_voucher_number(conn, period)
+                        vid = str(uuid.uuid4())
+                        conn.execute("INSERT INTO accounting_vouchers (id, voucher_no, voucher_date, accounting_period, summary, total_debit, total_credit, status, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, '已审核', ?, ?, ?)",
+                                   (vid, voucher_no, date.today().isoformat(), period, f"折旧计提-{period}", total_dep, total_dep, operator, now, now))
+                        conn.execute("INSERT INTO voucher_lines (voucher_id, account_code, description, debit, credit) VALUES (?, '5101', '折旧费用', ?, 0)", (vid, total_dep))
+                        conn.execute("INSERT INTO voucher_lines (voucher_id, account_code, description, debit, credit) VALUES (?, '1502', '累计折旧', 0, ?)", (vid, total_dep))
+                        conn.commit()
+                        message = f"已自动生成折旧凭证 {voucher_no}，金额 {total_dep:.2f}"
+
+            conn.close()
+            return redirect(f"/check-before-close?period={period}&message={message or ''}")
+
+    message = request.args.get("message") or None
+
     checks = {}
 
     # 1. 所有凭证是否已记账
-    unposted = conn.execute(
-        "SELECT COUNT(*) FROM accounting_vouchers WHERE accounting_period=? AND status!='已记账'",
-        (period,)).fetchone()[0]
-    checks["all_posted"] = {"pass": unposted == 0, "detail": f"{unposted} 张未记账凭证"}
+    unposted_rows = conn.execute(
+        "SELECT voucher_no, status FROM accounting_vouchers WHERE accounting_period=? AND status NOT IN ('已记账','已冲销')",
+        (period,)).fetchall()
+    unposted_count = len(unposted_rows)
+    checks["all_posted"] = {
+        "pass": unposted_count == 0,
+        "level": "pass" if unposted_count == 0 else "fail",
+        "title": "凭证是否全部记账",
+        "detail": f"{unposted_count} 张未记账凭证" if unposted_count > 0 else "全部已记账",
+        "items": [{"no": r["voucher_no"], "status": r["status"]} for r in unposted_rows[:5]],
+        "can_fix": True, "fix_type": "post_unposted", "fix_label": "一键记账"
+    }
 
     # 2. 试算是否平衡
     rows = conn.execute("""
@@ -2722,8 +2916,15 @@ def check_before_close():
     """, (period,)).fetchall()
     total_dr = sum(r[2] for r in rows)
     total_cr = sum(r[3] for r in rows)
-    checks["balanced"] = {"pass": abs(total_dr - total_cr) < 0.01,
-                          "detail": f"借 {total_dr:.2f} = 贷 {total_cr:.2f}"}
+    diff = abs(total_dr - total_cr)
+    checks["balanced"] = {
+        "pass": diff < 0.01,
+        "level": "pass" if diff < 0.01 else "fail",
+        "title": "试算是否平衡",
+        "detail": f"借 {total_dr:.2f} = 贷 {total_cr:.2f}" + (f" (差额 {diff:.2f})" if diff >= 0.01 else ""),
+        "items": [],
+        "can_fix": False
+    }
 
     # 3. 损益是否已结转
     has_close = conn.execute(
@@ -2734,8 +2935,14 @@ def check_before_close():
         "SELECT COUNT(*) FROM accounting_vouchers "
         "WHERE summary LIKE '%损益结转%' AND accounting_period=? AND status='已记账'",
         (period,)).fetchone()[0]
-    checks["profit_closed"] = {"pass": has_posted > 0,
-                               "detail": f"{has_close} 张结转凭证({has_posted} 已记账)"}
+    checks["profit_closed"] = {
+        "pass": has_posted > 0,
+        "level": "pass" if has_posted > 0 else ("warn" if has_close > 0 else "fail"),
+        "title": "损益是否已结转",
+        "detail": f"{has_close} 张结转凭证({has_posted} 已记账)" if has_close > 0 else "尚未结转损益",
+        "items": [],
+        "can_fix": False
+    }
 
     # 4. 折旧是否已计提
     has_dep = conn.execute(
@@ -2743,21 +2950,87 @@ def check_before_close():
         "WHERE summary LIKE '%折旧%' AND accounting_period=?",
         (period,)).fetchone()[0]
     fa_count = conn.execute("SELECT COUNT(*) FROM fixed_assets WHERE status='使用中'").fetchone()[0]
-    checks["depreciated"] = {"pass": has_dep > 0 or fa_count == 0,
-                             "detail": f"{has_dep} 张折旧凭证({fa_count} 项资产)"}
+    checks["depreciated"] = {
+        "pass": has_dep > 0 or fa_count == 0,
+        "level": "pass" if has_dep > 0 or fa_count == 0 else "warn",
+        "title": "折旧是否已计提",
+        "detail": f"{has_dep} 张折旧凭证({fa_count} 项使用中资产)" if fa_count > 0 else "无使用中资产",
+        "items": [],
+        "can_fix": has_dep == 0 and fa_count > 0,
+        "fix_type": "run_depreciation", "fix_label": "自动计提折旧"
+    }
 
     # 5. 期间是否已关闭
     period_status = conn.execute(
         "SELECT is_closed FROM accounting_periods WHERE period_name=?",
         (period,)).fetchone()
     is_closed = period_status["is_closed"] if period_status else 0
-    checks["not_closed"] = {"pass": not is_closed, "detail": "已关闭" if is_closed else "未关闭"}
+    checks["not_closed"] = {
+        "pass": not is_closed,
+        "level": "pass" if not is_closed else "fail",
+        "title": "期间是否可关闭",
+        "detail": "已关闭" if is_closed else "未关闭",
+        "items": [],
+        "can_fix": False
+    }
+
+    # 6. 未审核凭证检查
+    unreviewed_rows = conn.execute(
+        "SELECT voucher_no, voucher_date, summary FROM accounting_vouchers WHERE accounting_period=? AND status='草稿'",
+        (period,)).fetchall()
+    unreviewed_count = len(unreviewed_rows)
+    checks["all_reviewed"] = {
+        "pass": unreviewed_count == 0,
+        "level": "pass" if unreviewed_count == 0 else "warn",
+        "title": "草稿凭证是否已审核",
+        "detail": f"{unreviewed_count} 张草稿凭证" if unreviewed_count > 0 else "全部已审核",
+        "items": [{"no": r["voucher_no"], "summary": r["summary"][:20] if r["summary"] else ""} for r in unreviewed_rows[:5]],
+        "can_fix": unreviewed_count > 0,
+        "fix_type": "review_unreviewed", "fix_label": "一键审核"
+    }
+
+    # 7. 银行未达账项检查
+    try:
+        unreconciled = conn.execute(
+            "SELECT COUNT(*) FROM bank_reconciliation WHERE status='未匹配'"
+        ).fetchone()[0]
+    except:
+        unreconciled = 0
+    checks["bank_reconciled"] = {
+        "pass": unreconciled == 0,
+        "level": "pass" if unreconciled == 0 else "warn",
+        "title": "银行未达账项",
+        "detail": f"{unreconciled} 笔未匹配银行流水" if unreconciled > 0 else "银行对账无异常",
+        "items": [],
+        "can_fix": False
+    }
+
+    # 8. 跨期待摊销费用
+    try:
+        pending_amort = conn.execute(
+            "SELECT COUNT(*) FROM amortization_plans WHERE status='进行中' AND next_run_date <= ?",
+            (date.today().isoformat(),)
+        ).fetchone()[0]
+    except:
+        pending_amort = 0
+    checks["amortization_done"] = {
+        "pass": pending_amort == 0,
+        "level": "pass" if pending_amort == 0 else "warn",
+        "title": "待摊销费用",
+        "detail": f"{pending_amort} 项待执行摊销" if pending_amort > 0 else "摊销已全部执行",
+        "items": [],
+        "can_fix": False
+    }
 
     all_ok = all(c["pass"] for c in checks.values())
+    fail_count = sum(1 for c in checks.values() if c["level"] == "fail")
+    warn_count = sum(1 for c in checks.values() if c["level"] == "warn")
 
     conn.close()
     return render_template("check_close.html", period=period, checks=checks, all_ok=all_ok,
-                          has_posted=has_posted, is_closed=is_closed)
+                          fail_count=fail_count, warn_count=warn_count,
+                          has_posted=has_posted, is_closed=is_closed,
+                          message=message)
 
 
 # ========== 年结（结转下年） ==========

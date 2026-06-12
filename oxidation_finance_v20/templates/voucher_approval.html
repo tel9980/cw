@@ -1,9 +1,6 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>凭证审核工作台 - 氧化加工厂财务系统</title>
+{% extends "base.html" %}
+{% block title %}凭证审批 - 氧化加工厂财务系统{% endblock %}
+{% block head_extra %}
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
@@ -40,14 +37,20 @@
         .filter-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
         .filter-bar select, .filter-bar input { padding: 7px 10px; border: 1px solid #d9d9d9; border-radius: 4px; }
         .remark { color: #f5222d; font-size: 12px; }
+        .modal-bg { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 999; justify-content: center; align-items: center; }
+        .modal-bg.show { display: flex; }
+        .modal { background: white; padding: 24px; border-radius: 8px; width: 460px; max-width: 95%; }
+        .modal h3 { margin-bottom: 16px; }
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; margin-bottom: 4px; font-size: 13px; color: #666; }
     </style>
-</head>
-<body>
-    <div class="header">
-        <div class="container">
-            <h1>凭证审核工作台 <a href="/">← 返回首页</a></h1>
-        </div>
-    </div>
+{% endblock %}
+{% block breadcrumb %}
+<div class="breadcrumb">
+    <a href="/">首页</a> <span class="sep">›</span> <a href="/vouchers">会计凭证</a> <span class="sep">›</span> 凭证审批
+</div>
+{% endblock %}
+{% block content %}
     <div class="container">
         {% if message %}<div class="card" style="background:#f6ffed;border:1px solid #b7eb8f;color:#52c41a;">{{ message }}</div>{% endif %}
         {% if error %}<div class="card" style="background:#fff2f0;border:1px solid #ffccc7;color:#f5222d;">{{ error }}</div>{% endif %}
@@ -176,43 +179,35 @@
                 </form>
             </div>
         </div>
-
-        <style>
-            .modal-bg { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 999; justify-content: center; align-items: center; }
-            .modal-bg.show { display: flex; }
-            .modal { background: white; padding: 24px; border-radius: 8px; width: 460px; max-width: 95%; }
-            .modal h3 { margin-bottom: 16px; }
-            .form-group { margin-bottom: 12px; }
-            .form-group label { display: block; margin-bottom: 4px; font-size: 13px; color: #666; }
-        </style>
-        <script>
-            function confirmSubmit() {
-                var checked = document.querySelectorAll('.check-item:checked').length;
-                if (checked === 0) { alert('请至少选择一条凭证'); return false; }
-                return true;
-            }
-            function rejectVoucher(vid) {
-                document.getElementById('rejectVoucherId').value = vid;
-                document.getElementById('rejectModal').classList.add('show');
-            }
-            function batchDelete() {
-                var checked = document.querySelectorAll('.check-item:checked');
-                if (checked.length === 0) { alert('请至少选择一条凭证'); return; }
-                if (!confirm('确定删除选中的 ' + checked.length + ' 条凭证？此操作不可恢复！')) return;
-                var ids = Array.from(checked).map(c => c.value);
-                var form = document.createElement('form');
-                form.method = 'POST';
-                form.action = '/vouchers/batch-delete';
-                ids.forEach(function(id) {
-                    var inp = document.createElement('input');
-                    inp.type = 'hidden'; inp.name = 'voucher_ids'; inp.value = id;
-                    form.appendChild(inp);
-                });
-                document.body.appendChild(form);
-                form.submit();
-            }
-            {% if show_reject %}document.getElementById('rejectModal').classList.add('show');{% endif %}
-        </script>
     </div>
-</body>
-</html>
+{% endblock %}
+{% block scripts %}
+    <script>
+        function confirmSubmit() {
+            var checked = document.querySelectorAll('.check-item:checked').length;
+            if (checked === 0) { alert('请至少选择一条凭证'); return false; }
+            return true;
+        }
+        function rejectVoucher(vid) {
+            document.getElementById('rejectVoucherId').value = vid;
+            document.getElementById('rejectModal').classList.add('show');
+        }
+        function batchDelete() {
+            var checked = document.querySelectorAll('.check-item:checked');
+            if (checked.length === 0) { alert('请至少选择一条凭证'); return; }
+            if (!confirm('确定删除选中的 ' + checked.length + ' 条凭证？此操作不可恢复！')) return;
+            var ids = Array.from(checked).map(c => c.value);
+            var form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/vouchers/batch-delete';
+            ids.forEach(function(id) {
+                var inp = document.createElement('input');
+                inp.type = 'hidden'; inp.name = 'voucher_ids'; inp.value = id;
+                form.appendChild(inp);
+            });
+            document.body.appendChild(form);
+            form.submit();
+        }
+        {% if show_reject %}document.getElementById('rejectModal').classList.add('show');{% endif %}
+    </script>
+{% endblock %}

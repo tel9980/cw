@@ -1,8 +1,6 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <title>财务报表 - 氧化加工厂财务系统</title>
+{% extends "base.html" %}
+{% block title %}财务报表 - 氧化加工厂财务系统{% endblock %}
+{% block head_extra %}
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: "SimSun", "宋体", serif; background: #f5f5f5; }
@@ -38,8 +36,13 @@
             .container { max-width: 100%; padding: 0; margin: 0; }
         }
     </style>
-</head>
-<body>
+{% endblock %}
+{% block breadcrumb %}
+<div class="breadcrumb">
+    <a href="/">首页</a> <span class="sep">›</span> <a href="/reports">报表</a> <span class="sep">›</span> 财务报表
+</div>
+{% endblock %}
+{% block content %}
     <div class="no-print">
         <div>
             <h1>标准财务报表</h1>
@@ -134,5 +137,4 @@
             </table>
         </div>
     </div>
-</body>
-</html>
+{% endblock %}

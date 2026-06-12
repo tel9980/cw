@@ -24,12 +24,25 @@
         .btn-danger { background: #f5222d; }
         .btn-danger:hover { background: #ff4d4f; }
         .attachment-list { margin-top: 10px; }
-        .att-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+        .att-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
         .att-item:last-child { border: none; }
-        .att-name { color: #1890ff; }
+        .att-left { display: flex; align-items: center; gap: 10px; }
+        .att-icon { width: 40px; height: 40px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+        .att-icon.img { background: #e6f7ff; overflow: hidden; cursor: pointer; }
+        .att-icon.img img { width: 100%; height: 100%; object-fit: cover; }
+        .att-icon.pdf { background: #fff1f0; color: #f5222d; }
+        .att-icon.doc { background: #e6f7ff; color: #1890ff; }
+        .att-icon.xls { background: #f6ffed; color: #52c41a; }
+        .att-icon.other { background: #f5f5f5; color: #999; }
+        .att-name { color: #1890ff; cursor: pointer; }
+        .att-name:hover { text-decoration: underline; }
         .att-size { color: #999; margin: 0 10px; }
         .att-time { color: #bbb; font-size: 12px; }
         .upload-zone { border: 2px dashed #d9d9d9; padding: 20px; text-align: center; border-radius: 4px; margin-top: 10px; }
+        .lightbox { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 9999; align-items: center; justify-content: center; }
+        .lightbox.show { display: flex; }
+        .lightbox img { max-width: 90%; max-height: 90%; border-radius: 4px; }
+        .lightbox .close { position: absolute; top: 20px; right: 30px; color: white; font-size: 30px; cursor: pointer; }
         .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
         .info-item { background: #f8f9fa; padding: 15px; border-radius: 6px; }
         .info-label { font-size: 12px; color: #999; margin-bottom: 5px; }
@@ -161,12 +174,28 @@
             {% if attachments %}
             <div class="attachment-list">
                 {% for a in attachments %}
+                {% set ext = a.original_name.split('.')[-1]|lower if '.' in a.original_name else '' %}
                 <div class="att-item">
-                    <span>
-                        <span class="att-name">{{ a.original_name }}</span>
-                        <span class="att-size">{{ '%.1f'|format(a.file_size/1024) }}KB</span>
-                        <span class="att-time">{{ a.uploaded_at[:10] }}</span>
-                    </span>
+                    <div class="att-left">
+                        {% if ext in ('jpg','jpeg','png','gif','webp','bmp') %}
+                        <div class="att-icon img" onclick="openLightbox('/voucher/attachment-preview/{{ a.id }}')">
+                            <img src="/voucher/attachment-preview/{{ a.id }}" alt="{{ a.original_name }}" loading="lazy">
+                        </div>
+                        {% elif ext == 'pdf' %}
+                        <div class="att-icon pdf">&#128196;</div>
+                        {% elif ext in ('doc','docx') %}
+                        <div class="att-icon doc">&#128221;</div>
+                        {% elif ext in ('xls','xlsx','csv') %}
+                        <div class="att-icon xls">&#128202;</div>
+                        {% else %}
+                        <div class="att-icon other">&#128206;</div>
+                        {% endif %}
+                        <span>
+                            <a class="att-name" href="/voucher/attachment-preview/{{ a.id }}" target="_blank">{{ a.original_name }}</a>
+                            <span class="att-size">{{ '%.1f'|format(a.file_size/1024) }}KB</span>
+                            <span class="att-time">{{ a.uploaded_at[:10] }}</span>
+                        </span>
+                    </div>
                     <form method="POST" action="/voucher/delete-attachment/{{ a.id }}" style="display:inline;" onsubmit="return confirm('确认删除附件？')">
                         <button class="btn btn-sm btn-danger">删除</button>
                     </form>
@@ -179,9 +208,15 @@
             <div class="upload-zone">
                 <form method="POST" action="/voucher/upload-attachment/{{ voucher.id }}" enctype="multipart/form-data">
                     <div style="margin-bottom:10px;font-size:13px;color:#666;">点击或拖拽上传凭证附件（发票、合同等）</div>
-                    <input type="file" name="file" accept=".jpg,.jpeg,.png,.pdf,.doc,.docx,.xls,.xlsx" style="margin-bottom:8px;" onchange="this.form.submit()">
+                    <input type="file" name="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx" style="margin-bottom:8px;" onchange="this.form.submit()">
                 </form>
             </div>
+        </div>
+
+        <!-- Lightbox 图片预览 -->
+        <div class="lightbox" id="lightbox" onclick="closeLightbox()">
+            <span class="close">&times;</span>
+            <img id="lightboxImg" src="" alt="预览">
         </div>
 
         <div class="card">
@@ -208,4 +243,16 @@
     </div>
 {% endblock %}
 {% block scripts %}
+<script>
+    function openLightbox(src) {
+        document.getElementById('lightboxImg').src = src;
+        document.getElementById('lightbox').classList.add('show');
+    }
+    function closeLightbox() {
+        document.getElementById('lightbox').classList.remove('show');
+    }
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeLightbox();
+    });
+</script>
 {% endblock %}
