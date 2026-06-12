@@ -471,6 +471,34 @@ def vouchers_page():
                            today=date.today().isoformat())
 
 
+@accounting_bp.route("/api/accounts/search")
+def api_accounts_search():
+    """凭证录入科目自动完成：搜索科目"""
+    q = request.args.get("q", "").strip()
+    if not q:
+        return {"results": []}
+
+    conn = get_db()
+    try:
+        results = [dict(r) for r in conn.execute("""
+            SELECT a.code, a.name, a.account_type, a.balance_direction
+            FROM chart_of_accounts a
+            WHERE a.is_active = 1
+              AND (a.code LIKE ? OR a.name LIKE ?)
+              AND NOT EXISTS (
+                  SELECT 1 FROM chart_of_accounts b
+                  WHERE b.is_active = 1
+                    AND b.code != a.code
+                    AND b.code LIKE a.code || '%'
+              )
+            ORDER BY a.code
+            LIMIT 20
+        """, (f"%{q}%", f"%{q}%")).fetchall()]
+        return {"results": results}
+    finally:
+        conn.close()
+
+
 @accounting_bp.route("/vouchers/<voucher_id>")
 def voucher_detail(voucher_id):
     """凭证详情页"""
@@ -1928,37 +1956,64 @@ def voucher_templates():
     conn.commit()
 
     message = None
+    error = None
     if request.method == "POST":
         action = request.form.get("action", "")
         now = datetime.now().isoformat()
+        import json
         try:
             if action == "create":
                 name = request.form.get("template_name", "")
                 summary = request.form.get("summary", "")
                 accounts = request.form.getlist("line_account[]")
+                summaries = request.form.getlist("line_summary[]")
                 debits = request.form.getlist("line_debit[]")
                 credits = request.form.getlist("line_credit[]")
                 lines = []
                 for i in range(len(accounts)):
+                    if not accounts[i]:
+                        continue
                     d = float(debits[i] or 0); c = float(credits[i] or 0)
-                    if d > 0 or c > 0:
-                        acc = conn.execute("SELECT name FROM chart_of_accounts WHERE code=?",
-                                          (accounts[i],)).fetchone()
-                        lines.append({"code": accounts[i], "name": acc["name"] if acc else accounts[i],
-                                       "debit": d, "credit": c})
-                import json
+                    acc = conn.execute("SELECT name FROM chart_of_accounts WHERE code=?",
+                                      (accounts[i],)).fetchone()
+                    lines.append({"code": accounts[i], "name": acc["name"] if acc else accounts[i],
+                                   "summary": summaries[i] if i < len(summaries) else "",
+                                   "debit": d, "credit": c})
                 conn.execute(
                     "INSERT INTO voucher_templates (id,template_name,summary,lines_json,created_at,updated_at) VALUES (?,?,?,?,?,?)",
                     (str(uuid.uuid4()), name, summary, json.dumps(lines, ensure_ascii=False), now, now))
                 conn.commit()
                 message = f"模板 {name} 创建成功"
+            elif action == "update":
+                tid = request.form.get("template_id", "")
+                name = request.form.get("template_name", "")
+                summary = request.form.get("summary", "")
+                accounts = request.form.getlist("line_account[]")
+                summaries = request.form.getlist("line_summary[]")
+                debits = request.form.getlist("line_debit[]")
+                credits = request.form.getlist("line_credit[]")
+                lines = []
+                for i in range(len(accounts)):
+                    if not accounts[i]:
+                        continue
+                    d = float(debits[i] or 0); c = float(credits[i] or 0)
+                    acc = conn.execute("SELECT name FROM chart_of_accounts WHERE code=?",
+                                      (accounts[i],)).fetchone()
+                    lines.append({"code": accounts[i], "name": acc["name"] if acc else accounts[i],
+                                   "summary": summaries[i] if i < len(summaries) else "",
+                                   "debit": d, "credit": c})
+                conn.execute(
+                    "UPDATE voucher_templates SET template_name=?, summary=?, lines_json=?, updated_at=? WHERE id=?",
+                    (name, summary, json.dumps(lines, ensure_ascii=False), now, tid))
+                conn.commit()
+                message = f"模板 {name} 更新成功"
             elif action == "delete":
                 tid = request.form.get("template_id", "")
                 conn.execute("DELETE FROM voucher_templates WHERE id=?", (tid,))
                 conn.commit()
                 message = "模板已删除"
         except Exception as e:
-            message = f"操作失败: {e}"
+            error = f"操作失败: {e}"
 
     templates = [dict(t) for t in conn.execute(
         "SELECT * FROM voucher_templates ORDER BY updated_at DESC").fetchall()]
@@ -1970,8 +2025,102 @@ def voucher_templates():
         "SELECT code, name FROM chart_of_accounts WHERE is_active=1 ORDER BY code").fetchall()]
     conn.close()
     return render_template("voucher_templates.html", templates=templates,
-                          accounts_list=accounts_list, message=message,
+                          accounts_list=accounts_list, message=message, error=error,
                           today=date.today().isoformat())
+
+
+@accounting_bp.route("/voucher/load-template/<template_id>")
+def load_template_json(template_id):
+    """获取凭证模板JSON（供凭证页面加载）"""
+    conn = get_db()
+    t = conn.execute("SELECT * FROM voucher_templates WHERE id=?", (template_id,)).fetchone()
+    conn.close()
+    if not t:
+        return Response("{}", mimetype="application/json"), 404
+    import json
+    return Response(t["lines_json"], mimetype="application/json")
+
+
+# ========== 期间对比分析 ==========
+
+@accounting_bp.route("/period-comparison")
+def period_comparison():
+    """期间对比分析报表"""
+    conn = get_db()
+    period1 = request.args.get("period1", date.today().strftime("%Y-%m"))
+    period2 = request.args.get("period2", "")
+
+    # 获取可用期间列表
+    periods = [dict(p) for p in conn.execute(
+        "SELECT period_name FROM accounting_periods ORDER BY period_name DESC").fetchall()]
+
+    # 如果未指定第二期间，自动选上一个
+    if not period2 and len(periods) >= 2:
+        period2 = periods[1]["period_name"]
+
+    comparison = []
+    if period1 and period2:
+        # 查询两个期间的科目余额
+        def get_balances(period):
+            bals = {}
+            for b in conn.execute(
+                "SELECT account_code, opening_balance, debit_amount, credit_amount, closing_balance FROM account_balances WHERE period_id=?",
+                (period,)
+            ).fetchall():
+                bals[b["account_code"]] = {
+                    "opening": float(b["opening_balance"] or 0),
+                    "debit": float(b["debit_amount"] or 0),
+                    "credit": float(b["credit_amount"] or 0),
+                    "closing": float(b["closing_balance"] or 0),
+                }
+            return bals
+
+        bal1 = get_balances(period1)
+        bal2 = get_balances(period2)
+
+        # 获取所有科目并按类型分组
+        accounts = conn.execute(
+            "SELECT code, name, account_type, balance_direction FROM chart_of_accounts WHERE is_active=1 ORDER BY code"
+        ).fetchall()
+
+        for acc in accounts:
+            acc = dict(acc)
+            b1 = bal1.get(acc["code"], {"opening": 0, "debit": 0, "credit": 0, "closing": 0})
+            b2 = bal2.get(acc["code"], {"opening": 0, "debit": 0, "credit": 0, "closing": 0})
+
+            amt1 = abs(b1["closing"])
+            amt2 = abs(b2["closing"])
+
+            if amt1 == 0 and amt2 == 0:
+                continue
+
+            diff = amt1 - amt2
+            rate = (diff / amt2 * 100) if amt2 != 0 else (100 if amt1 > 0 else 0)
+
+            # 判断变动方向
+            if diff > 0.01:
+                trend = "up"
+            elif diff < -0.01:
+                trend = "down"
+            else:
+                trend = "flat"
+
+            comparison.append({
+                "code": acc["code"],
+                "name": acc["name"],
+                "type": acc["account_type"],
+                "direction": acc["balance_direction"],
+                "amt1": amt1,
+                "amt2": amt2,
+                "diff": diff,
+                "rate": round(rate, 1),
+                "trend": trend,
+            })
+
+    conn.close()
+    return render_template("period_comparison.html",
+                          periods=periods, period1=period1, period2=period2,
+                          comparison=comparison)
 
 
 # ========== 凭证批量审核/记账 ==========

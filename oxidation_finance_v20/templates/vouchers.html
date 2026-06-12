@@ -55,6 +55,43 @@
         .tab.active { color: #1890ff; border-bottom-color: #1890ff; font-weight: 600; }
         .tab-content { padding: 10px 0; }
         .action-btns { display: flex; gap: 8px; }
+        /* 科目自动完成 */
+        .autocomplete-wrapper { position: relative; }
+        .autocomplete-wrapper input { width: 100%; padding: 6px 8px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; }
+        .autocomplete-wrapper input:focus { outline: none; border-color: #1890ff; }
+        .autocomplete-dropdown {
+            position: absolute; top: 100%; left: 0; right: 0; z-index: 1000;
+            background: #fff; border: 1px solid #d9d9d9; border-top: none;
+            border-radius: 0 0 4px 4px; max-height: 300px; overflow-y: auto;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.12); display: none;
+        }
+        .autocomplete-dropdown.show { display: block; }
+        .autocomplete-item {
+            padding: 8px 10px; cursor: pointer; font-size: 13px;
+            border-bottom: 1px solid #f0f0f0;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .autocomplete-item:hover, .autocomplete-item.active { background: #e6f7ff; }
+        .autocomplete-item .acc-code { font-weight: 600; color: #333; min-width: 80px; }
+        .autocomplete-item .acc-name { color: #666; flex: 1; margin: 0 8px; font-size: 12px; }
+        .autocomplete-item .acc-dir {
+            font-size: 11px; padding: 1px 6px; border-radius: 3px; font-weight: 500;
+        }
+        .autocomplete-item .acc-dir.dir-借 { background: #e6f7ff; color: #1890ff; }
+        .autocomplete-item .acc-dir.dir-贷 { background: #fff0f6; color: #eb2f96; }
+        .autocomplete-item .acc-type { font-size: 11px; color: #999; margin-left: 4px; }
+        .acc-selected-info {
+            font-size: 12px; color: #52c41a; margin-top: 3px; display: none;
+            align-items: center; gap: 6px;
+        }
+        .acc-selected-info.show { display: flex; }
+        .acc-dir-tag {
+            font-size: 11px; padding: 1px 6px; border-radius: 3px; font-weight: 500;
+        }
+        .acc-dir-tag.tag-借 { background: #e6f7ff; color: #1890ff; }
+        .acc-dir-tag.tag-贷 { background: #fff0f6; color: #eb2f96; }
+        .autocomplete-empty { padding: 10px; text-align: center; color: #ccc; font-size: 13px; }
+        .autocomplete-loading { padding: 10px; text-align: center; color: #999; font-size: 13px; }
     </style>
 {% endblock %}
 {% block breadcrumb %}
@@ -244,18 +281,15 @@
             };
         });
 
+        // 科目自动完成全局状态
+        let activeAutocomplete = null; // currently focused autocomplete wrapper
+        const DIR_MAP = { '借': '借方', '贷': '贷方' };
+
         function switchTab(name, event) {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
             event.target.classList.add('active');
             document.getElementById('tab-' + name).style.display = 'block';
-        }
-
-        function buildAccountOptions(selected) {
-            return accounts_list.map(a => {
-                const sel = (selected === a.code) ? 'selected' : '';
-                return `<option value="${a.code}" ${sel}>${a.code} - ${a.name}</option>`;
-            }).join('');
         }
 
         function buildAuxOptions(auxType, selected) {
@@ -265,7 +299,6 @@
             else if (auxType === 'department') { list = departments_list; label = '部门'; }
             else if (auxType === 'project') { list = projects_list; label = '项目'; }
             else if (auxType === 'employee') {
-                // Use departments' managers as employee list
                 list = departments_list.filter(d => d.manager).map(d => ({id: d.manager, name: d.manager + ' (' + d.name + ')'}));
                 label = '员工';
             }
@@ -280,11 +313,197 @@
             return html;
         }
 
-        function onAccountChange(selectEl) {
-            const code = selectEl.value;
-            const row = selectEl.closest('tr');
-            const auxCell = row.querySelector('td:nth-child(2)');
+        function onAuxTypeChange(selectEl, auxType) {
+            updateHiddenAuxFields();
+        }
+
+        function updateHiddenAuxFields() {
+            const rows = document.querySelectorAll('#voucherLinesBody tr');
+            rows.forEach(row => {
+                const auxSelects = row.querySelectorAll('.aux-type-select');
+                row.querySelectorAll('input.aux-hidden').forEach(el => el.remove());
+                if (auxSelects.length > 0) {
+                    const firstSelect = auxSelects[0];
+                    const auxType = firstSelect.getAttribute('onchange').match(/'(.*?)'/)?.[1] || '';
+                    const auxValue = firstSelect.value;
+                    if (auxValue) {
+                        const hiddenType = document.createElement('input');
+                        hiddenType.type = 'hidden';
+                        hiddenType.name = 'line_aux_type[]';
+                        hiddenType.value = auxType;
+                        hiddenType.className = 'aux-hidden';
+                        row.appendChild(hiddenType);
+                        const hiddenId = document.createElement('input');
+                        hiddenId.type = 'hidden';
+                        hiddenId.name = 'line_aux_id[]';
+                        hiddenId.value = auxValue;
+                        hiddenId.className = 'aux-hidden';
+                        row.appendChild(hiddenId);
+                    }
+                }
+            });
+        }
+
+        // ========== 科目自动完成 ==========
+
+        function getDebounceTimer(wrapper) {
+            return wrapper._debounceTimer || null;
+        }
+        function setDebounceTimer(wrapper, timer) {
+            wrapper._debounceTimer = timer;
+        }
+
+        function fetchAccounts(query, wrapper) {
+            const dropdown = wrapper.querySelector('.autocomplete-dropdown');
+            dropdown.innerHTML = '<div class="autocomplete-loading">搜索中...</div>';
+            dropdown.classList.add('show');
+
+            fetch('/api/accounts/search?q=' + encodeURIComponent(query))
+                .then(r => r.json())
+                .then(data => {
+                    const results = data.results || [];
+                    if (results.length === 0) {
+                        dropdown.innerHTML = '<div class="autocomplete-empty">无匹配科目</div>';
+                    } else {
+                        dropdown.innerHTML = results.map((a, i) => {
+                            const dirLabel = a.balance_direction === '贷' ? '贷' : '借';
+                            return `<div class="autocomplete-item" data-idx="${i}"
+                                data-code="${escapeHtml(a.code)}" data-name="${escapeHtml(a.name)}"
+                                data-type="${escapeHtml(a.account_type)}" data-dir="${escapeHtml(a.balance_direction)}">
+                                <span class="acc-code">${escapeHtml(a.code)}</span>
+                                <span class="acc-name">${escapeHtml(a.name)}</span>
+                                <span class="acc-dir dir-${dirLabel}">${dirLabel}</span>
+                                <span class="acc-type">${escapeHtml(a.account_type)}</span>
+                            </div>`;
+                        }).join('');
+                    }
+                    wrapper._activeIndex = -1;
+                    wrapper._items = dropdown.querySelectorAll('.autocomplete-item');
+                })
+                .catch(() => {
+                    dropdown.innerHTML = '<div class="autocomplete-empty">搜索失败</div>';
+                });
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function setupAutocompleteInput(input) {
+            const wrapper = input.closest('.autocomplete-wrapper');
+            const dropdown = wrapper.querySelector('.autocomplete-dropdown');
+            const hidden = wrapper.querySelector('.acc-hidden-input');
+
+            input.addEventListener('input', function() {
+                const timer = getDebounceTimer(wrapper);
+                if (timer) clearTimeout(timer);
+                const val = this.value.trim();
+                if (!val) {
+                    dropdown.classList.remove('show');
+                    dropdown.innerHTML = '';
+                    return;
+                }
+                setDebounceTimer(wrapper, setTimeout(() => {
+                    fetchAccounts(val, wrapper);
+                }, 300));
+            });
+
+            input.addEventListener('focus', function() {
+                activeAutocomplete = wrapper;
+                const val = this.value.trim();
+                if (val && dropdown.innerHTML === '') {
+                    fetchAccounts(val, wrapper);
+                }
+            });
+
+            input.addEventListener('keydown', function(e) {
+                const items = wrapper._items || [];
+                if (e.key === 'Escape') {
+                    dropdown.classList.remove('show');
+                    wrapper._activeIndex = -1;
+                    return;
+                }
+                if (!dropdown.classList.contains('show') && e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    wrapper._activeIndex = Math.min(wrapper._activeIndex + 1, items.length - 1);
+                    updateActiveItem(wrapper);
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    wrapper._activeIndex = Math.max(wrapper._activeIndex - 1, 0);
+                    updateActiveItem(wrapper);
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (wrapper._activeIndex >= 0 && items[wrapper._activeIndex]) {
+                        selectAccount(items[wrapper._activeIndex], wrapper);
+                    }
+                }
+            });
+
+            input.addEventListener('blur', function() {
+                setTimeout(() => {
+                    dropdown.classList.remove('show');
+                }, 200);
+            });
+        }
+
+        function updateActiveItem(wrapper) {
+            const items = wrapper._items || [];
+            items.forEach((item, i) => {
+                item.classList.toggle('active', i === wrapper._activeIndex);
+            });
+            if (wrapper._activeIndex >= 0 && items[wrapper._activeIndex]) {
+                items[wrapper._activeIndex].scrollIntoView({ block: 'nearest' });
+            }
+        }
+
+        function selectAccount(itemEl, wrapper) {
+            const code = itemEl.getAttribute('data-code');
+            const name = itemEl.getAttribute('data-name');
+            const accType = itemEl.getAttribute('data-type');
+            const dir = itemEl.getAttribute('data-dir');
+            const input = wrapper.querySelector('input.acc-search-input');
+            const hidden = wrapper.querySelector('.acc-hidden-input');
+            const info = wrapper.querySelector('.acc-selected-info');
+
+            // set the hidden input value
+            hidden.value = code;
+            // show code - name in the input
+            input.value = code;
+
+            // update the info display
+            const dirLabel = dir === '贷' ? '贷' : '借';
+            info.querySelector('.acc-name-text').textContent = name;
+            const tag = info.querySelector('.acc-dir-tag');
+            tag.textContent = '余额方向: ' + dirLabel;
+            tag.className = 'acc-dir-tag tag-' + dirLabel;
+            info.classList.add('show');
+
+            // auto-fill debit/credit based on account_type
+            const row = wrapper.closest('tr');
+            const debitInput = row.querySelector('.debit-input');
+            const creditInput = row.querySelector('.credit-input');
+
+            // 资产类/成本类 → 借方, 负债类/权益类 → 贷方, 损益类取决于方向
+            if (accType === '资产类' || accType === '成本类') {
+                // Do NOT auto-fill numbers - just set focus
+                debitInput.focus();
+            } else if (accType === '负债类' || accType === '权益类') {
+                creditInput.focus();
+            } else if (accType === '损益类') {
+                if (dir === '借') {
+                    debitInput.focus();
+                } else {
+                    creditInput.focus();
+                }
+            }
+
+            // trigger aux check
             const flags = accountAuxMap[code];
+            const auxCell = row.querySelector('td:nth-child(2)');
             if (flags && (flags.customer || flags.supplier || flags.department || flags.project || flags.employee)) {
                 let html = '<div style="display:flex;flex-direction:column;gap:3px;">';
                 if (flags.customer) html += buildAuxOptions('customer', '');
@@ -297,42 +516,22 @@
             } else {
                 auxCell.innerHTML = '<span style="color:#ccc;font-size:12px;">无</span>';
             }
+
+            // close dropdown
+            wrapper.querySelector('.autocomplete-dropdown').classList.remove('show');
+            wrapper._activeIndex = -1;
         }
 
-        function onAuxTypeChange(selectEl, auxType) {
-            // Sync the hidden aux_id with the first selected value
-            updateHiddenAuxFields();
-        }
+        // delegate click on dropdown items
+        document.addEventListener('click', function(e) {
+            const item = e.target.closest('.autocomplete-item');
+            if (item) {
+                const wrapper = item.closest('.autocomplete-wrapper');
+                selectAccount(item, wrapper);
+            }
+        });
 
-        function updateHiddenAuxFields() {
-            const rows = document.querySelectorAll('#voucherLinesBody tr');
-            rows.forEach(row => {
-                const auxSelects = row.querySelectorAll('.aux-type-select');
-                // Remove old hidden fields
-                row.querySelectorAll('input.aux-hidden').forEach(el => el.remove());
-
-                if (auxSelects.length > 0) {
-                    const firstSelect = auxSelects[0];
-                    const auxType = firstSelect.getAttribute('onchange').match(/'(.*?)'/)?.[1] || '';
-                    const auxValue = firstSelect.value;
-                    if (auxValue) {
-                        const hiddenType = document.createElement('input');
-                        hiddenType.type = 'hidden';
-                        hiddenType.name = 'line_aux_type[]';
-                        hiddenType.value = auxType;
-                        hiddenType.className = 'aux-hidden';
-                        row.appendChild(hiddenType);
-
-                        const hiddenId = document.createElement('input');
-                        hiddenId.type = 'hidden';
-                        hiddenId.name = 'line_aux_id[]';
-                        hiddenId.value = auxValue;
-                        hiddenId.className = 'aux-hidden';
-                        row.appendChild(hiddenId);
-                    }
-                }
-            });
-        }
+        // ========== 分录行管理 ==========
 
         let lineCounter = 0;
         function addLine() {
@@ -341,10 +540,16 @@
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td>
-                    <select name="line_account[]" required style="width:100%; padding:6px; border:1px solid #d9d9d9; border-radius:4px;" onchange="onAccountChange(this)">
-                        <option value="">请选择科目</option>
-                        ${buildAccountOptions('')}
-                    </select>
+                    <div class="autocomplete-wrapper">
+                        <input type="text" class="acc-search-input" placeholder="输入科目编码或名称搜索..." autocomplete="off"
+                            style="width:100%; padding:6px 8px; border:1px solid #d9d9d9; border-radius:4px; font-size:14px;">
+                        <div class="autocomplete-dropdown"></div>
+                        <input type="hidden" name="line_account[]" class="acc-hidden-input" value="">
+                        <div class="acc-selected-info">
+                            <span class="acc-name-text"></span>
+                            <span class="acc-dir-tag"></span>
+                        </div>
+                    </div>
                 </td>
                 <td><span style="color:#ccc;font-size:12px;">无</span></td>
                 <td><input type="number" step="0.01" name="line_debit[]" class="debit-input" style="width:100%;" placeholder="0.00" oninput="updateTotals()"></td>
@@ -352,6 +557,10 @@
                 <td><button type="button" class="remove-btn" onclick="removeLine(this)">删除</button></td>
             `;
             tbody.appendChild(tr);
+
+            // setup autocomplete on the new input
+            const input = tr.querySelector('.acc-search-input');
+            setupAutocompleteInput(input);
         }
 
         function removeLine(btn) {
@@ -413,7 +622,6 @@
             document.querySelectorAll('.voucher-check:checked').forEach(cb => { ids.push(cb.value); });
             if (ids.length === 0) { alert('请先选择凭证'); return; }
             var form = document.getElementById('batchForm');
-            // Clear existing hidden inputs
             form.querySelectorAll('input[type=hidden]').forEach(el => el.remove());
             var actionInput = document.createElement('input');
             actionInput.type = 'hidden'; actionInput.name = 'action'; actionInput.value = action;

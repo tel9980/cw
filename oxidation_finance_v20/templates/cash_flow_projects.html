@@ -1,9 +1,6 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>现金流量项目管理 - 氧化加工厂财务系统</title>
+{% extends "base.html" %}
+{% block title %}现金流量项目 - 氧化加工厂财务系统{% endblock %}
+{% block head_extra %}
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
@@ -53,15 +50,13 @@
         .tab.active { color: #1890ff; border-bottom-color: #1890ff; font-weight: 600; }
         .tab-content { padding: 10px 0; }
     </style>
-</head>
-<body>
-    <div class="header"><div class="container"><h1>现金流量项目管理</h1></div></div>
-    <div class="nav"><div class="container">
-        <a href="/">首页</a><a href="/vouchers">会计凭证</a>
-        <a href="/accounting-books">会计账簿</a><a href="/financial-reports">财务报表</a>
-        <a href="/system-settings">系统设置</a>
-        <a href="/cash-flow-projects" class="active">现金流量项目</a>
-    </div></div>
+{% endblock %}
+{% block breadcrumb %}
+<div class="breadcrumb">
+    <a href="/">首页</a><span class="sep">›</span><a href="/vouchers">会计凭证</a><span class="sep">›</span><span>现金流量项目</span>
+</div>
+{% endblock %}
+{% block content %}
     <div class="container">
         {% if message %}<div class="flash flash-success">{{ message }}</div>{% endif %}
         {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
@@ -170,7 +165,8 @@
             </form>
         </div>
     </div>
-
+{% endblock %}
+{% block scripts %}
     <script>
         function showAddModal() { document.getElementById('addModal').classList.add('show'); }
         function hideAddModal() { document.getElementById('addModal').classList.remove('show'); }
@@ -178,5 +174,4 @@
             window.location.href = '/cash-flow-projects?tab=' + name;
         }
     </script>
-</body>
-</html>
+{% endblock %}

@@ -1,8 +1,6 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>批量导入 - 氧化加工厂财务系统</title>
+{% extends "base.html" %}
+{% block title %}批量导入 - 氧化加工厂财务系统{% endblock %}
+{% block head_extra %}
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#f5f5f5; }
@@ -27,13 +25,13 @@ pre { background:#f5f5f5; padding:10px; border-radius:4px; font-size:12px; margi
 .example { border:1px solid #d9d9d9; border-radius:6px; padding:12px; margin:12px 0; }
 .example h4 { font-size:13px; margin-bottom:6px; color:#555; }
 </style>
-</head>
-<body>
-<div class="header"><div class="container"><h1>批量导入</h1></div></div>
-<div class="nav"><div class="container">
-<a href="/">首页</a><a href="/customers">客户</a><a href="/chart-of-accounts">科目</a>
-<a href="/batch-import" class="active">导入</a><a href="/system-settings">设置</a>
-</div></div>
+{% endblock %}
+{% block breadcrumb %}
+<div class="breadcrumb">
+    <a href="/">首页</a><span class="sep">›</span><span>批量导入</span>
+</div>
+{% endblock %}
+{% block content %}
 <div class="container">
 {% if message %}<div class="flash flash-s">{{ message }}</div>{% endif %}
 {% if error %}<div class="flash flash-e">{{ error }}</div>{% endif %}
@@ -65,5 +63,4 @@ pre { background:#f5f5f5; padding:10px; border-radius:4px; font-size:12px; margi
 2242,预收账款,负债</pre></div>
 </div>
 </div>
-</body>
-</html>
+{% endblock %}

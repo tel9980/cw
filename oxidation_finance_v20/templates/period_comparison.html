@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% block title %}期间对比分析 - 氧化加工厂财务系统{% endblock %}
+{% block head_extra %}
+<style>
+    .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .card h2 { font-size: 18px; margin-bottom: 15px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid #eee; text-align: left; }
+    th { background: #fafafa; font-weight: 600; color: #555; cursor: pointer; }
+    td.num { text-align: right; font-family: monospace; }
+    .filter-bar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+    .filter-bar select { padding: 7px 10px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 13px; }
+    .btn { display: inline-block; padding: 7px 14px; background: #1890ff; color: white; border-radius: 4px; border: none; cursor: pointer; font-size: 13px; text-decoration: none; }
+    .btn:hover { background: #40a9ff; }
+    .btn-sm { padding: 5px 10px; font-size: 12px; }
+    .btn-default { background: white; color: #333; border: 1px solid #d9d9d9; }
+    .trend-up { color: #f5222d; font-weight: 600; }
+    .trend-down { color: #52c41a; font-weight: 600; }
+    .trend-flat { color: #999; }
+    .warn-high { background: #fff1f0; }
+    .warn-high td { color: #f5222d; }
+    .summary-bar { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+    .summary-card { background: #f8f9fa; padding: 16px; border-radius: 8px; flex: 1; min-width: 180px; text-align: center; }
+    .summary-card .val { font-size: 24px; font-weight: 700; margin-top: 4px; }
+    .summary-card .label { font-size: 12px; color: #888; }
+    .chart-container { margin: 20px 0; }
+    .type-group { background: #fafafa; font-weight: 700; }
+    .type-group td { font-size: 14px; padding: 12px; }
+    .empty { text-align: center; color: #999; padding: 40px; }
+</style>
+{% endblock %}
+{% block breadcrumb %}
+<div class="breadcrumb"><a href="/">首页</a><span class="sep">›</span><a href="/reports">报表</a><span class="sep">›</span><span>期间对比分析</span></div>
+{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>期间对比分析</h2>
+    <form class="filter-bar" method="GET">
+        <label style="font-size:13px;">本期:</label>
+        <select name="period1" onchange="this.form.submit()">
+            {% for p in periods %}
+            <option value="{{ p.period_name }}" {% if p.period_name == period1 %}selected{% endif %}>{{ p.period_name }}</option>
+            {% endfor %}
+        </select>
+        <label style="font-size:13px;">对比期:</label>
+        <select name="period2" onchange="this.form.submit()">
+            <option value="">-- 请选择 --</option>
+            {% for p in periods %}
+            <option value="{{ p.period_name }}" {% if p.period_name == period2 %}selected{% endif %}>{{ p.period_name }}</option>
+            {% endfor %}
+        </select>
+    </form>
+
+    {% if comparison %}
+    {% set total_amt1 = comparison|sum(attribute='amt1') %}
+    {% set total_amt2 = comparison|sum(attribute='amt2') %}
+    {% set total_diff = total_amt1 - total_amt2 %}
+    <div class="summary-bar">
+        <div class="summary-card">
+            <div class="label">{{ period1 }} 期末余额</div>
+            <div class="val">{{ '%.2f'|format(total_amt1) }}</div>
+        </div>
+        <div class="summary-card">
+            <div class="label">{{ period2 }} 期末余额</div>
+            <div class="val">{{ '%.2f'|format(total_amt2) }}</div>
+        </div>
+        <div class="summary-card">
+            <div class="label">差异额</div>
+            <div class="val" style="color:{% if total_diff > 0 %}#f5222d{% elif total_diff < 0 %}#52c41a{% else %}#999{% endif %};">
+                {{ '%+.2f'|format(total_diff) }}
+            </div>
+        </div>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="comparisonChart" width="600" height="300"></canvas>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>科目编码</th><th>科目名称</th><th>类型</th>
+                <th class="num">{{ period2 }}</th><th class="num">{{ period1 }}</th>
+                <th class="num">差异额</th><th class="num">差异率</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% set ns = namespace(current_type='') %}
+            {% for c in comparison %}
+            {% if c.type != ns.current_type %}
+            {% set ns.current_type = c.type %}
+            <tr class="type-group"><td colspan="7">{{ c.type }}</td></tr>
+            {% endif %}
+            <tr class="{% if c.rate > 20 or c.rate < -20 %}warn-high{% endif %}">
+                <td>{{ c.code }}</td>
+                <td>{{ c.name }}</td>
+                <td>{{ c.type }}</td>
+                <td class="num">{{ '%.2f'|format(c.amt2) }}</td>
+                <td class="num">{{ '%.2f'|format(c.amt1) }}</td>
+                <td class="num {% if c.trend == 'up' %}trend-up{% elif c.trend == 'down' %}trend-down{% else %}trend-flat{% endif %}">
+                    {{ '%+.2f'|format(c.diff) }}
+                </td>
+                <td class="num {% if c.rate > 20 %}trend-up{% elif c.rate < -20 %}trend-down{% else %}trend-flat{% endif %}">
+                    {% if c.rate != 0 %}{{ '%+.1f'|format(c.rate) }}%{% else %}-{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty">请选择两个不同的会计期间进行对比</div>
+    {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+{% if comparison %}
+<script>
+    (function() {
+        var ctx = document.getElementById('comparisonChart').getContext('2d');
+        var labels = [];
+        var data1 = [];
+        var data2 = [];
+        {% for c in comparison[:12] %}
+        labels.push('{{ c.code }} {{ c.name[:6] }}');
+        data1.push({{ c.amt1 }});
+        data2.push({{ c.amt2 }});
+        {% endfor %}
+
+        var barWidth = 20;
+        var gap = 8;
+        var chartWidth = ctx.canvas.width;
+        var chartHeight = ctx.canvas.height - 40;
+        var padding = { top: 10, right: 30, bottom: 80, left: 80 };
+        var plotWidth = chartWidth - padding.left - padding.right;
+        var plotHeight = chartHeight - padding.top - padding.bottom;
+
+        var allValues = data1.concat(data2);
+        var maxVal = Math.max.apply(null, allValues) * 1.1 || 1;
+
+        // 清空
+        ctx.clearRect(0, 0, chartWidth, chartHeight + 40);
+
+        // 网格线
+        ctx.strokeStyle = '#eee';
+        ctx.lineWidth = 1;
+        for (var i = 0; i <= 5; i++) {
+            var y = padding.top + plotHeight * i / 5;
+            ctx.beginPath();
+            ctx.moveTo(padding.left, y);
+            ctx.lineTo(chartWidth - padding.right, y);
+            ctx.stroke();
+            ctx.fillStyle = '#999';
+            ctx.font = '11px monospace';
+            ctx.textAlign = 'right';
+            ctx.fillText((maxVal * (5 - i) / 5).toFixed(0), padding.left - 8, y + 4);
+        }
+
+        // 柱状图
+        var groupWidth = barWidth * 2 + gap;
+        var step = plotWidth / labels.length;
+        var offset = (step - groupWidth) / 2;
+
+        for (var i = 0; i < labels.length; i++) {
+            var x = padding.left + step * i + offset;
+            var h1 = data1[i] / maxVal * plotHeight;
+            var h2 = data2[i] / maxVal * plotHeight;
+            var y = padding.top + plotHeight;
+
+            // 本期
+            ctx.fillStyle = '#1890ff';
+            ctx.fillRect(x, y - h1, barWidth, h1);
+            // 对比期
+            ctx.fillStyle = '#91d5ff';
+            ctx.fillRect(x + barWidth + gap, y - h2, barWidth, h2);
+
+            // 标签
+            ctx.fillStyle = '#333';
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.save();
+            ctx.translate(x + barWidth, y + 14);
+            ctx.rotate(-0.5);
+            ctx.fillText(labels[i], 0, 0);
+            ctx.restore();
+        }
+
+        // 图例
+        ctx.fillStyle = '#1890ff';
+        ctx.fillRect(padding.left, chartHeight + 10, 12, 12);
+        ctx.fillStyle = '#333';
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('{{ period1 }}', padding.left + 18, chartHeight + 21);
+
+        ctx.fillStyle = '#91d5ff';
+        ctx.fillRect(padding.left + 120, chartHeight + 10, 12, 12);
+        ctx.fillStyle = '#333';
+        ctx.fillText('{{ period2 }}', padding.left + 138, chartHeight + 21);
+    })();
+</script>
+{% endif %}
+{% endblock %}
