@@ -1,9 +1,6 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>增值税申报表 - 氧化加工厂财务系统</title>
+{% extends "base.html" %}
+{% block title %}增值税申报 - 氧化加工厂财务系统{% endblock %}
+{% block head_extra %}
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: "SimSun", "宋体", serif; background: #f5f5f5; }
@@ -33,12 +30,17 @@
         @media print { .no-print { display: none !important; } body { background: white; } .card { box-shadow: none; border: 1px solid #ddd; } }
         @media (max-width: 768px) { .summary-row { grid-template-columns: repeat(2, 1fr); } }
     </style>
-</head>
-<body>
-    <div class="no-print">
-        <div><h1>增值税申报表</h1></div>
-        <div><a href="/">← 返回首页</a> <button onclick="window.print()">打印</button> <a href="/export/xls/vat-return?period={{ period }}" class="btn-export">导出Excel</a></div>
-    </div>
+{% endblock %}
+{% block breadcrumb %}
+<div class="breadcrumb">
+    <a href="/">首页</a>
+    <span class="sep">›</span>
+    <a href="/reports">报表</a>
+    <span class="sep">›</span>
+    <span>增值税申报</span>
+</div>
+{% endblock %}
+{% block content %}
     <div class="container">
         <div class="no-print card">
             <form method="GET" class="form-inline">
@@ -122,5 +124,4 @@
             </table>
         </div>
     </div>
-</body>
-</html>
+{% endblock %}

@@ -228,7 +228,8 @@
         </div>
 
         <div class="card">
-            <a href="/vouchers" class="btn btn-default">← 返回凭证列表</a>
+            <a href="javascript:history.back()" class="btn">← 返回</a>
+            <a href="/vouchers" class="btn btn-default" style="margin-left:10px;">返回凭证列表</a>
             <a href="/accounting-books" class="btn btn-default" style="margin-left:10px;">返回会计账簿</a>
             <button onclick="window.print()" class="btn" style="margin-left:10px;background:#52c41a;">打印凭证</button>
             {% if voucher.status == '已记账' %}

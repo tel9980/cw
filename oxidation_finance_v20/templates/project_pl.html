@@ -1,9 +1,6 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>项目损益与预算 - 氧化加工厂财务系统</title>
+{% extends "base.html" %}
+{% block title %}项目损益 - 氧化加工厂财务系统{% endblock %}
+{% block head_extra %}
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
@@ -38,13 +35,17 @@
         .tag-active { background: #f6ffed; color: #52c41a; }
         .tag-done { background: #f0f5ff; color: #1890ff; }
     </style>
-</head>
-<body>
-    <div class="header">
-        <div class="container">
-            <h1>项目损益与预算 <a href="/">← 返回首页</a></h1>
-        </div>
-    </div>
+{% endblock %}
+{% block breadcrumb %}
+<div class="breadcrumb">
+    <a href="/">首页</a>
+    <span class="sep">›</span>
+    <a href="/reports">报表</a>
+    <span class="sep">›</span>
+    <span>项目损益</span>
+</div>
+{% endblock %}
+{% block content %}
     <div class="container">
         {% if action == "budget" %}
         <!-- 预算管理页面 -->
@@ -157,13 +158,14 @@
                 </form>
             </div>
         </div>
-        <script>
-            function openBudgetModal() { document.getElementById('budgetModal').classList.add('show'); }
-            function closeBudgetModal() { document.getElementById('budgetModal').classList.remove('show'); }
-            {% if show_modal %}
-            setTimeout(openBudgetModal, 100);
-            {% endif %}
-        </script>
     </div>
-</body>
-</html>
+{% endblock %}
+{% block scripts %}
+    <script>
+        function openBudgetModal() { document.getElementById('budgetModal').classList.add('show'); }
+        function closeBudgetModal() { document.getElementById('budgetModal').classList.remove('show'); }
+        {% if show_modal %}
+        setTimeout(openBudgetModal, 100);
+        {% endif %}
+    </script>
+{% endblock %}

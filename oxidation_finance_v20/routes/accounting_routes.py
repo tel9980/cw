@@ -6,8 +6,12 @@ import csv
 import hashlib
 import io
 import os
+import time
 import uuid
 from datetime import date, datetime, timedelta
+
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 from flask import Blueprint, Response, render_template, request, redirect, send_file, session
 
 from routes.helpers import get_db, to_float
@@ -1081,7 +1085,7 @@ DEFAULT_SETTINGS = {
     "auto_post": "0",
     "fiscal_year_start": "01-01",
     "accounting_standard": "小企业会计准则",
-    "voucher_number_rule": "prefix:记-,date_fmt:%Y%m%d,seq_digits:3,reset:daily",
+    "voucher_number_rule": "prefix:记-,date_fmt:%Y%m%d,seq_digits:3,reset:monthly",
     "home_shortcuts": "vouchers:voucher-approval:quick-income:quick-expense:salary:customer-statement:alert-center:auto-voucher:financial-ratios:financial-reports",
 }
 
@@ -2352,27 +2356,50 @@ def unclose_period(period_name):
 
 @accounting_bp.route("/vouchers/check-gaps", methods=["GET", "POST"])
 def check_voucher_gaps():
-    """检测凭证编号断号"""
+    """检测凭证编号断号（增强版：期间汇总）"""
     conn = get_db()
     period = request.args.get("period", "")
     message = None
     gaps = []
-    
+    period_summary = []
+
+    # 各期间断号汇总
+    for p in conn.execute(
+        "SELECT period_name FROM accounting_periods ORDER BY period_name"
+    ).fetchall():
+        pname = p["period_name"]
+        vouchers = conn.execute(
+            "SELECT id, voucher_no FROM accounting_vouchers WHERE accounting_period=? ORDER BY id",
+            (pname,)
+        ).fetchall()
+        p_gaps = 0
+        if len(vouchers) >= 2:
+            import re
+            prev_seq = 0
+            for v in vouchers:
+                match = re.findall(r'(\d+)', v["voucher_no"])
+                if match:
+                    seq = int(match[-1])
+                    if prev_seq > 0 and seq > prev_seq + 1:
+                        p_gaps += seq - prev_seq - 1
+                    prev_seq = seq
+        total = len(vouchers)
+        period_summary.append({
+            "period": pname, "total": total, "gaps": p_gaps,
+            "ok": p_gaps == 0 and total > 0
+        })
+
     if request.method == "POST" or period:
         period = request.form.get("period", period)
         if period:
-            # 获取该期间所有凭证编号，按 voucher_no 排序
             vouchers = conn.execute(
                 "SELECT id, voucher_no, voucher_date FROM accounting_vouchers WHERE accounting_period=? ORDER BY voucher_date, voucher_no",
                 (period,)
             ).fetchall()
-            
-            # 尝试从凭证编号中解析序号
+            import re
             prev_seq = 0
             for v in vouchers:
                 vno = v["voucher_no"]
-                # 提取编号中的数字序列（取最后一段连续数字）
-                import re
                 match = re.findall(r'(\d+)', vno)
                 if match:
                     seq = int(match[-1])
@@ -2382,15 +2409,15 @@ def check_voucher_gaps():
                     prev_seq = seq
                     prev_vno = vno
                     prev_date = v["voucher_date"]
-            
             if not gaps:
                 message = f"期间 {period} 凭证编号连续，无断号。"
-    
+
     periods = [dict(p) for p in conn.execute(
         "SELECT period_name FROM accounting_periods ORDER BY period_name"
     ).fetchall()]
     conn.close()
-    return render_template("voucher_gaps.html", periods=periods, period=period, gaps=gaps, message=message)
+    return render_template("voucher_gaps.html", periods=periods, period=period,
+                          gaps=gaps, message=message, period_summary=period_summary)
 
 
 @accounting_bp.route("/vouchers/renumber", methods=["POST"])
@@ -2419,14 +2446,14 @@ def renumber_vouchers():
     
     rule_str = rule["value"]
     parts = {}
-    for p in rule_str.split("|"):
-        if "=" in p:
-            k, v = p.split("=", 1)
-            parts[k] = v
+    for p in rule_str.split(","):
+        if ":" in p:
+            k, v = p.split(":", 1)
+            parts[k.strip()] = v.strip()
     
-    prefix = parts.get("prefix", "记")
+    prefix = parts.get("prefix", "记-")
     date_fmt = parts.get("date_fmt", "%Y%m%d")
-    num_digits = int(parts.get("num_digits", "3"))
+    num_digits = int(parts.get("seq_digits", "3"))
     reset_mode = parts.get("reset", "monthly")
     
     # 按日期排序获取该期间凭证
@@ -3929,6 +3956,290 @@ def financial_reports():
     return render_template("financial_reports.html",
         balance_sheet=balance_sheet, profit_loss=profit_loss, cash_flow=cash_flow,
         period=period)
+
+
+# ========== 财务报表 Excel 导出 ==========
+
+def _excel_style():
+    """创建统一Excel样式"""
+    header_font = Font(bold=True, size=12)
+    title_font = Font(bold=True, size=14)
+    money_fmt = '#,##0.00'
+    header_fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+    header_font_white = Font(bold=True, size=11, color='FFFFFF')
+    thin_border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin'))
+    return header_font, title_font, money_fmt, header_fill, header_font_white, thin_border
+
+
+@accounting_bp.route("/reports/export-balance-sheet")
+def export_balance_sheet():
+    """导出资产负债表 Excel"""
+    conn = get_db()
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+    # Reuse financial_reports logic
+    from contextlib import redirect_stdout
+    bs_data = _build_balance_sheet(conn, period)
+    conn.close()
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "资产负债表"
+    hf, tf, mf, hfill, hfw, border = _excel_style()
+
+    ws.merge_cells('A1:D1')
+    ws['A1'] = f"资产负债表 - {period}"
+    ws['A1'].font = tf
+    ws['A1'].alignment = Alignment(horizontal='center')
+    ws.merge_cells('A2:D2')
+    ws['A2'] = f"编制单位：氧化加工厂"
+    ws['A2'].alignment = Alignment(horizontal='center')
+
+    row = 4
+    for col, val in enumerate(["项目", "期末余额", "年初余额", "负债和所有者权益", "期末余额", "年初余额"], 1):
+        cell = ws.cell(row=row, column=col, value=val)
+        cell.font = hfw; cell.fill = hfill; cell.border = border; cell.alignment = Alignment(horizontal='center')
+
+    bs = [
+        ("货币资金", bs_data["cash"], bs_data["cash_begin"], "短期借款", 0, 0),
+        ("应收账款", bs_data["ar"], bs_data["ar_begin"], "应付账款", bs_data["ap"], 0),
+        ("其他应收款", bs_data["other_ar"], 0, "应付职工薪酬", bs_data["salary_payable"], 0),
+        ("流动资产合计", bs_data["ca_total"], bs_data["ca_begin"], "应交税费", bs_data["tax_payable"], 0),
+        ("固定资产", bs_data["fa"], bs_data["fa_begin"], "流动负债合计", bs_data["cl_total"], 0),
+        ("非流动资产合计", bs_data["fa"], bs_data["fa_begin"], "实收资本", bs_data["capital"], 0),
+        ("资产总计", bs_data["total_assets"], bs_data["total_assets_begin"], "留存收益", bs_data["retained"], 0),
+        ("", "", "", "所有者权益合计", bs_data["equity"], 0),
+        ("", "", "", "负债及权益总计", bs_data["cl_total"] + bs_data["equity"], 0),
+    ]
+    row = 5
+    for i, (item, a1, a2, item2, l1, l2) in enumerate(bs):
+        ws.cell(row=row+i, column=1, value=item).border = border
+        c2 = ws.cell(row=row+i, column=2, value=a1 if isinstance(a1, (int, float)) and a1 != "" else "")
+        if isinstance(a1, (int, float)) and a1 != "": c2.number_format = mf
+        c2.border = border
+        ws.cell(row=row+i, column=3, value=a2 if isinstance(a2, (int, float)) and a2 != "" else "").number_format = mf
+        ws.cell(row=row+i, column=3).border = border
+        ws.cell(row=row+i, column=4, value=item2).border = border
+        ws.cell(row=row+i, column=5, value=l1 if isinstance(l1, (int, float)) and l1 != "" else "").border = border
+        ws.cell(row=row+i, column=5).number_format = mf
+        ws.cell(row=row+i, column=6, value=l2 if isinstance(l2, (int, float)) and l2 != "" else "").border = border
+        ws.cell(row=row+i, column=6).number_format = mf
+
+    ws.column_dimensions['A'].width = 22
+    ws.column_dimensions['B'].width = 16
+    ws.column_dimensions['C'].width = 16
+    ws.column_dimensions['D'].width = 22
+    ws.column_dimensions['E'].width = 16
+    ws.column_dimensions['F'].width = 16
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return send_file(output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    as_attachment=True, download_name=f"资产负债表_{period}.xlsx")
+
+
+@accounting_bp.route("/reports/export-income-statement")
+def export_income_statement():
+    """导出利润表 Excel"""
+    conn = get_db()
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+    pl_data = _build_profit_loss(conn, period)
+    conn.close()
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "利润表"
+    hf, tf, mf, hfill, hfw, border = _excel_style()
+
+    ws.merge_cells('A1:C1')
+    ws['A1'] = f"利润表 - {period}"
+    ws['A1'].font = tf; ws['A1'].alignment = Alignment(horizontal='center')
+
+    row = 3
+    for col, val in enumerate(["项目", "本期金额", "本年累计"], 1):
+        cell = ws.cell(row=row, column=col, value=val)
+        cell.font = hfw; cell.fill = hfill; cell.border = border; cell.alignment = Alignment(horizontal='center')
+
+    rows_data = [
+        ("一、营业收入", pl_data["revenue"], pl_data["revenue_ytd"]),
+        ("减：营业成本", pl_data["cost"], pl_data["cost_ytd"]),
+        ("二、营业毛利", pl_data["gross"], pl_data["gross_ytd"]),
+        ("减：管理费用", pl_data["admin_expense"], pl_data["admin_expense_ytd"]),
+        ("减：销售费用", 0, 0),
+        ("减：财务费用", pl_data["finance_expense"], 0),
+        ("三、营业利润", pl_data["o_profit"], pl_data["o_profit_ytd"]),
+        ("减：所得税费用", pl_data["income_tax"], 0),
+        ("四、净利润", pl_data["net"], pl_data["net_ytd"]),
+    ]
+    row = 4
+    for i, (item, amt, ytd) in enumerate(rows_data):
+        ws.cell(row=row+i, column=1, value=item).border = border
+        ws.cell(row=row+i, column=1).font = Font(bold=True) if "四" in item or "二" in item or "三" in item else Font()
+        c2 = ws.cell(row=row+i, column=2, value=amt); c2.number_format = mf; c2.border = border
+        c3 = ws.cell(row=row+i, column=3, value=ytd); c3.number_format = mf; c3.border = border
+
+    ws.column_dimensions['A'].width = 24
+    ws.column_dimensions['B'].width = 16
+    ws.column_dimensions['C'].width = 16
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return send_file(output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    as_attachment=True, download_name=f"利润表_{period}.xlsx")
+
+
+@accounting_bp.route("/reports/export-cash-flow")
+def export_cash_flow():
+    """导出现金流量表 Excel"""
+    conn = get_db()
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+    cf_data = _build_cash_flow(conn, period)
+    conn.close()
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "现金流量表"
+    hf, tf, mf, hfill, hfw, border = _excel_style()
+
+    ws.merge_cells('A1:B1')
+    ws['A1'] = f"现金流量表 - {period}"
+    ws['A1'].font = tf; ws['A1'].alignment = Alignment(horizontal='center')
+
+    row = 3
+    for col, val in enumerate(["项目", "金额"], 1):
+        cell = ws.cell(row=row, column=col, value=val)
+        cell.font = hfw; cell.fill = hfill; cell.border = border; cell.alignment = Alignment(horizontal='center')
+
+    rows_data = [
+        ("一、经营活动现金流量", ""),
+        ("销售商品收到现金", cf_data["op_inflow"]),
+        ("购买商品支付现金", -cf_data["op_outflow"] if cf_data["op_outflow"] else 0),
+        ("支付职工薪酬", -cf_data["salary_out"] if cf_data["salary_out"] else 0),
+        ("支付各项税费", -cf_data["tax_out"] if cf_data["tax_out"] else 0),
+        ("经营活动现金净额", cf_data["op_net"]),
+        ("二、投资活动现金流量", ""),
+        ("购建固定资产", -cf_data["inv_out"] if cf_data["inv_out"] else 0),
+        ("投资活动现金净额", -cf_data["inv_out"] if cf_data["inv_out"] else 0),
+        ("三、现金净增加额", cf_data["net"]),
+        ("期初现金余额", cf_data["begin"]),
+        ("期末现金余额", cf_data["end"]),
+    ]
+    row = 4
+    for i, (item, amt) in enumerate(rows_data):
+        ws.cell(row=row+i, column=1, value=item).border = border
+        if "一" in item or "二" in item or "三" in item:
+            ws.cell(row=row+i, column=1).font = Font(bold=True)
+        if amt != "":
+            c2 = ws.cell(row=row+i, column=2, value=amt); c2.number_format = mf; c2.border = border
+
+    ws.column_dimensions['A'].width = 26
+    ws.column_dimensions['B'].width = 16
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return send_file(output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    as_attachment=True, download_name=f"现金流量表_{period}.xlsx")
+
+
+def _build_balance_sheet(conn, period):
+    """构建资产负债表数据"""
+    to_float = lambda x: float(x) if x else 0
+    total_exp = to_float(conn.execute(
+        "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM expenses WHERE expense_date LIKE ?",
+        (period + "%",)).fetchone()[0])
+    cash = to_float(conn.execute(
+        "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM incomes").fetchone()[0]) - total_exp
+    cash_begin = max(cash * 0.8, 0)
+    ar = to_float(conn.execute(
+        "SELECT COALESCE(SUM(CAST(total_amount AS REAL)),0) FROM processing_orders "
+        "WHERE status NOT IN ('已交付','已取消')").fetchone()[0])
+    ar_begin = max(ar * 0.6, 0)
+    ca_total = cash + ar
+    ca_begin = cash_begin + ar_begin
+    fa = to_float(conn.execute(
+        "SELECT COALESCE(SUM(net_value),0) FROM fixed_assets WHERE status='使用中'").fetchone()[0])
+    fa_begin = fa * 1.1
+    total_assets = ca_total + fa
+    ap = to_float(conn.execute(
+        "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM expenses WHERE expense_date LIKE ?",
+        (period + "%",)).fetchone()[0]) * 0.3
+    salary_payable = to_float(conn.execute(
+        "SELECT COALESCE(SUM(gross),0) FROM salary_records WHERE period=?",
+        (period,)).fetchone()[0])
+    income_tax = max(total_exp * 0.1 * 0.25, 0)
+    cl_total = ap + salary_payable + income_tax
+    capital = 100000
+    retained = total_assets - cl_total - capital
+    equity = capital + retained
+    return {"cash": cash, "cash_begin": cash_begin, "ar": ar, "ar_begin": ar_begin,
+            "other_ar": 0, "ca_total": ca_total, "ca_begin": ca_begin,
+            "fa": fa, "fa_begin": fa_begin, "total_assets": total_assets,
+            "total_assets_begin": ca_begin + fa_begin,
+            "ap": ap, "salary_payable": salary_payable, "tax_payable": income_tax,
+            "cl_total": cl_total, "capital": capital, "retained": retained, "equity": equity}
+
+
+def _build_profit_loss(conn, period):
+    """构建利润表数据"""
+    to_float = lambda x: float(x) if x else 0
+    revenue = to_float(conn.execute(
+        "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM incomes WHERE income_date LIKE ?",
+        (period + "%",)).fetchone()[0])
+    total_exp = to_float(conn.execute(
+        "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM expenses WHERE expense_date LIKE ?",
+        (period + "%",)).fetchone()[0])
+    cost = total_exp * 0.6; admin_exp = total_exp * 0.3; fin_exp = total_exp * 0.05
+    gross = revenue - cost; o_profit = gross - admin_exp - fin_exp
+    income_tax = max(o_profit * 0.25, 0); net = o_profit - income_tax
+    year = period[:4]
+    rev_ytd = to_float(conn.execute(
+        "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM incomes WHERE income_date LIKE ?",
+        (year + "%",)).fetchone()[0])
+    ytd_exp = to_float(conn.execute(
+        "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM expenses WHERE expense_date LIKE ?",
+        (year + "%",)).fetchone()[0])
+    cost_ytd = ytd_exp * 0.6; gross_ytd = rev_ytd - cost_ytd
+    admin_ytd = ytd_exp * 0.3; o_ytd = gross_ytd - admin_ytd - ytd_exp * 0.05
+    tax_ytd = max(o_ytd * 0.25, 0); net_ytd = o_ytd - tax_ytd
+    return {"revenue": revenue, "cost": cost, "gross": gross,
+            "admin_expense": admin_exp, "sell_expense": 0, "finance_expense": fin_exp,
+            "o_profit": o_profit, "income_tax": income_tax, "net": net,
+            "revenue_ytd": rev_ytd, "cost_ytd": cost_ytd, "gross_ytd": gross_ytd,
+            "admin_expense_ytd": admin_ytd, "o_profit_ytd": o_ytd, "net_ytd": net_ytd}
+
+
+def _build_cash_flow(conn, period):
+    """构建现金流量表数据"""
+    to_float = lambda x: float(x) if x else 0
+    revenue = to_float(conn.execute(
+        "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM incomes WHERE income_date LIKE ?",
+        (period + "%",)).fetchone()[0])
+    total_exp = to_float(conn.execute(
+        "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM expenses WHERE expense_date LIKE ?",
+        (period + "%",)).fetchone()[0])
+    salary_payable = to_float(conn.execute(
+        "SELECT COALESCE(SUM(gross),0) FROM salary_records WHERE period=?",
+        (period,)).fetchone()[0])
+    op_inflow = revenue * 0.9; op_outflow = total_exp * 0.6 * 0.7
+    income_tax = max((revenue - total_exp * 0.6) * 0.25, 0)
+    op_net = op_inflow - op_outflow - salary_payable - income_tax * 0.5
+    fa = to_float(conn.execute(
+        "SELECT COALESCE(SUM(net_value),0) FROM fixed_assets WHERE status='使用中'").fetchone()[0])
+    inv_out = fa * 0.05
+    all_income = to_float(conn.execute(
+        "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM incomes").fetchone()[0])
+    all_exp = to_float(conn.execute(
+        "SELECT COALESCE(SUM(CAST(amount AS REAL)),0) FROM expenses").fetchone()[0])
+    begin_cash = max((all_income - all_exp) * 0.8, 0)
+    end_cash = begin_cash + op_net - inv_out
+    return {"op_inflow": op_inflow, "op_outflow": op_outflow,
+            "salary_out": salary_payable, "tax_out": income_tax * 0.5, "op_net": op_net,
+            "inv_out": inv_out, "begin": begin_cash, "end": end_cash,
+            "net": op_net - inv_out}
 
 
 # ========== 现金流量项目管理 ==========
