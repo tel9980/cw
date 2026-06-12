@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}数量金额式明细账 - 氧化加工厂财务系统{% endblock %}
+{% block head_extra %}
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .header { background: #1890ff; color: white; padding: 20px; margin-bottom: 20px; }
+        .header h1 { font-size: 24px; }
+        .nav { background: white; padding: 10px 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .nav a { color: #333; text-decoration: none; margin-right: 20px; padding: 5px 10px; font-size: 14px; }
+        .nav a:hover { color: #1890ff; }
+        .nav a.active { color: #1890ff; font-weight: 600; border-bottom: 2px solid #1890ff; }
+        .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .card h2 { font-size: 18px; margin-bottom: 15px; color: #333; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #fafafa; font-weight: 600; white-space: nowrap; }
+        td.num, th.num { text-align: right; font-family: "SF Mono", Monaco, monospace; }
+        .btn { display: inline-block; padding: 8px 16px; background: #1890ff; color: white; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; font-size: 14px; }
+        .btn:hover { background: #40a9ff; }
+        .btn-sm { padding: 6px 12px; font-size: 12px; }
+        .btn-default { background: #fff; color: #333; border: 1px solid #d9d9d9; }
+        .btn-default:hover { background: #fafafa; color: #1890ff; border-color: #1890ff; }
+        .filter-bar { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
+        .filter-bar select, .filter-bar input { padding: 8px 12px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; }
+        .flash { padding: 12px 15px; border-radius: 4px; margin-bottom: 15px; font-size: 14px; }
+        .flash-info { background: #e6f7ff; border: 1px solid #91d5ff; color: #1890ff; }
+        .empty-state { text-align: center; padding: 40px; color: #999; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; }
+        .stat-item { background: #f8f9fa; padding: 15px; border-radius: 6px; text-align: center; }
+        .stat-value { font-size: 22px; font-weight: bold; color: #1890ff; }
+        .stat-label { font-size: 12px; color: #666; margin-top: 5px; }
+        @media print {
+            .header { background: white; color: black; padding: 10px; margin-bottom: 10px; }
+            .nav, .filter-bar, .btn, .flash, .empty-state { display: none; }
+            .card { box-shadow: none; border: 1px solid #ddd; page-break-inside: avoid; }
+            body { background: white; font-size: 12px; }
+            table { font-size: 11px; }
+            th, td { padding: 4px 6px; }
+        }
+    </style>
+{% endblock %}
+{% block breadcrumb %}
+<div class="breadcrumb">
+    <a href="/">首页</a>
+    <span class="sep">›</span>
+    <a href="/accounting-books">会计账簿</a>
+    <span class="sep">›</span>
+    <span>数量金额式明细账</span>
+</div>
+{% endblock %}
+{% block content %}
+<div class="container">
+    <div class="card">
+        <div class="filter-bar">
+            <form method="GET" style="display:contents;">
+                <label>会计期间：</label>
+                <select name="period" onchange="this.form.submit()">
+                    {% for p in periods %}
+                    <option value="{{ p }}" {% if period == p %}selected{% endif %}>{{ p }}</option>
+                    {% endfor %}
+                </select>
+                <label>科目编码/名称：</label>
+                <input type="text" name="account_code" placeholder="搜索科目..." value="{{ account_code or '' }}" style="width:200px;">
+                <button type="submit" class="btn btn-sm">查询</button>
+            </form>
+        </div>
+
+        {% if account_code and account_name %}
+        <h3 style="font-size:15px;margin:10px 0;color:#666;">
+            科目：<strong>{{ account_code }} - {{ account_name }}</strong>
+            &nbsp;|&nbsp; 期间：<strong>{{ period }}</strong>
+            {% if is_quantity %}<span style="color:#52c41a;margin-left:8px;">(数量核算)</span>{% endif %}
+        </h3>
+        {% endif %}
+
+        {% if ledger_data %}
+        <table>
+            <thead>
+                <tr>
+                    <th>日期</th>
+                    <th>凭证号</th>
+                    <th>摘要</th>
+                    {% if is_quantity %}
+                    <th class="num">借方数量</th>
+                    <th class="num">借方单价</th>
+                    {% endif %}
+                    <th class="num">借方金额</th>
+                    {% if is_quantity %}
+                    <th class="num">贷方数量</th>
+                    <th class="num">贷方单价</th>
+                    {% endif %}
+                    <th class="num">贷方金额</th>
+                    {% if is_quantity %}
+                    <th class="num">结存数量</th>
+                    {% endif %}
+                    <th class="num">结存金额</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% set ns = namespace(dr=0, cr=0, dq=0, cq=0, bal=0, bal_q=0) %}
+                {% for entry in ledger_data %}
+                {% set ns.dr = ns.dr + (entry.debit|float if entry.debit else 0) %}
+                {% set ns.cr = ns.cr + (entry.credit|float if entry.credit else 0) %}
+                {% set ns.bal = ns.bal + (entry.debit|float if entry.debit else 0) - (entry.credit|float if entry.credit else 0) %}
+                {% if is_quantity %}
+                {% set ns.dq = ns.dq + (entry.quantity|float if entry.quantity else 0) %}
+                {% set ns.cq = ns.cq + (entry.quantity|float if entry.quantity else 0) %}
+                {% set ns.bal_q = ns.bal_q + (entry.quantity|float if entry.quantity else 0) - (entry.quantity|float if entry.quantity else 0) %}
+                {% endif %}
+                <tr>
+                    <td>{{ entry.voucher_date }}</td>
+                    <td>{{ entry.voucher_no }}</td>
+                    <td>{{ entry.summary or '-' }}</td>
+                    {% if is_quantity %}
+                    <td class="num">{% if entry.debit and entry.quantity %}{{ '%.4f'|format(entry.quantity|float) }}{% endif %}</td>
+                    <td class="num">{% if entry.unit_price %}{{ '%.4f'|format(entry.unit_price|float) }}{% endif %}</td>
+                    {% endif %}
+                    <td class="num">{% if entry.debit|float > 0 %}{{ '%.2f'|format(entry.debit|float) }}{% endif %}</td>
+                    {% if is_quantity %}
+                    <td class="num">{% if entry.credit and entry.quantity %}{{ '%.4f'|format(entry.quantity|float) }}{% endif %}</td>
+                    <td class="num">{% if entry.unit_price %}{{ '%.4f'|format(entry.unit_price|float) }}{% endif %}</td>
+                    {% endif %}
+                    <td class="num">{% if entry.credit|float > 0 %}{{ '%.2f'|format(entry.credit|float) }}{% endif %}</td>
+                    {% if is_quantity %}
+                    <td class="num" style="font-weight:600;">{{ '%.4f'|format(ns.bal_q) }}</td>
+                    {% endif %}
+                    <td class="num" style="font-weight:600;">{{ '%.2f'|format(ns.bal) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr style="font-weight:bold;background:#fafafa;border-top:2px solid #333;">
+                    <td colspan="3">本期合计</td>
+                    {% if is_quantity %}
+                    <td class="num">{{ '%.4f'|format(ns.dq) }}</td>
+                    <td class="num"></td>
+                    {% endif %}
+                    <td class="num">{{ '%.2f'|format(ns.dr) }}</td>
+                    {% if is_quantity %}
+                    <td class="num">{{ '%.4f'|format(ns.cq) }}</td>
+                    <td class="num"></td>
+                    {% endif %}
+                    <td class="num">{{ '%.2f'|format(ns.cr) }}</td>
+                    {% if is_quantity %}
+                    <td class="num">{{ '%.4f'|format(ns.bal_q) }}</td>
+                    {% endif %}
+                    <td class="num">{{ '%.2f'|format(ns.bal) }}</td>
+                </tr>
+            </tfoot>
+        </table>
+        {% elif account_code %}
+        <div class="empty-state">该科目暂无凭证记录</div>
+        {% else %}
+        <div class="empty-state">请选择科目进行查询</div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

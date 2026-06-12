@@ -228,10 +228,11 @@
                     <table class="voucher-lines" id="voucherLinesTable">
                         <thead>
                             <tr>
-                                <th style="width:25%;">科目</th>
-                                <th style="width:20%;">辅助核算</th>
-                                <th style="width:20%;" class="num">借方金额</th>
-                                <th style="width:20%;" class="num">贷方金额</th>
+                                <th style="width:20%;">科目</th>
+                                <th style="width:15%;">辅助核算</th>
+                                <th style="width:15%;">数量/单位</th>
+                                <th style="width:15%;" class="num">借方金额</th>
+                                <th style="width:15%;" class="num">贷方金额</th>
                                 <th style="width:5%;">操作</th>
                             </tr>
                         </thead>
@@ -241,6 +242,7 @@
                         <tfoot>
                             <tr style="background:#fafafa; font-weight:bold;">
                                 <td>合计</td>
+                                <td></td>
                                 <td></td>
                                 <td class="num" id="debitTotal">0.00</td>
                                 <td class="num" id="creditTotal">0.00</td>
@@ -277,7 +279,8 @@
                 supplier: a.aux_supplier,
                 department: a.aux_department,
                 project: a.aux_project,
-                employee: a.aux_employee
+                employee: a.aux_employee,
+                is_quantity: a.is_quantity_account || 0
             };
         });
 
@@ -517,6 +520,17 @@
                 auxCell.innerHTML = '<span style="color:#ccc;font-size:12px;">无</span>';
             }
 
+            // toggle quantity cells based on is_quantity_account
+            const qtyCell = row.querySelector('.qty-cell');
+            const qtyCellEmpty = row.querySelector('.qty-cell-empty');
+            if (flags && flags.is_quantity) {
+                if (qtyCell) qtyCell.style.display = '';
+                if (qtyCellEmpty) qtyCellEmpty.style.display = 'none';
+            } else {
+                if (qtyCell) qtyCell.style.display = 'none';
+                if (qtyCellEmpty) qtyCellEmpty.style.display = '';
+            }
+
             // close dropdown
             wrapper.querySelector('.autocomplete-dropdown').classList.remove('show');
             wrapper._activeIndex = -1;
@@ -552,6 +566,14 @@
                     </div>
                 </td>
                 <td><span style="color:#ccc;font-size:12px;">无</span></td>
+                <td class="qty-cell" style="display:none;">
+                    <div style="display:flex; gap:4px;">
+                        <input type="number" step="0.01" name="line_quantity[]" class="qty-input" placeholder="数量" style="width:50%; font-size:12px;">
+                        <input type="text" name="line_unit[]" class="unit-input" placeholder="单位" style="width:50%; font-size:12px;">
+                    </div>
+                    <input type="hidden" name="line_unit_price[]" value="0">
+                </td>
+                <td class="qty-cell-empty"><span style="color:#ccc;font-size:12px;">-</span></td>
                 <td><input type="number" step="0.01" name="line_debit[]" class="debit-input" style="width:100%;" placeholder="0.00" oninput="updateTotals()"></td>
                 <td><input type="number" step="0.01" name="line_credit[]" class="credit-input" style="width:100%;" placeholder="0.00" oninput="updateTotals()"></td>
                 <td><button type="button" class="remove-btn" onclick="removeLine(this)">删除</button></td>

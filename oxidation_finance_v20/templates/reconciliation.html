@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% block title %}往来核销 - 氧化加工厂财务系统{% endblock %}
+{% block head_extra %}
+    <style>
+        td.num, th.num { text-align: right; font-family: monospace; }
+        .filter-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    </style>
+{% endblock %}
+{% block breadcrumb %}
+<div class="breadcrumb">
+    <a href="/">首页</a> <span class="sep">›</span> 往来核销
+</div>
+{% endblock %}
+{% block content %}
+    {% if message %}<div class="message message-success">{{ message }}</div>{% endif %}
+    {% if error %}<div class="message message-error">{{ error }}</div>{% endif %}
+
+    <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h2 style="margin-bottom:0;">往来核销</h2>
+            <div style="display:flex; gap:8px;">
+                <button class="btn btn-success" onclick="submitReconciliation()">核销</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="filter-bar" style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+            <label style="font-size:13px; color:#555;">往来类型：</label>
+            <select id="entity_type" name="entity_type" onchange="onEntityTypeChange()" style="padding:6px 10px; border:1px solid #d9d9d9; border-radius:4px; font-size:13px;">
+                <option value="customer" {% if entity_type == 'customer' %}selected{% endif %}>客户</option>
+                <option value="supplier" {% if entity_type == 'supplier' %}selected{% endif %}>供应商</option>
+            </select>
+            <label style="font-size:13px; color:#555;">往来单位：</label>
+            <select id="entity_id" name="entity_id" onchange="onEntityIdChange()" style="padding:6px 10px; border:1px solid #d9d9d9; border-radius:4px; font-size:13px;">
+                <option value="">-- 请选择 --</option>
+                {% for e in entity_list %}
+                <option value="{{ e.id }}" data-name="{{ e.name }}" {% if entity_id == e.id|string %}selected{% endif %}>{{ e.name }}</option>
+                {% endfor %}
+            </select>
+            {% if periods %}
+            <label style="font-size:13px; color:#555;">期间：</label>
+            <select name="period" style="padding:6px 10px; border:1px solid #d9d9d9; border-radius:4px; font-size:13px;">
+                {% for p in periods %}
+                <option value="{{ p.period }}" {% if period == p.period %}selected{% endif %}>{{ p.period }}</option>
+                {% endfor %}
+            </select>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>未核销明细</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width:40px;">
+                            <input type="checkbox" onclick="toggleAll(this)" id="select-all">
+                        </th>
+                        <th>日期</th>
+                        <th>凭证号</th>
+                        <th>科目</th>
+                        <th>摘要</th>
+                        <th class="num">借方金额</th>
+                        <th class="num">贷方金额</th>
+                        <th class="num">余额</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if unreconciled_lines %}
+                    {% for line in unreconciled_lines %}
+                    <tr>
+                        <td><input type="checkbox" class="line-check" value="{{ line.id }}" data-balance="{{ line.balance }}"></td>
+                        <td>{{ line.voucher_date or '-' }}</td>
+                        <td>{{ line.voucher_no or '-' }}</td>
+                        <td>{{ line.account_code }} {{ line.account_name }}</td>
+                        <td>{{ line.summary or '-' }}</td>
+                        <td class="num">{{ "%.2f"|format(line.debit or 0) }}</td>
+                        <td class="num">{{ "%.2f"|format(line.credit or 0) }}</td>
+                        <td class="num">{{ "%.2f"|format(line.balance or 0) }}</td>
+                    </tr>
+                    {% endfor %}
+                    {% else %}
+                    <tr>
+                        <td colspan="8" style="text-align:center; color:#999; padding:30px;">请选择往来单位以查看未核销明细</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>已核销记录</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>核销日期</th>
+                        <th>凭证号</th>
+                        <th>对方科目</th>
+                        <th class="num">核销金额</th>
+                        <th>备注</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if reconciled_records %}
+                    {% for r in reconciled_records %}
+                    <tr>
+                        <td>{{ r.reconciliation_date or '-' }}</td>
+                        <td>{{ r.voucher_no or '-' }}</td>
+                        <td>{{ r.account_code or '-' }} {{ r.account_name or '' }}</td>
+                        <td class="num">{{ "%.2f"|format(r.amount or 0) }}</td>
+                        <td>{{ r.notes or '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                    {% else %}
+                    <tr>
+                        <td colspan="5" style="text-align:center; color:#999; padding:30px;">暂无已核销记录</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Hidden form for reconciliation submission -->
+    <form id="reconciliation-form" method="POST" action="/reconciliation" style="display:none;">
+        <input type="hidden" name="entity_type" id="form_entity_type" value="{{ entity_type }}">
+        <input type="hidden" name="entity_id" id="form_entity_id" value="{{ entity_id }}">
+        <input type="hidden" name="selected_line_ids" id="form_selected_line_ids">
+        <input type="hidden" name="reference_type" id="form_reference_type">
+        <input type="hidden" name="reference_id" id="form_reference_id">
+        <input type="hidden" name="notes" id="form_notes">
+    </form>
+{% endblock %}
+{% block scripts %}
+<script>
+    function onEntityTypeChange() {
+        var entityType = document.getElementById('entity_type').value;
+        window.location.href = '/reconciliation?entity_type=' + entityType + '&entity_id=';
+    }
+
+    function onEntityIdChange() {
+        var entityType = document.getElementById('entity_type').value;
+        var entityId = document.getElementById('entity_id').value;
+        if (entityId) {
+            window.location.href = '/reconciliation?entity_type=' + entityType + '&entity_id=' + entityId;
+        }
+    }
+
+    function toggleAll(source) {
+        var checks = document.querySelectorAll('.line-check');
+        for (var i = 0; i < checks.length; i++) {
+            checks[i].checked = source.checked;
+        }
+    }
+
+    function submitReconciliation() {
+        var checks = document.querySelectorAll('.line-check:checked');
+        if (checks.length === 0) {
+            alert('请选择至少一条待核销明细');
+            return;
+        }
+        var ids = [];
+        for (var i = 0; i < checks.length; i++) {
+            ids.push(checks[i].value);
+        }
+        document.getElementById('form_selected_line_ids').value = ids.join(',');
+
+        var refType = prompt('请选择核销依据类型 (income/expense):', 'income');
+        if (!refType || (refType !== 'income' && refType !== 'expense')) {
+            alert('请输入 income 或 expense');
+            return;
+        }
+        document.getElementById('form_reference_type').value = refType;
+
+        var refId = prompt('请输入核销依据编号 (reference_id):', '');
+        if (refId === null) return;
+        document.getElementById('form_reference_id').value = refId;
+
+        var notes = prompt('请输入备注 (可选):', '');
+        document.getElementById('form_notes').value = notes || '';
+
+        document.getElementById('form_entity_type').value = document.getElementById('entity_type').value;
+        document.getElementById('form_entity_id').value = document.getElementById('entity_id').value;
+
+        document.getElementById('reconciliation-form').submit();
+    }
+</script>
+{% endblock %}

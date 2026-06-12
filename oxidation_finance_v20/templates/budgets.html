@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}预算管理 - 氧化加工厂财务系统{% endblock %}
+{% block head_extra %}
+    <style>
+        td.num, th.num { text-align: right; font-family: monospace; }
+        .filter-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    </style>
+{% endblock %}
+{% block breadcrumb %}
+<div class="breadcrumb">
+    <a href="/">首页</a> <span class="sep">›</span> 预算管理
+</div>
+{% endblock %}
+{% block content %}
+    {% if message %}<div class="message message-success">{{ message }}</div>{% endif %}
+    {% if error %}<div class="message message-error">{{ error }}</div>{% endif %}
+
+    <div class="card">
+        <div class="filter-bar" style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+            <label style="font-size:13px; color:#555;">预算期间：</label>
+            <select name="period" onchange="onFilterChange()" style="padding:6px 10px; border:1px solid #d9d9d9; border-radius:4px; font-size:13px;">
+                <option value="{{ period }}">{{ period }}</option>
+                {% for p in periods_list %}
+                {% if p.period != period %}
+                <option value="{{ p.period }}">{{ p.period }}</option>
+                {% endif %}
+                {% endfor %}
+            </select>
+            <label style="font-size:13px; color:#555;">目标类型：</label>
+            <select name="target_type" onchange="onFilterChange()" style="padding:6px 10px; border:1px solid #d9d9d9; border-radius:4px; font-size:13px;">
+                <option value="account" {% if target_type == 'account' %}selected{% endif %}>科目</option>
+                <option value="department" {% if target_type == 'department' %}selected{% endif %}>部门</option>
+                <option value="project" {% if target_type == 'project' %}selected{% endif %}>项目</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>预算设置</h2>
+        <form method="POST" action="/budgets">
+            <input type="hidden" name="period" id="budget_period" value="{{ period }}">
+            <input type="hidden" name="target_type" id="budget_target_type" value="{{ target_type }}">
+            {% if target_list %}
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>目标编码</th>
+                            <th>目标名称</th>
+                            <th style="width:140px;">预算金额</th>
+                            <th style="width:120px;">预警阈值(%)</th>
+                            <th>备注</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for t in target_list %}
+                        {% set target_id = t.id if t.id is defined else t.code %}
+                        {% set budget_row = budgets | selectattr('target_id', 'equalto', target_id|string) | list %}
+                        {% set existing = budget_row[0] if budget_row else {} %}
+                        <tr>
+                            <td>{{ t.code or target_id }}</td>
+                            <td>{{ t.name or '-' }}</td>
+                            <td>
+                                <input type="hidden" name="target_id[]" value="{{ target_id }}">
+                                <input type="number" name="budget_amount[]" step="0.01" min="0" value="{{ existing.budget_amount or '' }}" style="width:100%; padding:6px 8px; border:1px solid #d9d9d9; border-radius:4px; font-size:13px;">
+                            </td>
+                            <td>
+                                <input type="number" name="warn_threshold[]" step="1" min="0" max="100" value="{{ existing.warn_threshold or 90 }}" style="width:100%; padding:6px 8px; border:1px solid #d9d9d9; border-radius:4px; font-size:13px;">
+                            </td>
+                            <td>
+                                <input type="text" name="notes[]" value="{{ existing.notes or '' }}" style="width:100%; padding:6px 8px; border:1px solid #d9d9d9; border-radius:4px; font-size:13px;">
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div style="margin-top:15px;">
+                <button type="submit" class="btn">保存预算</button>
+            </div>
+            {% else %}
+            <div style="text-align:center; color:#999; padding:30px;">请选择目标类型以查看可用的预算目标</div>
+            {% endif %}
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>当前预算列表</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>期间</th>
+                        <th>目标类型</th>
+                        <th>目标编码</th>
+                        <th>目标名称</th>
+                        <th class="num">预算金额</th>
+                        <th class="num">预警阈值</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if budgets %}
+                    {% for b in budgets %}
+                    <tr>
+                        <td>{{ b.period }}</td>
+                        <td>
+                            {% if b.target_type == 'account' %}科目{% elif b.target_type == 'department' %}部门{% elif b.target_type == 'project' %}项目{% else %}{{ b.target_type }}{% endif %}
+                        </td>
+                        <td>{{ b.target_id }}</td>
+                        <td>
+                            {% set t = target_list | selectattr('id', 'equalto', b.target_id|string) | list if target_list is defined else [] %}
+                            {% if not t %}{% set t = target_list | selectattr('code', 'equalto', b.target_id|string) | list %}{% endif %}
+                            {{ t[0].name if t and t[0] else '-' }}
+                        </td>
+                        <td class="num">{{ "%.2f"|format(b.budget_amount or 0) }}</td>
+                        <td class="num">{{ (b.warn_threshold or 0) | int }}%</td>
+                        <td>
+                            <button class="btn btn-sm btn-outline" onclick="editBudget('{{ b.period }}', '{{ b.target_type }}', '{{ b.target_id }}', '{{ b.budget_amount }}', '{{ b.warn_threshold }}')">编辑</button>
+                            <form method="POST" action="/budgets/delete" style="display:inline;" onsubmit="return confirm('确定删除该预算记录？');">
+                                <input type="hidden" name="budget_id" value="{{ b.id }}">
+                                <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% else %}
+                    <tr>
+                        <td colspan="7" style="text-align:center; color:#999; padding:30px;">暂无预算记录</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+{% endblock %}
+{% block scripts %}
+<script>
+    function onFilterChange() {
+        var period = document.querySelector('select[name="period"]').value;
+        var targetType = document.querySelector('select[name="target_type"]').value;
+        window.location.href = '/budgets?period=' + period + '&target_type=' + targetType;
+    }
+
+    function editBudget(period, targetType, targetId, amount, threshold) {
+        document.querySelector('select[name="period"]').value = period;
+        document.querySelector('select[name="target_type"]').value = targetType;
+        setTimeout(function() {
+            var rows = document.querySelectorAll('tbody tr');
+            for (var i = 0; i < rows.length; i++) {
+                var hidden = rows[i].querySelector('input[name="target_id[]"]');
+                if (hidden && hidden.value === targetId) {
+                    var inputs = rows[i].querySelectorAll('input[type="number"], input[type="text"]');
+                    if (inputs.length >= 2) {
+                        inputs[1].value = amount;
+                        inputs[2].value = threshold;
+                    }
+                    rows[i].scrollIntoView({ behavior: 'smooth' });
+                    break;
+                }
+            }
+        }, 100);
+    }
+</script>
+{% endblock %}

@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta
 
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
-from flask import Blueprint, Response, render_template, request, redirect, send_file, session
+from flask import Blueprint, Response, jsonify, render_template, request, redirect, send_file, session
 
 from routes.helpers import get_db, to_float
 
@@ -39,6 +39,7 @@ def chart_of_accounts():
         aux_department = request.form.get("aux_department") == "1"
         aux_project = request.form.get("aux_project") == "1"
         aux_employee = request.form.get("aux_employee") == "1"
+        is_quantity_account = request.form.get("is_quantity_account") == "1"
         notes = request.form.get("notes", "")
 
         if not code or not name:
@@ -47,7 +48,7 @@ def chart_of_accounts():
             try:
                 from business.account_manager import AccountManager
                 am = AccountManager(conn=conn)
-                success, msg, _ = am.create_account(
+                success, msg, account_id = am.create_account(
                     code=code, name=name, account_type=account_type,
                     balance_direction=balance_direction,
                     aux_customer=aux_customer, aux_supplier=aux_supplier,
@@ -55,6 +56,12 @@ def chart_of_accounts():
                     aux_employee=aux_employee, notes=notes
                 )
                 if success:
+                    # 设置数量核算标记
+                    if is_quantity_account and account_id:
+                        conn.execute(
+                            "UPDATE chart_of_accounts SET is_quantity_account=1 WHERE id=?",
+                            (account_id,))
+                        conn.commit()
                     message = msg
                 else:
                     error = msg
@@ -64,6 +71,9 @@ def chart_of_accounts():
     accounts = [dict(a) for a in conn.execute(
         "SELECT * FROM chart_of_accounts ORDER BY code"
     ).fetchall()]
+    # 确保 is_quantity_account 字段存在
+    for a in accounts:
+        a.setdefault("is_quantity_account", 0)
 
     # 获取可用期间列表
     periods = [dict(p) for p in conn.execute(
@@ -393,6 +403,9 @@ def vouchers_page():
                 credits = request.form.getlist("line_credit[]")
                 aux_types = request.form.getlist("line_aux_type[]")
                 aux_ids = request.form.getlist("line_aux_id[]")
+                quantities = request.form.getlist("line_quantity[]")
+                units = request.form.getlist("line_unit[]")
+                unit_prices = request.form.getlist("line_unit_price[]")
 
                 total_debit = sum(float(d or 0) for d in debits)
                 total_credit = sum(float(c or 0) for c in credits)
@@ -420,6 +433,9 @@ def vouchers_page():
                         credit = float(credits[i] or 0)
                         aux_type = aux_types[i] if i < len(aux_types) else ""
                         aux_id = aux_ids[i] if i < len(aux_ids) else ""
+                        quantity = float(quantities[i] or 0) if i < len(quantities) else 0
+                        unit = units[i] if i < len(units) else ""
+                        unit_price = float(unit_prices[i] or 0) if i < len(unit_prices) else 0
                         if debit > 0 or credit > 0:
                             acc = conn.execute(
                                 "SELECT name FROM chart_of_accounts WHERE code=?", (account_code,)
@@ -428,11 +444,14 @@ def vouchers_page():
                             cursor.execute(
                                 """INSERT INTO voucher_lines
                                    (id, voucher_id, account_code, account_name, debit, credit,
-                                    summary, related_entity_type, related_entity_id)
-                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                    summary, related_entity_type, related_entity_id,
+                                    quantity, unit, unit_price)
+                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                                 (str(uuid.uuid4()), vid, account_code, acc_name,
                                  f"{debit:.2f}", f"{credit:.2f}", summary,
-                                 aux_type if aux_type else None, aux_id if aux_id else None))
+                                 aux_type if aux_type else None, aux_id if aux_id else None,
+                                 quantity if quantity else 0, unit if unit else "",
+                                 unit_price if unit_price else 0))
                     conn.commit()
                     message = f"凭证 {voucher_no} 创建成功"
             except Exception as e:
@@ -444,7 +463,7 @@ def vouchers_page():
     """).fetchall()]
 
     accounts_list = [dict(a) for a in conn.execute(
-        "SELECT code, name, account_type, aux_customer, aux_supplier, aux_department, aux_project, aux_employee FROM chart_of_accounts WHERE is_active=1 ORDER BY code"
+        "SELECT code, name, account_type, aux_customer, aux_supplier, aux_department, aux_project, aux_employee, COALESCE(is_quantity_account,0) as is_quantity_account FROM chart_of_accounts WHERE is_active=1 ORDER BY code"
     ).fetchall()]
 
     # 辅助核算：获取实体列表
@@ -485,7 +504,8 @@ def api_accounts_search():
     conn = get_db()
     try:
         results = [dict(r) for r in conn.execute("""
-            SELECT a.code, a.name, a.account_type, a.balance_direction
+            SELECT a.code, a.name, a.account_type, a.balance_direction,
+                   COALESCE(a.is_quantity_account, 0) as is_quantity_account
             FROM chart_of_accounts a
             WHERE a.is_active = 1
               AND (a.code LIKE ? OR a.name LIKE ?)
@@ -650,6 +670,7 @@ def accounting_books():
     aux_data = {}
     aux_detail_data = []
     aging_data = {}
+    quantity_data = []
 
     # ---- 公共：获取期初余额 ----
     opening_map = {}
@@ -782,6 +803,12 @@ def accounting_books():
                 "SELECT id, code, name FROM projects ORDER BY code").fetchall()]}
             for eid, ed in aux_entities.items():
                 ed["display"] = f"{ed.get('code','')} {ed['name']}"
+        elif aux_type == "employee":
+            # 员工表不存在，使用部门表(含manager字段)作为代理
+            aux_entities = {d["id"]: d for d in [dict(r) for r in conn.execute(
+                "SELECT id, code, name, manager FROM departments ORDER BY code").fetchall()]}
+            for eid, ed in aux_entities.items():
+                ed["display"] = f"{ed.get('manager', ed.get('name',''))}"
 
         if book_type == "aux_detail" and aux_entity_id:
             aux_detail_rows = conn.execute("""
@@ -1047,6 +1074,36 @@ def accounting_books():
             "net_increase": cf_operating_net + cf_investing_net + cf_financing_net,
         }
 
+    elif period and account_code and book_type == "quantity_amount":
+        # 数量金额式明细账
+        quantity_rows = conn.execute("""
+            SELECT v.voucher_no, v.voucher_date, v.summary,
+                   l.account_code, l.account_name,
+                   CAST(l.debit AS REAL) as debit, CAST(l.credit AS REAL) as credit,
+                   COALESCE(l.quantity, 0) as quantity,
+                   COALESCE(l.unit, '') as unit,
+                   COALESCE(l.unit_price, 0) as unit_price,
+                   v.status, v.id as vid
+            FROM voucher_lines l
+            JOIN accounting_vouchers v ON v.id = l.voucher_id
+            WHERE l.account_code = ? AND v.accounting_period = ?
+            ORDER BY v.voucher_date, v.voucher_no
+        """, (account_code, period)).fetchall()
+
+        # 计算数量余额
+        running_quantity = 0.0
+        quantity_data = []
+        for row in quantity_rows:
+            d = dict(row)
+            running_quantity += d["quantity"]
+            d["balance_quantity"] = running_quantity
+            quantity_data.append(d)
+
+        acc_info_row = conn.execute(
+            "SELECT code, name, account_type, balance_direction, COALESCE(is_quantity_account,0) as is_quantity_account FROM chart_of_accounts WHERE code=?",
+            (account_code,)).fetchone()
+        acc_info = dict(acc_info_row) if acc_info_row else None
+
     conn.close()
 
     # 获取辅助核算实体列表（用于筛选下拉）
@@ -1072,7 +1129,65 @@ def accounting_books():
                            aux_type=aux_type, aux_entity=aux_entity,
                            aux_customers=aux_customers, aux_suppliers=aux_suppliers,
                            aux_departments=aux_departments, aux_projects=aux_projects,
-                           aging_data=aging_data)
+                           aging_data=aging_data, quantity_data=quantity_data)
+
+
+@accounting_bp.route("/quantity-amount-ledger")
+def quantity_amount_ledger():
+    """数量金额式明细账专用页面"""
+    conn = get_db()
+    period = request.args.get("period", "")
+    account_code = request.args.get("account_code", "")
+
+    periods = [dict(p) for p in conn.execute(
+        "SELECT DISTINCT accounting_period FROM accounting_vouchers ORDER BY accounting_period DESC"
+    ).fetchall()]
+
+    accounts_list = [dict(a) for a in conn.execute(
+        "SELECT code, name, account_type, balance_direction, COALESCE(is_quantity_account,0) as is_quantity_account "
+        "FROM chart_of_accounts WHERE is_active=1 ORDER BY code"
+    ).fetchall()]
+
+    if not period and periods:
+        period = periods[0]["accounting_period"]
+
+    acc_info = None
+    quantity_data = []
+
+    if period and account_code:
+        quantity_rows = conn.execute("""
+            SELECT v.voucher_no, v.voucher_date, v.summary,
+                   l.account_code, l.account_name,
+                   CAST(l.debit AS REAL) as debit, CAST(l.credit AS REAL) as credit,
+                   COALESCE(l.quantity, 0) as quantity,
+                   COALESCE(l.unit, '') as unit,
+                   COALESCE(l.unit_price, 0) as unit_price,
+                   v.status, v.id as vid
+            FROM voucher_lines l
+            JOIN accounting_vouchers v ON v.id = l.voucher_id
+            WHERE l.account_code = ? AND v.accounting_period = ? AND v.status = '已记账'
+            ORDER BY v.voucher_date, v.voucher_no
+        """, (account_code, period)).fetchall()
+
+        running_quantity = 0.0
+        for row in quantity_rows:
+            d = dict(row)
+            running_quantity += d["quantity"]
+            d["balance_quantity"] = running_quantity
+            quantity_data.append(d)
+
+        acc_info_row = conn.execute(
+            "SELECT code, name, account_type, balance_direction, COALESCE(is_quantity_account,0) as is_quantity_account "
+            "FROM chart_of_accounts WHERE code=?",
+            (account_code,)).fetchone()
+        acc_info = dict(acc_info_row) if acc_info_row else None
+
+    conn.close()
+
+    return render_template("quantity_amount_ledger.html",
+                           periods=periods, current_period=period,
+                           accounts_list=accounts_list, current_account=account_code,
+                           acc_info=acc_info, quantity_data=quantity_data)
 
 
 # ========== 系统参数设置 ==========
@@ -5504,3 +5619,308 @@ def batch_delete_vouchers():
         message = f"删除失败: {e}"
     conn.close()
     return redirect(f"/voucher-approval?status=草稿&message={message}")
+
+
+# ========== 方案C: 往来核销管理 ==========
+
+@accounting_bp.route("/reconciliation", methods=["GET", "POST"])
+def reconciliation_page():
+    """往来核销主页面"""
+    conn = get_db()
+    message = None
+    error = None
+    entity_type = request.args.get("entity_type", "customer")
+    entity_id = request.args.get("entity_id", "")
+
+    if request.method == "POST":
+        entity_type = request.form.get("entity_type", "customer")
+        entity_id = request.form.get("entity_id", "")
+        selected_line_ids = request.form.get("selected_line_ids", "")
+        reference_type = request.form.get("reference_type", "")
+        reference_id = request.form.get("reference_id", "")
+        notes = request.form.get("notes", "")
+        created_by = request.form.get("created_by", "管理员")
+        now = datetime.now().isoformat()
+
+        if not entity_type or not entity_id or not selected_line_ids:
+            error = "请选择往来单位和待核销明细"
+        else:
+            try:
+                line_ids = [lid.strip() for lid in selected_line_ids.split(",") if lid.strip()]
+                for lid in line_ids:
+                    # 获取该行的金额（未核销余额）
+                    line = conn.execute(
+                        "SELECT debit, credit FROM voucher_lines WHERE id=?",
+                        (lid,)
+                    ).fetchone()
+                    if not line:
+                        continue
+                    balance = float(line["debit"] or 0) - float(line["credit"] or 0)
+                    if balance <= 0:
+                        continue
+                    conn.execute(
+                        """INSERT INTO reconciliation
+                           (id, entity_type, entity_id, voucher_line_id, reference_type,
+                            reference_id, amount, reconciliation_date, notes, created_by, created_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (str(uuid.uuid4()), entity_type, entity_id, lid,
+                         reference_type, reference_id, balance,
+                         date.today().isoformat(), notes, created_by, now))
+                conn.commit()
+                message = f"成功核销 {len(line_ids)} 条记录"
+            except Exception as e:
+                error = f"核销失败: {e}"
+
+    # 查询往来单位列表
+    entity_type_for_list = request.args.get("entity_type", entity_type) or "customer"
+    if entity_type_for_list == "customer":
+        entity_list = [dict(e) for e in conn.execute(
+            "SELECT id, name FROM customers ORDER BY name"
+        ).fetchall()]
+    else:
+        entity_list = [dict(e) for e in conn.execute(
+            "SELECT id, name FROM suppliers ORDER BY name"
+        ).fetchall()]
+
+    # 查询未核销的凭证行
+    unreconciled_lines = []
+    if entity_id:
+        lines = conn.execute("""
+            SELECT vl.id, vl.voucher_id, vl.account_code, vl.account_name,
+                   vl.debit, vl.credit, vl.summary, vl.related_entity_type, vl.related_entity_id,
+                   v.voucher_no, v.voucher_date, v.accounting_period
+            FROM voucher_lines vl
+            JOIN accounting_vouchers v ON v.id = vl.voucher_id
+            WHERE vl.related_entity_type = ? AND vl.related_entity_id = ?
+            ORDER BY v.voucher_date DESC, v.voucher_no DESC
+        """, (entity_type, entity_id)).fetchall()
+
+        for l in lines:
+            l = dict(l)
+            line_id = l["id"]
+            # 计算该行已核销的总额
+            reconciled = conn.execute(
+                "SELECT COALESCE(SUM(amount), 0) as total FROM reconciliation WHERE voucher_line_id=?",
+                (line_id,)
+            ).fetchone()
+            reconciled_amount = float(reconciled["total"] or 0)
+            balance = float(l["debit"] or 0) - float(l["credit"] or 0) - reconciled_amount
+            l["balance"] = balance
+            l["reconciled_amount"] = reconciled_amount
+            if balance != 0:
+                unreconciled_lines.append(l)
+
+    # 查询已核销记录
+    reconciled_records = []
+    if entity_id:
+        reconciled_records = [dict(r) for r in conn.execute("""
+            SELECT r.*, vl.account_code, vl.account_name,
+                   v.voucher_no, v.voucher_date
+            FROM reconciliation r
+            LEFT JOIN voucher_lines vl ON vl.id = r.voucher_line_id
+            LEFT JOIN accounting_vouchers v ON v.id = vl.voucher_id
+            WHERE r.entity_type = ? AND r.entity_id = ?
+            ORDER BY r.reconciliation_date DESC, r.created_at DESC
+        """, (entity_type, entity_id)).fetchall()]
+
+    conn.close()
+    return render_template("reconciliation.html",
+        entity_type=entity_type, entity_id=entity_id,
+        entity_list=entity_list, unreconciled_lines=unreconciled_lines,
+        reconciled_records=reconciled_records,
+        message=message, error=error)
+
+
+@accounting_bp.route("/api/reconciliation/unreconciled")
+def api_reconciliation_unreconciled():
+    """API返回未核销明细"""
+    entity_type = request.args.get("entity_type", "customer")
+    entity_id = request.args.get("entity_id", "")
+
+    if not entity_id:
+        return jsonify({"success": False, "data": [], "error": "缺少entity_id"})
+
+    conn = get_db()
+    try:
+        lines = conn.execute("""
+            SELECT vl.id, vl.voucher_id, vl.account_code, vl.account_name,
+                   vl.debit, vl.credit, vl.summary, vl.related_entity_type, vl.related_entity_id,
+                   v.voucher_no, v.voucher_date, v.accounting_period
+            FROM voucher_lines vl
+            JOIN accounting_vouchers v ON v.id = vl.voucher_id
+            WHERE vl.related_entity_type = ? AND vl.related_entity_id = ?
+            ORDER BY v.voucher_date DESC, v.voucher_no DESC
+        """, (entity_type, entity_id)).fetchall()
+
+        result = []
+        for l in lines:
+            l = dict(l)
+            line_id = l["id"]
+            reconciled = conn.execute(
+                "SELECT COALESCE(SUM(amount), 0) as total FROM reconciliation WHERE voucher_line_id=?",
+                (line_id,)
+            ).fetchone()
+            reconciled_amount = float(reconciled["total"] or 0)
+            balance = float(l["debit"] or 0) - float(l["credit"] or 0) - reconciled_amount
+            l["balance"] = balance
+            l["reconciled_amount"] = reconciled_amount
+            result.append(l)
+
+        return jsonify({"success": True, "data": result})
+    except Exception as e:
+        return jsonify({"success": False, "data": [], "error": str(e)})
+    finally:
+        conn.close()
+
+
+# ========== 方案D: 预算管理 ==========
+
+@accounting_bp.route("/budgets", methods=["GET", "POST"])
+def budgets_page():
+    """预算管理页面"""
+    conn = get_db()
+    message = None
+    error = None
+    period = request.args.get("period", date.today().strftime("%Y"))
+    target_type = request.args.get("target_type", "account")
+
+    if request.method == "POST":
+        period = request.form.get("period", date.today().strftime("%Y"))
+        target_type = request.form.get("target_type", "account")
+        target_ids = request.form.getlist("target_id[]")
+        budget_amounts = request.form.getlist("budget_amount[]")
+        warn_thresholds = request.form.getlist("warn_threshold[]")
+        notes = request.form.get("notes", "")
+        now = datetime.now().isoformat()
+
+        if not target_ids:
+            error = "请选择预算目标"
+        else:
+            try:
+                for i in range(len(target_ids)):
+                    tid = target_ids[i]
+                    amount = float(budget_amounts[i] or 0) if i < len(budget_amounts) else 0
+                    threshold = float(warn_thresholds[i] or 90) if i < len(warn_thresholds) else 90
+
+                    # Insert or replace
+                    existing = conn.execute(
+                        "SELECT id FROM budgets WHERE period=? AND target_type=? AND target_id=?",
+                        (period, target_type, tid)
+                    ).fetchone()
+
+                    if existing:
+                        conn.execute(
+                            """UPDATE budgets SET budget_amount=?, warn_threshold=?,
+                               notes=?, updated_at=? WHERE id=?""",
+                            (amount, threshold, notes, now, existing["id"]))
+                    else:
+                        conn.execute(
+                            """INSERT INTO budgets
+                               (id, period, target_type, target_id, budget_amount,
+                                warn_threshold, notes, created_at, updated_at)
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            (str(uuid.uuid4()), period, target_type, tid,
+                             amount, threshold, notes, now, now))
+                conn.commit()
+                message = f"成功保存 {len(target_ids)} 条预算记录"
+            except Exception as e:
+                error = f"保存预算失败: {e}"
+
+    # 查询目标列表
+    if target_type == "account":
+        target_list = [dict(t) for t in conn.execute(
+            "SELECT code as id, code, name FROM chart_of_accounts WHERE is_active=1 ORDER BY code"
+        ).fetchall()]
+    elif target_type == "department":
+        target_list = [dict(t) for t in conn.execute(
+            "SELECT id, code, name FROM departments ORDER BY code"
+        ).fetchall()]
+    elif target_type == "project":
+        target_list = [dict(t) for t in conn.execute(
+            "SELECT id, code, name FROM projects ORDER BY code"
+        ).fetchall()]
+    else:
+        target_list = []
+
+    # 查询已有预算
+    budgets = [dict(b) for b in conn.execute(
+        "SELECT * FROM budgets WHERE period=? AND target_type=? ORDER BY target_id",
+        (period, target_type)
+    ).fetchall()]
+
+    # 可用年度列表
+    periods_list = [dict(p) for p in conn.execute(
+        "SELECT DISTINCT period FROM budgets ORDER BY period DESC"
+    ).fetchall()]
+
+    conn.close()
+    return render_template("budgets.html",
+        period=period, target_type=target_type,
+        target_list=target_list, budgets=budgets,
+        periods_list=periods_list,
+        message=message, error=error)
+
+
+@accounting_bp.route("/budget-comparison")
+def budget_comparison():
+    """预算执行对比表"""
+    conn = get_db()
+    period = request.args.get("period", date.today().strftime("%Y"))
+    target_type = request.args.get("target_type", "account")
+
+    # 查询预算
+    budgets = [dict(b) for b in conn.execute(
+        "SELECT * FROM budgets WHERE period=? AND target_type=? ORDER BY target_id",
+        (period, target_type)
+    ).fetchall()]
+
+    # 计算实际发生额
+    comparison = []
+    for b in budgets:
+        tid = b["target_id"]
+        budget_amount = float(b["budget_amount"] or 0)
+        warn_threshold = float(b["warn_threshold"] or 90)
+
+        if target_type == "account":
+            # 按科目计算：从voucher_lines按account_code汇总
+            row = conn.execute("""
+                SELECT COALESCE(SUM(CAST(vl.debit AS REAL)), 0) as total_debit,
+                       COALESCE(SUM(CAST(vl.credit AS REAL)), 0) as total_credit
+                FROM voucher_lines vl
+                JOIN accounting_vouchers v ON v.id = vl.voucher_id
+                WHERE vl.account_code = ? AND v.accounting_period LIKE ?
+            """, (tid, f"{period}%")).fetchone()
+            actual = float(row["total_debit"] or 0) - float(row["total_credit"] or 0)
+        else:
+            # 按部门/项目：从voucher_lines按related_entity汇总
+            row = conn.execute("""
+                SELECT COALESCE(SUM(CAST(vl.debit AS REAL)), 0) as total_debit,
+                       COALESCE(SUM(CAST(vl.credit AS REAL)), 0) as total_credit
+                FROM voucher_lines vl
+                JOIN accounting_vouchers v ON v.id = vl.voucher_id
+                WHERE vl.related_entity_type = ? AND vl.related_entity_id = ?
+                  AND v.accounting_period LIKE ?
+            """, (target_type, tid, f"{period}%")).fetchone()
+            actual = float(row["total_debit"] or 0) - float(row["total_credit"] or 0)
+
+        variance = budget_amount - actual
+        execution_rate = (actual / budget_amount * 100) if budget_amount != 0 else 0
+
+        comparison.append({
+            "target_id": tid,
+            "budget_amount": budget_amount,
+            "actual_amount": actual,
+            "variance": variance,
+            "execution_rate": round(execution_rate, 2),
+            "warn_threshold": warn_threshold,
+        })
+
+    # 可用年度列表
+    periods_list = [dict(p) for p in conn.execute(
+        "SELECT DISTINCT period FROM budgets ORDER BY period DESC"
+    ).fetchall()]
+
+    conn.close()
+    return render_template("budget_comparison.html",
+        period=period, target_type=target_type,
+        comparison=comparison, periods_list=periods_list)

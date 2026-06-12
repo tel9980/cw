@@ -199,11 +199,11 @@
                             <td class="num">{{ '%.2f'|format(bal.credit) if bal.credit else '' }}</td>
                             <td class="num">{{ '%.2f'|format(bal.closing) if bal.closing else '' }}</td>
                             <td>
-                                {% if acc.aux_customer %}<span class="tag tag-aux">客户</span>{% endif %}
-                                {% if acc.aux_supplier %}<span class="tag tag-aux">供应商</span>{% endif %}
-                                {% if acc.aux_department %}<span class="tag tag-aux">部门</span>{% endif %}
-                                {% if acc.aux_project %}<span class="tag tag-aux">项目</span>{% endif %}
-                                {% if acc.aux_employee %}<span class="tag tag-aux">员工</span>{% endif %}
+                                {% if acc.aux_customer %}<a href="/accounting-books?type=aux_detail&aux_type=customer&period={{ selected_period }}" class="tag tag-aux" style="text-decoration:none;">客户</a>{% endif %}
+                                {% if acc.aux_supplier %}<a href="/accounting-books?type=aux_detail&aux_type=supplier&period={{ selected_period }}" class="tag tag-aux" style="text-decoration:none;">供应商</a>{% endif %}
+                                {% if acc.aux_department %}<a href="/accounting-books?type=aux_detail&aux_type=department&period={{ selected_period }}" class="tag tag-aux" style="text-decoration:none;">部门</a>{% endif %}
+                                {% if acc.aux_project %}<a href="/accounting-books?type=aux_detail&aux_type=project&period={{ selected_period }}" class="tag tag-aux" style="text-decoration:none;">项目</a>{% endif %}
+                                {% if acc.aux_employee %}<a href="/accounting-books?type=aux_detail&aux_type=employee&period={{ selected_period }}" class="tag tag-aux" style="text-decoration:none;">员工</a>{% endif %}
                                 {% if not acc.aux_customer and not acc.aux_supplier and not acc.aux_department and not acc.aux_project and not acc.aux_employee %}<span style="color:#999; font-size: 12px;">无</span>{% endif %}
                             </td>
                             <td>
@@ -324,6 +324,12 @@
                             <label><input type="checkbox" name="aux_department" value="1"> 部门核算</label>
                             <label><input type="checkbox" name="aux_project" value="1"> 项目核算</label>
                             <label><input type="checkbox" name="aux_employee" value="1"> 员工核算</label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>数量核算</label>
+                        <div class="checkbox-group">
+                            <label><input type="checkbox" name="is_quantity_account" value="1"> 数量核算</label>
                         </div>
                     </div>
                     <div class="form-group">

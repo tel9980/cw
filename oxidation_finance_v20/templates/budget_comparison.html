@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}预算执行对比 - 氧化加工厂财务系统{% endblock %}
+{% block head_extra %}
+    <style>
+        td.num, th.num { text-align: right; font-family: monospace; }
+        .filter-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+        .row-over { background: #fff1f0 !important; }
+        .row-over:hover { background: #ffe7e7 !important; }
+        .row-normal { background: #f6ffed !important; }
+        .row-normal:hover { background: #eeffe7 !important; }
+        .row-under { background: #fffbe6 !important; }
+        .row-under:hover { background: #fff8d4 !important; }
+        .status-over { color: #f5222d; font-weight: 600; }
+        .status-normal { color: #52c41a; font-weight: 600; }
+        .status-under { color: #faad14; font-weight: 600; }
+    </style>
+{% endblock %}
+{% block breadcrumb %}
+<div class="breadcrumb">
+    <a href="/">首页</a> <span class="sep">›</span> 预算执行对比
+</div>
+{% endblock %}
+{% block content %}
+    <div class="card">
+        <div class="filter-bar" style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+            <label style="font-size:13px; color:#555;">期间：</label>
+            <select name="period" onchange="onFilterChange()" style="padding:6px 10px; border:1px solid #d9d9d9; border-radius:4px; font-size:13px;">
+                <option value="{{ period }}" selected>{{ period }}</option>
+                {% for p in periods_list %}
+                {% if p.period != period %}
+                <option value="{{ p.period }}">{{ p.period }}</option>
+                {% endif %}
+                {% endfor %}
+            </select>
+            <label style="font-size:13px; color:#555;">目标类型：</label>
+            <select name="target_type" onchange="onFilterChange()" style="padding:6px 10px; border:1px solid #d9d9d9; border-radius:4px; font-size:13px;">
+                <option value="account" {% if target_type == 'account' %}selected{% endif %}>科目</option>
+                <option value="department" {% if target_type == 'department' %}selected{% endif %}>部门</option>
+                <option value="project" {% if target_type == 'project' %}selected{% endif %}>项目</option>
+            </select>
+        </div>
+    </div>
+
+    {% set summary = namespace(total_budget=0, total_actual=0, total_variance=0, count=0) %}
+    {% for c in comparison %}
+        {% set summary.total_budget = summary.total_budget + (c.budget_amount or 0) %}
+        {% set summary.total_actual = summary.total_actual + (c.actual_amount or 0) %}
+        {% set summary.total_variance = summary.total_variance + (c.variance or 0) %}
+        {% set summary.count = summary.count + 1 %}
+    {% endfor %}
+
+    <div class="stats-grid" style="margin-bottom:20px;">
+        <div class="stat-item">
+            <div class="stat-value">{{ "%.2f"|format(summary.total_budget) }}</div>
+            <div class="stat-label">预算总额</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value" style="color:#52c41a;">{{ "%.2f"|format(summary.total_actual) }}</div>
+            <div class="stat-label">实际发生额</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value" style="color:{% if summary.total_variance >= 0 %}#52c41a{% else %}#f5222d{% endif %};">{{ "%.2f"|format(summary.total_variance) }}</div>
+            <div class="stat-label">差异额</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value" style="color:#1890ff;">
+                {% if summary.total_budget > 0 %}
+                {{ "%.1f"|format(summary.total_actual / summary.total_budget * 100) }}%
+                {% else %}0.0%{% endif %}
+            </div>
+            <div class="stat-label">平均执行率</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>预算执行对比表</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>目标编码</th>
+                        <th>目标名称</th>
+                        <th class="num">预算金额</th>
+                        <th class="num">实际金额</th>
+                        <th class="num">差异额</th>
+                        <th class="num">执行率(%)</th>
+                        <th>状态</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if comparison %}
+                    {% for c in comparison %}
+                    {% set rate = c.execution_rate or 0 %}
+                    {% if rate > 100 %}
+                        {% set row_class = 'row-over' %}
+                        {% set status_text = '超预算' %}
+                        {% set status_class = 'status-over' %}
+                    {% elif rate >= (c.warn_threshold or 90) %}
+                        {% set row_class = 'row-normal' %}
+                        {% set status_text = '正常' %}
+                        {% set status_class = 'status-normal' %}
+                    {% else %}
+                        {% set row_class = 'row-under' %}
+                        {% set status_text = '未达标' %}
+                        {% set status_class = 'status-under' %}
+                    {% endif %}
+                    <tr class="{{ row_class }}">
+                        <td>{{ c.target_id }}</td>
+                        <td>{{ c.target_name or c.target_id }}</td>
+                        <td class="num">{{ "%.2f"|format(c.budget_amount or 0) }}</td>
+                        <td class="num">{{ "%.2f"|format(c.actual_amount or 0) }}</td>
+                        <td class="num">{{ "%.2f"|format(c.variance or 0) }}</td>
+                        <td class="num">{{ "%.1f"|format(rate) }}%</td>
+                        <td><span class="{{ status_class }}">{{ status_text }}</span></td>
+                    </tr>
+                    {% endfor %}
+                    {% else %}
+                    <tr>
+                        <td colspan="7" style="text-align:center; color:#999; padding:30px;">暂无预算执行数据</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+{% endblock %}
+{% block scripts %}
+<script>
+    function onFilterChange() {
+        var period = document.querySelector('select[name="period"]').value;
+        var targetType = document.querySelector('select[name="target_type"]').value;
+        window.location.href = '/budget-comparison?period=' + period + '&target_type=' + targetType;
+    }
+</script>
+{% endblock %}

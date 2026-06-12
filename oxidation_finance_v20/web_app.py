@@ -177,7 +177,7 @@ def create_templates():
     <div class="header">
         <div class="container">
             <div style="display:flex; align-items:center; gap:16px;">
-                <h1>氧化加工厂财务系统 V4.3</h1>
+                <h1>氧化加工厂财务系统 V4.4</h1>
                 {% if current_period %}
                 <span class="period-tag">{{ current_period }}</span>
                 {% endif %}
@@ -603,6 +603,52 @@ if __name__ == "__main__":
         print(f"[ERROR] 数据库不存在: {DB_PATH}")
         print("请先运行: python examples/generate_comprehensive_demo.py")
         sys.exit(1)
+
+    # Phase 20 数据库迁移（新增表和字段）
+    import sqlite3
+    mig_conn = sqlite3.connect(str(DB_PATH))
+    mig_conn.row_factory = sqlite3.Row
+    try:
+        # 方案B: 新增 is_quantity_account 字段
+        try:
+            mig_conn.execute("ALTER TABLE chart_of_accounts ADD COLUMN is_quantity_account INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+        # 方案B: 新增 quantity/unit/unit_price 字段
+        for col in ["quantity REAL DEFAULT 0", "unit TEXT DEFAULT ''", "unit_price REAL DEFAULT 0"]:
+            try:
+                mig_conn.execute(f"ALTER TABLE voucher_lines ADD COLUMN {col}")
+            except sqlite3.OperationalError:
+                pass
+        # 方案C: 往来核销表
+        mig_conn.execute("""
+            CREATE TABLE IF NOT EXISTS reconciliation (
+                id TEXT PRIMARY KEY, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL,
+                voucher_line_id TEXT, reference_type TEXT NOT NULL, reference_id TEXT NOT NULL,
+                amount REAL NOT NULL DEFAULT 0, reconciliation_date TEXT NOT NULL,
+                notes TEXT, created_by TEXT, created_at TEXT NOT NULL
+            )
+        """)
+        mig_conn.execute("CREATE INDEX IF NOT EXISTS idx_recon_entity ON reconciliation(entity_type, entity_id)")
+        mig_conn.execute("CREATE INDEX IF NOT EXISTS idx_recon_ref ON reconciliation(reference_type, reference_id)")
+        # 方案D: 预算管理表
+        mig_conn.execute("""
+            CREATE TABLE IF NOT EXISTS budgets (
+                id TEXT PRIMARY KEY, period TEXT NOT NULL, target_type TEXT NOT NULL,
+                target_id TEXT NOT NULL, budget_amount REAL NOT NULL DEFAULT 0,
+                warn_threshold REAL DEFAULT 90, notes TEXT,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                UNIQUE(period, target_type, target_id)
+            )
+        """)
+        mig_conn.execute("CREATE INDEX IF NOT EXISTS idx_budget_period ON budgets(period)")
+        mig_conn.execute("CREATE INDEX IF NOT EXISTS idx_budget_target ON budgets(target_type, target_id)")
+        mig_conn.commit()
+        print("✅ Phase 20 数据库迁移完成")
+    except Exception as e:
+        print(f"⚠️ 数据库迁移警告: {e}")
+    finally:
+        mig_conn.close()
 
     # 创建模板文件
     create_templates()

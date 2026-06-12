@@ -294,6 +294,7 @@
                             <option value="supplier" {% if aux_type=='supplier' %}selected{% endif %}>供应商</option>
                             <option value="department" {% if aux_type=='department' %}selected{% endif %}>部门</option>
                             <option value="project" {% if aux_type=='project' %}selected{% endif %}>项目</option>
+                            <option value="employee" {% if aux_type=='employee' %}selected{% endif %}>员工</option>
                         </select>
                         <label>核算对象：</label>
                         <select name="aux_entity" id="aux_detail_entity">
@@ -308,7 +309,7 @@
                 </div>
                 {% if aux_detail_data %}
                 <h3 style="font-size:15px;margin:10px 0;color:#666;">
-                    核算维度：<strong>{{ {'customer':'客户','supplier':'供应商','department':'部门','project':'项目'}.get(aux_type, aux_type) }}</strong>
+                    核算维度：<strong>{{ {'customer':'客户','supplier':'供应商','department':'部门','project':'项目','employee':'员工'}.get(aux_type, aux_type) }}</strong>
                     &nbsp;|&nbsp; 核算对象：<strong>{{ aux_data.entity_name }}</strong>
                     &nbsp;|&nbsp; 期间：<strong>{{ current_period }}</strong>
                 </h3>
@@ -353,6 +354,7 @@
                             <option value="supplier" {% if aux_type=='supplier' %}selected{% endif %}>供应商</option>
                             <option value="department" {% if aux_type=='department' %}selected{% endif %}>部门</option>
                             <option value="project" {% if aux_type=='project' %}selected{% endif %}>项目</option>
+                            <option value="employee" {% if aux_type=='employee' %}selected{% endif %}>员工</option>
                         </select>
                         <label>期间：</label>
                         {% if periods %}
@@ -363,7 +365,7 @@
                 </div>
                 {% if aux_data and aux_data.rows %}
                 <h3 style="font-size:15px;margin:10px 0;color:#666;">
-                    核算维度：<strong>{{ {'customer':'客户','supplier':'供应商','department':'部门','project':'项目'}.get(aux_type, aux_type) }}</strong>
+                    核算维度：<strong>{{ {'customer':'客户','supplier':'供应商','department':'部门','project':'项目','employee':'员工'}.get(aux_type, aux_type) }}</strong>
                     &nbsp;|&nbsp; 期间：<strong>{{ current_period }}</strong>
                     &nbsp;|&nbsp; {{ aux_data.rows|length }} 个核算对象
                 </h3>

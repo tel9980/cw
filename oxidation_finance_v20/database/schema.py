@@ -468,6 +468,73 @@ def create_tables(conn: sqlite3.Connection):
         "CREATE INDEX IF NOT EXISTS idx_balance_account ON account_balances(account_code)"
     )
 
+    # ====== Phase 20 新增表/字段 ======
+
+    # 方案B: 为 chart_of_accounts 添加数量核算标记
+    try:
+        cursor.execute("ALTER TABLE chart_of_accounts ADD COLUMN is_quantity_account INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # 列已存在
+
+    # 方案B: 为 voucher_lines 添加数量/单位/单价字段
+    try:
+        cursor.execute("ALTER TABLE voucher_lines ADD COLUMN quantity REAL DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute("ALTER TABLE voucher_lines ADD COLUMN unit TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute("ALTER TABLE voucher_lines ADD COLUMN unit_price REAL DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+
+    # 方案C: 往来核销表
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS reconciliation (
+            id TEXT PRIMARY KEY,
+            entity_type TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            voucher_line_id TEXT,
+            reference_type TEXT NOT NULL,
+            reference_id TEXT NOT NULL,
+            amount REAL NOT NULL DEFAULT 0,
+            reconciliation_date TEXT NOT NULL,
+            notes TEXT,
+            created_by TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_recon_entity ON reconciliation(entity_type, entity_id)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_recon_ref ON reconciliation(reference_type, reference_id)"
+    )
+
+    # 方案D: 预算管理表
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS budgets (
+            id TEXT PRIMARY KEY,
+            period TEXT NOT NULL,
+            target_type TEXT NOT NULL,
+            target_id TEXT NOT NULL,
+            budget_amount REAL NOT NULL DEFAULT 0,
+            warn_threshold REAL DEFAULT 90,
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(period, target_type, target_id)
+        )
+    """)
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_budget_period ON budgets(period)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_budget_target ON budgets(target_type, target_id)"
+    )
+
     conn.commit()
 
 
@@ -492,6 +559,8 @@ def drop_tables(conn: sqlite3.Connection):
         "account_balances",
         "departments",
         "projects",
+        "reconciliation",
+        "budgets",
     }
 
     tables = [
@@ -499,6 +568,8 @@ def drop_tables(conn: sqlite3.Connection):
         "chart_of_accounts",
         "departments",
         "projects",
+        "reconciliation",
+        "budgets",
         "voucher_lines",
         "accounting_vouchers",
         "accounting_periods",
